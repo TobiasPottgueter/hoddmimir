@@ -1,0 +1,134 @@
+---
+name: {{ hoddmimir_project_name | to_json }}
+
+x-app-environment: &app-environment
+  APP_SECRET_FILE: /run/secrets/app_secret
+  ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  DATABASE_HOST: mariadb
+  DATABASE_PORT: "3306"
+  DATABASE_NAME: {{ hoddmimir_database_name | to_json }}
+
+x-app-security: &app-security
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:mode=1777
+    - /app/var:uid=10001,gid=10001,mode=0770
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+services:
+  mariadb:
+    image: {{ hoddmimir_mariadb_image | to_json }}
+    environment:
+      MARIADB_DATABASE: {{ hoddmimir_database_name | to_json }}
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      TZ: UTC
+    secrets: [mariadb_root_password, mariadb_migration_password, mariadb_web_password, mariadb_collector_password, mariadb_backup_worker_password]
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - {{ (hoddmimir_mariadb_init_script ~ ':/docker-entrypoint-initdb.d/10-create-app-users.sh:ro') | to_json }}
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    networks: [internal]
+
+  data-worker:
+    image: {{ hoddmimir_data_worker_image | to_json }}
+    command: [hoddmimir:worker:data, "--interval={{ hoddmimir_collector_interval_seconds }}"]
+    env_file: [./runtime.env]
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_collector
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
+    secrets: [app_secret, encryption_key, mariadb_collector_password]
+    depends_on:
+      mariadb: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, php, bin/console, hoddmimir:worker:readiness, collector]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks: [internal]
+    <<: *app-security
+
+  backup-worker:
+    image: {{ hoddmimir_backup_worker_image | to_json }}
+    command: [hoddmimir:worker:backup, "--interval={{ hoddmimir_backup_worker_poll_interval_seconds }}"]
+    env_file: [./runtime.env]
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_backup_worker
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_backup_worker_password
+    secrets: [app_secret, encryption_key, mariadb_backup_worker_password]
+    depends_on:
+      mariadb: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, php, bin/console, hoddmimir:worker:readiness, backup]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks: [internal]
+    <<: *app-security
+
+  webapp:
+    image: {{ hoddmimir_webapp_image | to_json }}
+    env_file: [./runtime.env]
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_web
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_web_password
+    secrets: [app_secret, encryption_key, mariadb_web_password]
+    depends_on:
+      mariadb: { condition: service_healthy }
+    ports:
+      - {{ (hoddmimir_web_bind_address ~ ':' ~ hoddmimir_web_port ~ ':8080') | to_json }}
+    healthcheck:
+      test: [CMD, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [internal]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/var:uid=82,gid=82,mode=0770
+      - /config:uid=82,gid=82,mode=0770
+      - /data:uid=82,gid=82,mode=0770
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  mariadb_data:
+
+secrets:
+  app_secret: { file: {{ (hoddmimir_secrets_directory ~ '/app_secret') | to_json }} }
+  encryption_key: { file: {{ (hoddmimir_secrets_directory ~ '/encryption_key') | to_json }} }
+  mariadb_root_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_root_password') | to_json }} }
+  mariadb_migration_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_migration_password') | to_json }} }
+  mariadb_web_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_web_password') | to_json }} }
+  mariadb_collector_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_collector_password') | to_json }} }
+  mariadb_backup_worker_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_backup_worker_password') | to_json }} }

@@ -1,0 +1,38 @@
+---
+- name: Validate the Hoddmímir host identity
+  ansible.builtin.assert:
+    that:
+      - alpine_base_hoddmimir_hostname is string
+      - alpine_base_hoddmimir_hostname is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+      - alpine_base_hoddmimir_fqdn is string
+      - alpine_base_hoddmimir_fqdn is match('^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+      - alpine_base_hoddmimir_fqdn.startswith(alpine_base_hoddmimir_hostname ~ '.')
+      - alpine_base_hoddmimir_hostname not in alpine_base_hoddmimir_retired_hostnames
+      - alpine_base_hoddmimir_fqdn not in alpine_base_hoddmimir_retired_hostnames
+    fail_msg: The configured Hoddmímir hostname or FQDN is invalid.
+
+- name: Persist the Hoddmímir short hostname
+  ansible.builtin.copy:
+    content: "{{ alpine_base_hoddmimir_hostname }}\n"
+    dest: "{{ alpine_base_hoddmimir_hostname_file }}"
+    mode: "0644"
+
+- name: Remove retired host aliases from the hosts file
+  ansible.builtin.replace:
+    path: "{{ alpine_base_hoddmimir_hosts_file }}"
+    regexp: "(?<![A-Za-z0-9.-]){{ item | regex_escape }}(?![A-Za-z0-9.-])"
+    replace: ""
+  loop: "{{ alpine_base_hoddmimir_retired_hostnames }}"
+
+- name: Configure canonical Hoddmímir loopback resolution
+  ansible.builtin.lineinfile:
+    path: "{{ alpine_base_hoddmimir_hosts_file }}"
+    regexp: '^127\.0\.0\.1(?:[ \t]+.*)?$'
+    line: "127.0.0.1\t{{ alpine_base_hoddmimir_fqdn }} {{ alpine_base_hoddmimir_hostname }} localhost.localdomain localhost"
+    mode: "0644"
+
+- name: Apply the Hoddmímir runtime hostname
+  ansible.builtin.hostname:
+    name: "{{ alpine_base_hoddmimir_hostname }}"
+    use: alpine
+  when: alpine_base_hoddmimir_manage_runtime_hostname | bool

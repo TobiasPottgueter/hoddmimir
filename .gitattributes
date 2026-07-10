@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.php text diff=php
+*.{js,mjs,cjs,ts,vue,css,scss,json,yaml,yml,md} text
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

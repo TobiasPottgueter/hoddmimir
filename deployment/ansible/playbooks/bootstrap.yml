@@ -1,0 +1,17 @@
+---
+- name: Bootstrap Alpine Hoddmímir hosts
+  hosts: hoddmimir_hosts
+  gather_facts: false
+  become: false
+  pre_tasks:
+    - name: Ensure Python is available for Ansible
+      ansible.builtin.raw: test -x /usr/bin/python3 || apk add --no-cache python3
+      register: hoddmimir_python_bootstrap
+      changed_when: hoddmimir_python_bootstrap.stdout | length > 0
+
+    - name: Gather facts after Python bootstrap
+      ansible.builtin.setup:
+
+  roles:
+    - role: alpine_base
+    - role: docker_openrc

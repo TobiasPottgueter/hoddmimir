@@ -1,0 +1,65 @@
+{
+    "name": "tobiaspottgueter/hoddmimir-backend",
+    "description": "Backend and workers for Hoddmímir",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.5",
+        "ext-ctype": "*",
+        "ext-iconv": "*",
+        "symfony/console": "^7.4",
+        "symfony/framework-bundle": "^7.4",
+        "symfony/runtime": "^7.4"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^12.5",
+        "symfony/browser-kit": "^7.4",
+        "symfony/css-selector": "^7.4"
+    },
+    "conflict": {
+        "symfony/cache": ">=8.0",
+        "symfony/config": ">=8.0",
+        "symfony/dependency-injection": ">=8.0",
+        "symfony/dom-crawler": ">=8.0",
+        "symfony/error-handler": ">=8.0",
+        "symfony/event-dispatcher": ">=8.0",
+        "symfony/filesystem": ">=8.0",
+        "symfony/finder": ">=8.0",
+        "symfony/http-foundation": ">=8.0",
+        "symfony/http-kernel": ">=8.0",
+        "symfony/routing": ">=8.0",
+        "symfony/string": ">=8.0",
+        "symfony/var-dumper": ">=8.0",
+        "symfony/var-exporter": ">=8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "App\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "test": "phpunit",
+        "verify": [
+            "@validate-project",
+            "@analyse",
+            "@test"
+        ],
+        "validate-project": "composer validate --strict"
+    },
+    "config": {
+        "allow-plugins": {
+            "symfony/runtime": true
+        },
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

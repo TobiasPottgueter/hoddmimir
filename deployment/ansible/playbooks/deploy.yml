@@ -1,0 +1,7 @@
+---
+- name: Deploy Hoddmímir
+  hosts: hoddmimir_hosts
+  gather_facts: true
+  become: false
+  roles:
+    - role: hoddmimir

@@ -1,0 +1,10 @@
+---
+- name: Verify Hoddmímir
+  hosts: hoddmimir_hosts
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Run Hoddmímir verification
+      ansible.builtin.include_role:
+        name: hoddmimir
+        tasks_from: verify

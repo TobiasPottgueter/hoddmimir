@@ -1,0 +1,9 @@
+---
+all:
+  children:
+    hoddmimir_hosts:
+      hosts:
+        hoddmimir-production:
+          ansible_host: REPLACE_WITH_DEPLOYMENT_HOST
+          ansible_user: REPLACE_WITH_DEPLOYMENT_USER
+          alpine_base_hoddmimir_fqdn: hoddmimir.example.invalid

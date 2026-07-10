@@ -1,0 +1,27 @@
+---
+- name: Read running Compose services
+  ansible.builtin.command:
+    argv:
+      - "{{ hoddmimir_docker_executable }}"
+      - compose
+      - --file
+      - "{{ hoddmimir_compose_file }}"
+      - ps
+      - --services
+      - --filter
+      - status=running
+  register: hoddmimir_running_services
+  changed_when: false
+
+- name: Require exactly four running services
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_running_services.stdout_lines | sort == hoddmimir_expected_services | sort
+    fail_msg: The expected data-worker, backup-worker, webapp, and mariadb services are not all running.
+
+- name: Check web API health
+  ansible.builtin.uri:
+    url: "{{ hoddmimir_healthcheck_url }}"
+    method: GET
+    status_code: 200
+    return_content: false

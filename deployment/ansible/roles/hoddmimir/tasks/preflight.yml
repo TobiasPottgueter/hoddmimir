@@ -1,0 +1,48 @@
+---
+- name: Validate non-secret deployment settings
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_data_worker_image | length > 0
+      - hoddmimir_backup_worker_image | length > 0
+      - hoddmimir_webapp_image | length > 0
+      - hoddmimir_mariadb_image | length > 0
+      - hoddmimir_database_name is match('^[A-Za-z0-9_]+$')
+      - hoddmimir_web_port | int > 0
+      - hoddmimir_web_port | int <= 65535
+      - hoddmimir_collector_interval_seconds | int > 0
+      - hoddmimir_backup_worker_poll_interval_seconds | int > 0
+      - hoddmimir_compose_wait_timeout_seconds | int > 0
+      - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack
+    fail_msg: Image references, runtime values, database name, or backup activation acknowledgement are invalid.
+
+- name: Require immutable image references
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_data_worker_image is match('^.+@sha256:[0-9a-f]{64}$')
+      - hoddmimir_backup_worker_image is match('^.+@sha256:[0-9a-f]{64}$')
+      - hoddmimir_webapp_image is match('^.+@sha256:[0-9a-f]{64}$')
+      - hoddmimir_mariadb_image is match('^.+@sha256:[0-9a-f]{64}$')
+    fail_msg: Pin every production image with an @sha256 digest before deployment.
+
+- name: Require strong unique generated secrets
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_app_secret is defined and hoddmimir_app_secret is match('^[0-9a-f]{64}$')
+      - hoddmimir_encryption_key is defined and hoddmimir_encryption_key is match('^[0-9a-f]{64}$')
+      - hoddmimir_mariadb_root_password is defined and hoddmimir_mariadb_root_password is match('^[0-9a-f]{64}$')
+      - hoddmimir_mariadb_migration_password is defined and hoddmimir_mariadb_migration_password is match('^[0-9a-f]{64}$')
+      - hoddmimir_mariadb_web_password is defined and hoddmimir_mariadb_web_password is match('^[0-9a-f]{64}$')
+      - hoddmimir_mariadb_collector_password is defined and hoddmimir_mariadb_collector_password is match('^[0-9a-f]{64}$')
+      - hoddmimir_mariadb_backup_worker_password is defined and hoddmimir_mariadb_backup_worker_password is match('^[0-9a-f]{64}$')
+      - >-
+        [
+          hoddmimir_app_secret,
+          hoddmimir_encryption_key,
+          hoddmimir_mariadb_root_password,
+          hoddmimir_mariadb_migration_password,
+          hoddmimir_mariadb_web_password,
+          hoddmimir_mariadb_collector_password,
+          hoddmimir_mariadb_backup_worker_password
+        ] | unique | length == 7
+    fail_msg: Create the ignored encrypted vault.yml with seven distinct 64-character hexadecimal secrets.
+  no_log: true

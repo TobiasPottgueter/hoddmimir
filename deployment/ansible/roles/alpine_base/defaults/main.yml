@@ -1,0 +1,12 @@
+---
+alpine_base_hoddmimir_hostname: hoddmimir
+alpine_base_hoddmimir_fqdn: hoddmimir.localdomain
+alpine_base_hoddmimir_hostname_file: /etc/hostname
+alpine_base_hoddmimir_hosts_file: /etc/hosts
+alpine_base_hoddmimir_manage_runtime_hostname: true
+alpine_base_hoddmimir_retired_hostnames: []
+
+alpine_base_packages:
+  - ca-certificates
+  - curl
+  - tzdata

@@ -1,0 +1,15 @@
+---
+- name: Install Docker and Compose
+  ansible.builtin.package:
+    name: "{{ docker_openrc_packages }}"
+    state: present
+
+- name: Enable and start Docker through OpenRC
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Verify Docker Compose availability
+  ansible.builtin.command: docker compose version
+  changed_when: false

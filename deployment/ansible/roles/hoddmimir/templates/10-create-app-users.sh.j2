@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -euo pipefail
+
+read_secret() {
+    local secret_file=$1
+    test -s "$secret_file" || { echo "Required secret file is missing" >&2; exit 1; }
+    tr -d '\r\n' < "$secret_file"
+}
+
+root_password=$(read_secret /run/secrets/mariadb_root_password)
+migration_password=$(read_secret /run/secrets/mariadb_migration_password)
+web_password=$(read_secret /run/secrets/mariadb_web_password)
+collector_password=$(read_secret /run/secrets/mariadb_collector_password)
+backup_worker_password=$(read_secret /run/secrets/mariadb_backup_worker_password)
+
+[[ "$MARIADB_DATABASE" =~ ^[A-Za-z0-9_]+$ ]] || { echo "Invalid database name" >&2; exit 1; }
+
+MYSQL_PWD="$root_password" mariadb --protocol=socket --user=root <<SQL
+CREATE USER IF NOT EXISTS 'hoddmimir_migration'@'%' IDENTIFIED BY '${migration_password}';
+CREATE USER IF NOT EXISTS 'hoddmimir_web'@'%' IDENTIFIED BY '${web_password}';
+CREATE USER IF NOT EXISTS 'hoddmimir_collector'@'%' IDENTIFIED BY '${collector_password}';
+CREATE USER IF NOT EXISTS 'hoddmimir_backup_worker'@'%' IDENTIFIED BY '${backup_worker_password}';
+GRANT ALL PRIVILEGES ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_migration'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_web'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_collector'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_backup_worker'@'%';
+FLUSH PRIVILEGES;
+SQL

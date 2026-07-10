@@ -1,0 +1,32 @@
+---
+hoddmimir_project_name: hoddmimir
+hoddmimir_install_directory: /opt/hoddmimir
+hoddmimir_secrets_directory: /etc/hoddmimir/secrets
+hoddmimir_compose_file: "{{ hoddmimir_install_directory }}/compose.yaml"
+hoddmimir_environment_file: "{{ hoddmimir_install_directory }}/runtime.env"
+hoddmimir_mariadb_init_script: "{{ hoddmimir_install_directory }}/10-create-app-users.sh"
+hoddmimir_transaction_script: "{{ hoddmimir_install_directory }}/deploy_transaction.py"
+hoddmimir_staging_directory: "{{ hoddmimir_install_directory }}/.deployment-staging"
+hoddmimir_docker_executable: docker
+hoddmimir_python_executable: /usr/bin/python3
+
+hoddmimir_data_worker_image: ""
+hoddmimir_backup_worker_image: ""
+hoddmimir_webapp_image: ""
+hoddmimir_mariadb_image: ""
+
+hoddmimir_database_name: hoddmimir
+hoddmimir_collector_interval_seconds: 60
+hoddmimir_backup_worker_poll_interval_seconds: 5
+hoddmimir_backup_execution_enabled: false
+hoddmimir_backup_execution_activation_ack: ""
+hoddmimir_backup_execution_required_ack: ENABLE_PRODUCTION_BACKUPS
+hoddmimir_web_bind_address: 127.0.0.1
+hoddmimir_web_port: 8080
+hoddmimir_healthcheck_url: "http://127.0.0.1:{{ hoddmimir_web_port }}/api/health"
+hoddmimir_compose_wait_timeout_seconds: 180
+hoddmimir_expected_services:
+  - backup-worker
+  - data-worker
+  - mariadb
+  - webapp

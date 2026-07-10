@@ -1,0 +1,60 @@
+# Operating systems and IDEs
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+auth.json
+.secrets/
+secrets/
+*.pem
+*.key
+
+# Python / Ansible
+.venv/
+**/.venv/
+.ansible/
+**/.ansible/
+**/__pycache__/
+*.pyc
+deployment/ansible/.cache/
+deployment/ansible/.vault-password
+deployment/ansible/inventories/*/hosts.yml
+deployment/ansible/inventories/*/group_vars/*/vault.yml
+*.retry
+
+# PHP / Symfony
+backend/vendor/
+backend/var/
+backend/.phpunit.cache/
+backend/.phpunit.result.cache
+backend/coverage/
+backend/composer.phar
+backend/config/reference.php
+
+# Node / Vue
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+frontend/*.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+
+# Test and analysis output
+coverage/
+.phpunit.cache/
+reports/
+*.log
+
+# Runtime data
+data/
+tmp/

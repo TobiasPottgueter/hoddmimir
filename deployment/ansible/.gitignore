@@ -1,0 +1,8 @@
+inventories/*/hosts.yml
+inventories/*/group_vars/*/vault.yml
+.vault-password
+.cache/
+.venv/
+**/__pycache__/
+*.pyc
+*.retry

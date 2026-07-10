@@ -1,0 +1,30 @@
+---
+- name: Require Alpine Linux
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Alpine'
+      - ansible_facts['service_mgr'] == 'openrc'
+    fail_msg: This deployment supports Alpine Linux hosts running OpenRC only.
+
+- name: Configure the Hoddmímir host identity
+  ansible.builtin.include_tasks: hostname.yml
+
+- name: Install base packages
+  ansible.builtin.package:
+    name: "{{ alpine_base_packages }}"
+    state: present
+
+- name: Configure local timezone link
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ hoddmimir_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+
+- name: Configure timezone name
+  ansible.builtin.copy:
+    content: "{{ hoddmimir_timezone }}\n"
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,10 @@
+---
+- name: Validate Hoddmímir deployment inputs locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run Hoddmímir preflight gates
+      ansible.builtin.include_role:
+        name: hoddmimir
+        tasks_from: preflight

@@ -1,0 +1,183 @@
+---
+name: hoddmimir
+
+x-app-environment: &app-environment
+  APP_ENV: ${APP_ENV:-prod}
+  APP_DEBUG: ${APP_DEBUG:-0}
+  APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
+  APP_SECRET_FILE: /run/secrets/app_secret
+  ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  DATABASE_HOST: mariadb
+  DATABASE_PORT: 3306
+  DATABASE_NAME: ${MARIADB_DATABASE:-hoddmimir}
+
+x-app-security: &app-security
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:mode=1777
+    - /app/var:uid=10001,gid=10001,mode=0770
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  mariadb:
+    build:
+      context: .
+      dockerfile: docker/mariadb/Dockerfile
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-hoddmimir}
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      TZ: UTC
+    secrets:
+      - mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    networks:
+      - internal
+
+  data-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: worker
+    command: ["hoddmimir:worker:data", "--interval=${COLLECTOR_INTERVAL_SECONDS:-60}"]
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_collector
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
+      COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-60}
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_collector_password
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "collector"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+    <<: *app-security
+
+  backup-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: worker
+    command: ["hoddmimir:worker:backup", "--interval=${BACKUP_WORKER_POLL_INTERVAL_SECONDS:-5}"]
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_backup_worker
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_backup_worker_password
+      BACKUP_WORKER_POLL_INTERVAL_SECONDS: ${BACKUP_WORKER_POLL_INTERVAL_SECONDS:-5}
+      BACKUP_EXECUTION_ENABLED: ${BACKUP_EXECUTION_ENABLED:-false}
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_backup_worker_password
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "backup"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+    <<: *app-security
+
+  webapp:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      target: web
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_web
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_web_password
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_web_password
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/var:uid=82,gid=82,mode=0770
+      - /config:uid=82,gid=82,mode=0770
+      - /data:uid=82,gid=82,mode=0770
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  mariadb_data:
+
+secrets:
+  app_secret:
+    file: ./.secrets/app_secret
+  encryption_key:
+    file: ./.secrets/encryption_key
+  mariadb_root_password:
+    file: ./.secrets/mariadb_root_password
+  mariadb_migration_password:
+    file: ./.secrets/mariadb_migration_password
+  mariadb_web_password:
+    file: ./.secrets/mariadb_web_password
+  mariadb_collector_password:
+    file: ./.secrets/mariadb_collector_password
+  mariadb_backup_worker_password:
+    file: ./.secrets/mariadb_backup_worker_password

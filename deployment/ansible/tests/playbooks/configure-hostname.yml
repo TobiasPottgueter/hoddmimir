@@ -1,0 +1,10 @@
+---
+- name: Exercise Hoddmímir host identity management in isolation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Apply only the Alpine hostname tasks
+      ansible.builtin.include_role:
+        name: alpine_base
+        tasks_from: hostname

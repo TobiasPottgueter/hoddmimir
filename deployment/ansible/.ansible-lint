@@ -1,0 +1,9 @@
+---
+profile: production
+strict: true
+offline: true
+exclude_paths:
+  - .cache/
+  - .venv/
+  - inventories/production/hosts.yml
+  - inventories/production/group_vars/hoddmimir_hosts/vault.yml

@@ -1,0 +1,19 @@
+---
+- name: Render Hoddmímir Compose contract locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../../roles/hoddmimir/defaults/main.yml"
+  tasks:
+    - name: Render MariaDB application users
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/10-create-app-users.sh.j2"
+        dest: "{{ hoddmimir_test_mariadb_init_output }}"
+        mode: "0555"
+
+    - name: Render production Compose model
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/compose.yaml.j2"
+        dest: "{{ hoddmimir_test_compose_output }}"
+        mode: "0600"
