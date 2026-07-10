@@ -81,7 +81,10 @@ const setupSteps = [
           <i class="pi pi-search" aria-hidden="true" />
           <div>
             <h3>Collector Worker</h3>
-            <p>Liest Inventar und Laufzeitdaten aus PVE und PBS.</p>
+            <p>
+              Liest Inventar und Laufzeitdaten kontinuierlich und standardmäßig
+              alle 120 Sekunden aus PVE und PBS.
+            </p>
           </div>
         </article>
         <article>

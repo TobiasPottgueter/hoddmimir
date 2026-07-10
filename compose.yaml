@@ -62,12 +62,12 @@ services:
       context: .
       dockerfile: docker/php/Dockerfile
       target: worker
-    command: ["hoddmimir:worker:data", "--interval=${COLLECTOR_INTERVAL_SECONDS:-60}"]
+    command: ["hoddmimir:worker:data", "--interval=${COLLECTOR_INTERVAL_SECONDS:-120}"]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_collector
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
-      COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-60}
+      COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-120}
     secrets:
       - app_secret
       - encryption_key

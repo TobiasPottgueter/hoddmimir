@@ -20,7 +20,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 final class CollectorWorkerCommand extends Command
 {
-    private const int DEFAULT_INTERVAL_SECONDS = 60;
+    private const int DEFAULT_INTERVAL_SECONDS = 120;
 
     public function __construct(private readonly WorkerLoop $workerLoop)
     {

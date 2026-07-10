@@ -153,6 +153,8 @@ jobs:
             and (.services | keys | sort == ["backup-worker", "data-worker", "mariadb", "webapp"])
             and .services.mariadb.environment.MARIADB_DATABASE == "hoddmimir"
             and .services."data-worker".environment.DATABASE_USER == "hoddmimir_collector"
+            and .services."data-worker".environment.COLLECTOR_INTERVAL_SECONDS == "120"
+            and .services."data-worker".command == ["hoddmimir:worker:data", "--interval=120"]
             and .services."backup-worker".environment.DATABASE_USER == "hoddmimir_backup_worker"
             and .services.webapp.environment.DATABASE_USER == "hoddmimir_web"
           ' "$model" >/dev/null

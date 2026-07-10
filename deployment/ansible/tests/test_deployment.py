@@ -224,7 +224,7 @@ class ComposeContractTest(unittest.TestCase):
             compose_file = root / "compose.yaml"
             (root / "runtime.env").write_text(
                 "APP_ENV=prod\nAPP_DEBUG=0\nAPP_TIMEZONE=UTC\n"
-                "COLLECTOR_INTERVAL_SECONDS=60\nBACKUP_WORKER_POLL_INTERVAL_SECONDS=5\n"
+                "COLLECTOR_INTERVAL_SECONDS=120\nBACKUP_WORKER_POLL_INTERVAL_SECONDS=5\n"
                 "BACKUP_EXECUTION_ENABLED=false\n",
                 encoding="utf-8",
             )
@@ -262,11 +262,12 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("hoddmimir", services["mariadb"]["environment"]["MARIADB_DATABASE"])
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
             self.assertEqual("hoddmimir_collector", services["data-worker"]["environment"]["DATABASE_USER"])
+            self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_INTERVAL_SECONDS"])
             self.assertEqual("hoddmimir_backup_worker", services["backup-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("hoddmimir_web", services["webapp"]["environment"]["DATABASE_USER"])
             self.assertEqual("false", services["backup-worker"]["environment"]["BACKUP_EXECUTION_ENABLED"])
             self.assertEqual(
-                ["hoddmimir:worker:data", "--interval=60"],
+                ["hoddmimir:worker:data", "--interval=120"],
                 services["data-worker"]["command"],
             )
             self.assertEqual(

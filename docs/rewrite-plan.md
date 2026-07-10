@@ -37,7 +37,8 @@ Die folgenden vier Funktionen sind Release-Blocker. Eine technisch vollständige
 #### PVE-/PBS-Installationen scannen
 
 - Nach dem Anlegen mindestens eines API-Endpunkts und Tokens scannt der Collector die vollständige konfigurierte PVE- beziehungsweise PBS-Installation.
-- Scans laufen automatisch in einem konfigurierbaren Intervall und manuell über „Jetzt scannen“.
+- Der Collector läuft kontinuierlich und startet die Scans automatisch in einem standardmäßigen 120-Sekunden-Takt. Das Intervall bleibt eine Laufzeit-/Deployment-Konfiguration; die WebApp und ihre API bieten bewusst weder einen manuellen Scan-Endpunkt noch eine Aktion „Jetzt scannen“.
+- Die fachliche Scanplanung verwendet ein startzeitbasiertes Raster mit standardmäßig 120 Sekunden Breite; ein Deployment-Override verändert nur diese Rasterbreite. Scanzyklen dürfen sich niemals überlappen. Dauert ein Zyklus über einen oder mehrere Rasterpunkte hinaus, werden alle verpassten Ticks übersprungen und nur der nächste zukünftige Rasterpunkt geplant; es gibt weder Sofort-Nachholungen noch einen Catch-up-Sturm.
 - Angezeigt werden Produkt, Version, Cluster/Server, erkannte Objekte, Dauer, letzter erfolgreicher Lauf, Teilfehler und nächster Lauf.
 - Mehrere PVE-Endpunkte desselben Clusters dienen als Failover und erzeugen kein doppeltes Inventar.
 - Ein Teilfehler oder nicht erreichbarer Node ist kein autoritativer Nachweis für eine Entfernung. Bekannte Objekte werden erst nach einem vollständigen erfolgreichen Scan als fehlend markiert oder archiviert.
@@ -151,7 +152,7 @@ flowchart LR
     C <--> D
     B <--> D
     W <--> D
-    W -->|"manuelle Requests, keine Direkt-Ausführung"| D
+    W -->|"manuelle Backup-Requests, keine Direkt-Ausführung"| D
 ```
 
 ### 3.1 Gemeinsamer Anwendungskern
@@ -545,7 +546,7 @@ Abnahme: keine alte Proxmox-Bibliothek im Dependency Tree; alle fünf Versionsli
 - read-only Sync, Placement-Reconciliation, Freshness und Heartbeats.
 - QEMU und LXC.
 - PBS-Kapazität, Snapshots und Tasks.
-- automatische und manuelle Scans mit Intervall, Laufstatus und sicherer Teilfehlerbehandlung.
+- kontinuierlicher Collector mit startzeitbasiertem 120-Sekunden-Standardraster ohne Überlappung oder Catch-up-Läufe, Laufstatus und sicherer Teilfehlerbehandlung; kein manueller Scan über WebApp oder API.
 - read-only WebApp-Sichten für Inventar und Health.
 
 Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig scannen; wiederholter Sync ist idempotent und Placementwechsel, Teilfehler oder Node-Ausfall erzeugen keine stale Queue.

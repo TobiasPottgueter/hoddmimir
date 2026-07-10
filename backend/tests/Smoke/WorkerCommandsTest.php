@@ -58,6 +58,17 @@ final class WorkerCommandsTest extends TestCase
         $kernel->shutdown();
     }
 
+    public function testCollectorDefaultsToTwoMinuteCadence(): void
+    {
+        $kernel = new Kernel('test', false);
+        $application = new Application($kernel);
+        $command = $application->find('hoddmimir:worker:data');
+
+        self::assertSame('120', $command->getDefinition()->getOption('interval')->getDefault());
+
+        $kernel->shutdown();
+    }
+
     /** @throws JsonException */
     #[DataProvider('workerKinds')]
     public function testReadinessCommandIsRegisteredWithoutRunningAWorkerIteration(string $component): void

@@ -28,7 +28,7 @@ const router = createRouter({
       meta: {
         title: "Inventar",
         description:
-          "Cluster, Nodes, VMs und Container erscheinen nach dem ersten Scan.",
+          "Cluster, Nodes, VMs und Container erscheinen automatisch nach dem ersten Collector-Zyklus.",
       },
     },
     {

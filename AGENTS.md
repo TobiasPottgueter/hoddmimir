@@ -20,6 +20,8 @@ Use `Hoddmímir` (NFC) as the user-facing display name and `hoddmimir` as the te
 - Treat V2 as a clean start. Do not create a legacy database importer or compatibility layer.
 - Keep domain and application logic independent of Symfony, HTTP, MariaDB, and Vue.
 - The collector is read-only against PVE/PBS. Only the backup worker may start or stop backup tasks.
+- The collector is a continuously running worker. Its default production cadence is one automatic inventory cycle every 120 seconds; do not add a manual scan endpoint or a “Scan now” action to the WebApp.
+- Schedule inventory cycles on a start-time-based grid with a default width of 120 seconds; a deployment override changes only that grid width. Never overlap cycles. If a cycle overruns one or more ticks, skip every missed tick and schedule only the next future tick—never create a catch-up burst. Implement and test this behavior in collector application logic; the generic readiness `WorkerLoop` is not the final scan scheduler.
 - Never automatically retry a `vzdump` POST after an ambiguous response.
 - Never disable TLS verification in production code.
 - Never log tokens, passwords, cookies, CSRF values, TOTP data, or decrypted secrets.

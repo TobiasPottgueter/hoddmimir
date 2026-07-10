@@ -16,7 +16,7 @@ hoddmimir_webapp_image: ""
 hoddmimir_mariadb_image: ""
 
 hoddmimir_database_name: hoddmimir
-hoddmimir_collector_interval_seconds: 60
+hoddmimir_collector_interval_seconds: 120
 hoddmimir_backup_worker_poll_interval_seconds: 5
 hoddmimir_backup_execution_enabled: false
 hoddmimir_backup_execution_activation_ack: ""

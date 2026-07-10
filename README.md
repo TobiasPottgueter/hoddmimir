@@ -2,7 +2,7 @@
 
 Hoddmímir is a clean rewrite for orchestrating Proxmox backups with two workers and one web application:
 
-- **Collector worker** scans configured Proxmox VE and Proxmox Backup Server installations and builds the inventory.
+- **Collector worker** runs continuously, scans configured Proxmox VE and Proxmox Backup Server installations automatically, and builds the inventory.
 - **Backup worker** claims, starts, and monitors backup jobs.
 - **Web application** provides administration, selection, status, and history through a PHP API and a Vue/PrimeVue frontend.
 
@@ -57,7 +57,7 @@ If port `8080` is already in use, set `WEB_PORT=18080` in the local `.env` befor
 
 Use `make help` to list the test, build, start, stop, log, and cleanup commands.
 
-The standard Compose model contains exactly four services: `data-worker`, `backup-worker`, `webapp`, and `mariadb`. The data worker runs the collector command, and the Vue application is compiled into the webapp image rather than running as a separate service.
+The standard Compose model contains exactly four services: `data-worker`, `backup-worker`, `webapp`, and `mariadb`. The data worker runs the collector command continuously with a default inventory cadence of 120 seconds. Scans are not triggered through the WebApp or its API. The Vue application is compiled into the webapp image rather than running as a separate service.
 
 ## Security
 

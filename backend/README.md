@@ -11,10 +11,11 @@ php bin/console hoddmimir:worker:data
 php bin/console hoddmimir:worker:backup
 ```
 
-Both commands run continuously by default. `--interval=<seconds>` controls the
-wait between iterations and `--once` runs exactly one iteration for diagnostics
-and tests. These scaffold commands only report readiness; they do not access
-Proxmox or start backups.
+Both commands run continuously by default. The collector defaults to an
+automatic cycle every 120 seconds; it is not triggered by the WebApp or its API.
+`--interval=<seconds>` controls the wait between iterations and `--once` runs
+exactly one iteration for diagnostics and tests. These scaffold commands only
+report readiness; they do not access Proxmox or start backups.
 
 The HTTP health endpoint is `GET /api/health`.
 

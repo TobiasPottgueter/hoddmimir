@@ -25,7 +25,7 @@ final class WorkerLoopTest extends TestCase
 
         $loop->run(
             WorkerKind::Collector,
-            60,
+            120,
             true,
             static function (WorkerReadinessReport $report) use (&$reports): void {
                 $reports[] = $report->worker;
