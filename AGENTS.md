@@ -79,7 +79,7 @@ These commands may evolve with the scaffold. Keep this section current when tool
 ./scripts/init-dev-secrets.sh
 docker compose config
 docker compose build
-docker compose up --detach --wait
+make up
 curl --fail http://localhost:8080/api/health
 docker compose down --volumes
 

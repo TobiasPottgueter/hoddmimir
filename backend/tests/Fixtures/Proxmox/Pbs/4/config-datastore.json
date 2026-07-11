@@ -1,0 +1,1 @@
+{"data":[{"name":"local_fs","path":"/srv/local-fs"},{"name":"object_s3","path":"/srv/cache/object-s3","backend":"bucket=backup-bucket,client=s3-client,type=s3","future-config":"ignored"}],"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}

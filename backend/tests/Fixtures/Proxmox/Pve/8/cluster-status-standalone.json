@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "id": "node/pve8-standalone.test",
+      "ip": "198.51.100.88",
+      "level": "",
+      "local": true,
+      "name": "pve8-standalone.test",
+      "nodeid": 0,
+      "online": true,
+      "type": "node"
+    }
+  ]
+}

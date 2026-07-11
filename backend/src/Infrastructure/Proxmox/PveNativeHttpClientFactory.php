@@ -1,0 +1,50 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Infrastructure\Proxmox;
+
+use Symfony\Component\HttpClient\NativeHttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+
+final readonly class PveNativeHttpClientFactory implements PveHttpClientFactory
+{
+    public function __construct(private PveCustomCaMaterializer $customCaMaterializer)
+    {
+    }
+
+    public function create(PveTlsConfiguration $tls): HttpClientInterface
+    {
+        return new NativeHttpClient($this->options($tls));
+    }
+
+    /** @return array<string, mixed> */
+    public function options(PveTlsConfiguration $tls): array
+    {
+        $options = [
+            'verify_peer' => true,
+            'verify_host' => true,
+            'max_redirects' => 0,
+            'timeout' => 30.0,
+            'max_duration' => 30.0,
+        ];
+
+        /** @var PveCustomCaCertificate $customCa */
+        $customCa = $tls->customCa;
+        /** @var PveCertificateFingerprint $certificateFingerprint */
+        $certificateFingerprint = $tls->certificateFingerprint;
+
+        if (PveTlsMode::SystemCa === $tls->mode) {
+            return $options;
+        }
+
+        if (PveTlsMode::CustomCa === $tls->mode) {
+            $caFile = $this->customCaMaterializer->materialize($customCa);
+            return $options + ['cafile' => $caFile];
+        }
+
+        return $options + [
+            'peer_fingerprint' => ['sha256' => $certificateFingerprint->sha256],
+        ];
+    }
+}

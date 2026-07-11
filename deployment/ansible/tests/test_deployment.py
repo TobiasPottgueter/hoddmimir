@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import fcntl
 import http.server
 import importlib.util
 import io
@@ -32,6 +33,8 @@ SECRET_NAMES = (
     "mariadb_backup_worker_password",
 )
 DATABASE_SECRET_NAMES = SECRET_NAMES[2:]
+KEY_MATERIAL_OLD = "a" * 64
+KEY_MATERIAL_NEW = "b" * 64
 
 TRANSACTION_SPEC = importlib.util.spec_from_file_location("deploy_transaction_under_test", TRANSACTION_SCRIPT)
 if TRANSACTION_SPEC is None or TRANSACTION_SPEC.loader is None:
@@ -53,8 +56,22 @@ def valid_variables() -> dict[str, object]:
         "hoddmimir_mariadb_image": f"registry.example/mariadb@sha256:{'d' * 64}",
         "hoddmimir_backup_execution_enabled": False,
         "hoddmimir_backup_execution_activation_ack": "",
+        "hoddmimir_timezone": "UTC",
+        "hoddmimir_encryption_keyring": {
+            "format": 1,
+            "revision": 7,
+            "primaryKeyId": "k2026_07",
+            "keys": [
+                {
+                    "id": "k2026_07",
+                    "material": "2" * 64,
+                },
+            ],
+        },
     }
     for index, secret_name in enumerate(SECRET_NAMES, start=1):
+        if secret_name == "encryption_key":
+            continue
         variables[f"hoddmimir_{secret_name}"] = f"{index:x}" * 64
 
     return variables
@@ -70,8 +87,19 @@ class QuietHealthHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def health_server():
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), QuietHealthHandler)
+def health_server(response_statuses: tuple[int, ...] = (200,)):
+    pending_statuses = list(response_statuses)
+    fallback_status = response_statuses[-1]
+    status_lock = threading.Lock()
+
+    class SequencedHealthHandler(QuietHealthHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            with status_lock:
+                status = pending_statuses.pop(0) if pending_statuses else fallback_status
+            self.send_response(status)
+            self.end_headers()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SequencedHealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -190,6 +218,13 @@ class PreflightTest(unittest.TestCase):
         result = self.run_preflight(variables)
         self.assertNotEqual(0, result.returncode)
 
+    def test_rejects_collector_grid_width_outside_application_bounds(self) -> None:
+        for width in (0, 31_536_001):
+            with self.subTest(width=width):
+                variables = valid_variables()
+                variables["hoddmimir_collector_grid_width_seconds"] = width
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
     def test_secret_validation_does_not_echo_rejected_value(self) -> None:
         variables = valid_variables()
         rejected_secret = "NOT_A_VALID_SECRET"
@@ -198,6 +233,134 @@ class PreflightTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertNotIn(rejected_secret, result.stdout + result.stderr)
+
+    def test_rejects_invalid_encryption_keyring_envelopes(self) -> None:
+        invalid_keyrings: dict[str, object] = {
+            "not a mapping": "NOT_A_KEYRING",
+            "unexpected top-level field": {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "key-a",
+                "keys": [{"id": "key-a", "material": "8" * 64}],
+                "unexpected": True,
+            },
+            "wrong format": {
+                "format": 2,
+                "revision": 1,
+                "primaryKeyId": "key-a",
+                "keys": [{"id": "key-a", "material": "8" * 64}],
+            },
+            "non-positive revision": {
+                "format": 1,
+                "revision": 0,
+                "primaryKeyId": "key-a",
+                "keys": [{"id": "key-a", "material": "8" * 64}],
+            },
+            "boolean revision": {
+                "format": 1,
+                "revision": True,
+                "primaryKeyId": "key-a",
+                "keys": [{"id": "key-a", "material": "8" * 64}],
+            },
+            "invalid primary ID": {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "INVALID KEY",
+                "keys": [{"id": "INVALID KEY", "material": "8" * 64}],
+            },
+            "empty keys": {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "key-a",
+                "keys": [],
+            },
+            "keys are not a list": {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "key-a",
+                "keys": "key-a",
+            },
+            "too many keys": {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "key-0",
+                "keys": [
+                    {"id": f"key-{index}", "material": f"{index + 8:064x}"}
+                    for index in range(17)
+                ],
+            },
+        }
+
+        for name, keyring in invalid_keyrings.items():
+            with self.subTest(name=name):
+                variables = valid_variables()
+                variables["hoddmimir_encryption_keyring"] = keyring
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables.pop("hoddmimir_encryption_keyring")
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_invalid_encryption_keyring_entries(self) -> None:
+        invalid_entries: dict[str, list[dict[str, object]]] = {
+            "unexpected entry field": [{"id": "key-a", "material": "8" * 64, "extra": True}],
+            "missing material": [{"id": "key-a"}],
+            "invalid ID": [{"id": "Key-A", "material": "8" * 64}],
+            "invalid material": [{"id": "key-a", "material": "8" * 63}],
+            "duplicate IDs": [
+                {"id": "key-a", "material": "8" * 64},
+                {"id": "key-a", "material": "9" * 64},
+            ],
+            "duplicate materials": [
+                {"id": "key-a", "material": "8" * 64},
+                {"id": "key-b", "material": "8" * 64},
+            ],
+        }
+
+        for name, entries in invalid_entries.items():
+            with self.subTest(name=name):
+                variables = valid_variables()
+                variables["hoddmimir_encryption_keyring"] = {
+                    "format": 1,
+                    "revision": 1,
+                    "primaryKeyId": entries[0]["id"],
+                    "keys": entries,
+                }
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_requires_present_primary_key_and_materials_distinct_from_other_secrets(self) -> None:
+        variables = valid_variables()
+        variables["hoddmimir_encryption_keyring"] = {
+            "format": 1,
+            "revision": 1,
+            "primaryKeyId": "missing-key",
+            "keys": [{"id": "key-a", "material": "8" * 64}],
+        }
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables["hoddmimir_encryption_keyring"] = {
+            "format": 1,
+            "revision": 1,
+            "primaryKeyId": "key-a",
+            "keys": [{"id": "key-a", "material": variables["hoddmimir_app_secret"]}],
+        }
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_encryption_keyring_validation_never_echoes_rejected_material(self) -> None:
+        variables = valid_variables()
+        rejected_material = "LEAK_ME_NOT_" * 8
+        variables["hoddmimir_encryption_keyring"] = {
+            "format": 1,
+            "revision": 1,
+            "primaryKeyId": "key-a",
+            "keys": [{"id": "key-a", "material": rejected_material}],
+        }
+
+        result = self.run_preflight(variables)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn(rejected_material, result.stdout + result.stderr)
 
     @staticmethod
     def run_preflight(variables: dict[str, object]) -> subprocess.CompletedProcess[str]:
@@ -222,20 +385,20 @@ class ComposeContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             compose_file = root / "compose.yaml"
-            (root / "runtime.env").write_text(
-                "APP_ENV=prod\nAPP_DEBUG=0\nAPP_TIMEZONE=UTC\n"
-                "COLLECTOR_INTERVAL_SECONDS=120\nBACKUP_WORKER_POLL_INTERVAL_SECONDS=5\n"
-                "BACKUP_EXECUTION_ENABLED=false\n",
-                encoding="utf-8",
-            )
+            migration_compose_file = root / "compose.migration.yaml"
+            runtime_file = root / "runtime.env"
             secrets_directory = root / "secrets"
             secrets_directory.mkdir()
             for secret_name in SECRET_NAMES:
                 (secrets_directory / secret_name).write_text("test\n", encoding="utf-8")
+            encryption_key_file = secrets_directory / "encryption_key"
             init_script = root / "10-create-app-users.sh"
             variables = valid_variables() | {
                 "hoddmimir_test_compose_output": str(compose_file),
+                "hoddmimir_test_migration_compose_output": str(migration_compose_file),
                 "hoddmimir_test_mariadb_init_output": str(init_script),
+                "hoddmimir_test_runtime_output": str(runtime_file),
+                "hoddmimir_test_encryption_key_output": str(encryption_key_file),
                 "hoddmimir_secrets_directory": str(secrets_directory),
                 "hoddmimir_mariadb_init_script": str(init_script),
             }
@@ -250,6 +413,12 @@ class ComposeContractTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(0, rendered.returncode, rendered.stderr)
+            self.assertEqual(
+                json.dumps(variables["hoddmimir_encryption_keyring"], sort_keys=True, separators=(",", ":")) + "\n",
+                encryption_key_file.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(0o600, stat.S_IMODE(encryption_key_file.stat().st_mode))
+            self.assertIn("ENCRYPTION_KEYRING_REVISION=7\n", runtime_file.read_text(encoding="utf-8"))
             configured = run(["docker", "compose", "--file", str(compose_file), "config", "--format", "json"])
             self.assertEqual(0, configured.returncode, configured.stderr)
             model = json.loads(configured.stdout)
@@ -262,12 +431,18 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("hoddmimir", services["mariadb"]["environment"]["MARIADB_DATABASE"])
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
             self.assertEqual("hoddmimir_collector", services["data-worker"]["environment"]["DATABASE_USER"])
-            self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_INTERVAL_SECONDS"])
+            self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_GRID_WIDTH_SECONDS"])
+            self.assertEqual("a" * 64, services["data-worker"]["environment"]["APP_BUILD_VERSION"])
+            for application_service in ("data-worker", "backup-worker", "webapp"):
+                self.assertEqual(
+                    "7",
+                    services[application_service]["environment"]["ENCRYPTION_KEYRING_REVISION"],
+                )
             self.assertEqual("hoddmimir_backup_worker", services["backup-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("hoddmimir_web", services["webapp"]["environment"]["DATABASE_USER"])
             self.assertEqual("false", services["backup-worker"]["environment"]["BACKUP_EXECUTION_ENABLED"])
             self.assertEqual(
-                ["hoddmimir:worker:data", "--interval=120"],
+                ["hoddmimir:worker:data"],
                 services["data-worker"]["command"],
             )
             self.assertEqual(
@@ -275,14 +450,45 @@ class ComposeContractTest(unittest.TestCase):
                 services["backup-worker"]["command"],
             )
             self.assertEqual(
-                ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "collector"],
+                ["CMD", "php", "bin/console", "hoddmimir:worker:health", "collector"],
                 services["data-worker"]["healthcheck"]["test"],
             )
+            self.assertEqual("1m15s", services["data-worker"]["stop_grace_period"])
             self.assertEqual(
                 ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "backup"],
                 services["backup-worker"]["healthcheck"]["test"],
             )
             self.assertNotIn("ports", services["mariadb"])
+
+            migration_configured = run([
+                "docker",
+                "compose",
+                "--file",
+                str(compose_file),
+                "--file",
+                str(migration_compose_file),
+                "config",
+                "--format",
+                "json",
+            ])
+            self.assertEqual(0, migration_configured.returncode, migration_configured.stderr)
+            migration_model = json.loads(migration_configured.stdout)
+            self.assertEqual(EXPECTED_SERVICES | {"schema-migration"}, set(migration_model["services"]))
+            migration = migration_model["services"]["schema-migration"]
+            self.assertEqual(services["data-worker"]["image"], migration["image"])
+            self.assertIn("@sha256:", migration["image"])
+            self.assertEqual("hoddmimir_migration", migration["environment"]["DATABASE_USER"])
+            self.assertEqual("/run/secrets/mariadb_migration_password", migration["environment"]["DATABASE_PASSWORD_FILE"])
+            self.assertTrue(migration["read_only"])
+            self.assertEqual(["ALL"], migration["cap_drop"])
+            self.assertEqual(
+                {"app_secret", "mariadb_migration_password"},
+                {secret["source"] for secret in migration["secrets"]},
+            )
+            self.assertEqual(
+                ["doctrine:migrations:migrate", "--no-interaction", "--allow-no-migration", "--no-ansi"],
+                migration["command"],
+            )
 
             users = init_script.read_text(encoding="utf-8")
             for database_user in (
@@ -292,6 +498,39 @@ class ComposeContractTest(unittest.TestCase):
                 "hoddmimir_backup_worker",
             ):
                 self.assertIn(f"CREATE USER IF NOT EXISTS '{database_user}'@'%'", users)
+
+
+class DeploymentStagingIsolationTest(unittest.TestCase):
+    def test_role_uses_unique_staged_executor_and_no_shared_staging_cleanup(self) -> None:
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        defaults = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "defaults" / "main.yml").read_text(encoding="utf-8")
+
+        self.assertIn("ansible.builtin.tempfile:", tasks)
+        self.assertIn('prefix: "{{ hoddmimir_staging_prefix }}"', tasks)
+        self.assertIn("hoddmimir_deployment_staging.path ~ '/deploy_transaction.py'", tasks)
+        self.assertIn("--transaction-lock-file=", tasks)
+        self.assertIn("Remove only this deployment staging directory", tasks)
+        self.assertNotIn("hoddmimir_staging_directory", tasks + defaults)
+        self.assertNotIn("Remove stale deployment staging directory", tasks)
+        self.assertNotIn("hoddmimir_transaction_script", tasks + defaults)
+
+    def test_ansible_tempfile_produces_two_unique_private_directories_and_cleans_both(self) -> None:
+        with tempfile.TemporaryDirectory() as parent, tempfile.TemporaryDirectory() as local_temp:
+            environment = os.environ.copy()
+            environment["ANSIBLE_LOCAL_TEMP"] = local_temp
+            environment["HODDMIMIR_STAGING_TEST_PARENT"] = parent
+            result = run(
+                [
+                    "ansible-playbook",
+                    "--inventory",
+                    "localhost,",
+                    "tests/playbooks/staging-isolation.yml",
+                ],
+                env=environment,
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual([], list(Path(parent).iterdir()))
 
 
 class DeploymentTransactionTest(unittest.TestCase):
@@ -304,8 +543,11 @@ class DeploymentTransactionTest(unittest.TestCase):
         case_root = self.root / name
         self.staging = case_root / "staging"
         self.install = case_root / "install"
+        self.install.mkdir(parents=True, exist_ok=True)
         self.secrets = case_root / "secrets"
+        self.lock_file = self.install / ".deployment-transaction.lock"
         self.state_file = case_root / "fake-docker.json"
+        self.expected_keyring_revision = "2"
         self.write_staged("new")
 
     def tearDown(self) -> None:
@@ -321,32 +563,176 @@ class DeploymentTransactionTest(unittest.TestCase):
         for secret_name in SECRET_NAMES:
             self.assertEqual(0o600, stat.S_IMODE((self.secrets / secret_name).stat().st_mode))
         self.assertEqual(0o640, stat.S_IMODE((self.install / "compose.yaml").stat().st_mode))
+        self.assertEqual(0o640, stat.S_IMODE((self.install / "compose.migration.yaml").stat().st_mode))
         self.assertEqual(0o640, stat.S_IMODE((self.install / "runtime.env").stat().st_mode))
         self.assertEqual(0o555, stat.S_IMODE((self.install / "10-create-app-users.sh").stat().st_mode))
-        self.assertEqual(["config", "pull", "up", "ps"], self.operations())
+        self.assertEqual(
+            ["config", "config", "pull", "up", "schema-check", "run", "up", "ps"],
+            self.operations(),
+        )
         self.assert_safe_docker_calls()
+        self.assert_transaction_lock_available()
+
+    def test_concurrent_transaction_is_rejected_before_docker_or_managed_mutation(self) -> None:
+        self.install_current("new")
+        self.write_state(sorted(EXPECTED_SERVICES))
+        before = self.current_state()
+        descriptor = os.open(self.lock_file, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        try:
+            result = self.run_transaction()
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("Another deployment transaction is already running", result.stderr)
+        self.assertEqual([], self.operations())
+        self.assertEqual(before, self.current_state())
+        self.assertNotIn(KEY_MATERIAL_OLD, result.stdout + result.stderr)
+        self.assertNotIn(KEY_MATERIAL_NEW, result.stdout + result.stderr)
+        self.assert_transaction_lock_available()
+
+    def test_transaction_body_oserror_is_not_misclassified_as_a_lock_failure(self) -> None:
+        with self.assertRaises(OSError) as caught:
+            with TRANSACTION_MODULE.deployment_lock(self.lock_file):
+                raise OSError(errno.EIO, "BODY-OSERROR-SENTINEL")
+
+        self.assertIn("BODY-OSERROR-SENTINEL", str(caught.exception))
+        self.assertNotIn("lock is unavailable", str(caught.exception))
+        self.assert_transaction_lock_available()
 
     def test_unchanged_verify_failure_never_stops_stack(self) -> None:
         self.install_current("new")
         self.write_state(sorted(EXPECTED_SERVICES), failures={"ps": [1]})
-        before = self.current_bytes()
+        before = self.current_state()
         result = self.run_transaction()
 
         self.assertNotEqual(0, result.returncode)
-        self.assertEqual(before, self.current_bytes())
-        self.assertEqual(["config", "ps"], self.operations())
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(["config", "config", "up", "schema-check", "ps"], self.operations())
+        self.assertIn("without changing application files", result.stderr)
+        self.assertIn("existing application services were not stopped", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assertNotIn("down", self.operations())
+        self.assert_safe_docker_calls()
+
+    def test_unchanged_up_to_date_schema_reports_verified_unchanged(self) -> None:
+        self.install_current("new")
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {"changed": False, "status": "verified-unchanged"},
+            json.loads(result.stdout),
+        )
+        self.assertEqual(["config", "config", "up", "schema-check", "ps"], self.operations())
+        self.assert_safe_docker_calls()
+
+    def test_unchanged_schema_status_error_never_runs_migration_or_stops_stack(self) -> None:
+        self.install_current("new")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), schema_check_returncode=2)
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(["config", "config", "up", "schema-check"], self.operations())
+        self.assertNotIn("run", self.operations())
+        self.assertNotIn("down", self.operations())
+        self.assertIn("without changing application files", result.stderr)
+        self.assertIn("existing application services were not stopped", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_unchanged_files_apply_pending_migration_before_verification(self) -> None:
+        self.install_current("new")
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=False)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["changed"])
+        self.assertEqual("schema-migrated-and-verified", payload["status"])
+        self.assertEqual(["config", "config", "up", "schema-check", "run", "ps"], self.operations())
+        self.assert_safe_docker_calls()
+
+    def test_unchanged_migration_failure_keeps_application_files_and_services(self) -> None:
+        self.install_current("new")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"run": [1]}, schema_up_to_date=False)
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(["config", "config", "up", "schema-check", "run"], self.operations())
+        self.assertNotIn("down", self.operations())
+        self.assertIn("without changing application files", result.stderr)
+        self.assertIn("existing application services were not stopped", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assertIn("Cause: Docker Compose run failed with exit code 1.", result.stderr)
         self.assert_safe_docker_calls()
 
     def test_changed_verify_failure_restores_all_files_and_reverifies(self) -> None:
         self.install_current("old")
         self.write_state(sorted(EXPECTED_SERVICES), failures={"ps": [2]})
-        before = self.current_bytes()
+        before = self.current_state()
         result = self.run_transaction()
 
         self.assertNotEqual(0, result.returncode)
-        self.assertEqual(before, self.current_bytes())
-        self.assertEqual(["config", "ps", "pull", "up", "ps", "up", "ps"], self.operations())
+        self.assert_recovered_with_additive_union(before)
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps", "up", "ps"],
+            self.operations(),
+        )
+        self.assertIn("retained for recovery and must not be removed", result.stderr)
         self.assertNotIn("down", self.operations())
+        self.assert_safe_docker_calls()
+        self.assert_transaction_lock_available()
+
+    def test_changed_schema_status_error_restores_previous_stack_without_running_migration(self) -> None:
+        self.install_current("old")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), schema_check_returncode=2)
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps"],
+            self.operations(),
+        )
+        self.assertNotIn("run", self.operations())
+        self.assertNotIn("down", self.operations())
+        self.assertIn("managed application files were restored", result.stderr)
+        self.assertIn("previously running stack was restarted and verified", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_changed_candidate_health_failure_reports_http_status_after_successful_recovery(self) -> None:
+        self.install_current("old")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction((503, 200))
+
+        self.assertNotEqual(0, result.returncode)
+        self.assert_recovered_with_additive_union(before)
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps", "up", "ps"],
+            self.operations(),
+        )
+        self.assertIn("managed application files were restored", result.stderr)
+        self.assertIn("previously running stack was restarted and verified", result.stderr)
+        self.assertIn("Cause: Web health endpoint returned HTTP 503.", result.stderr)
+        self.assertIn("retained for recovery and must not be removed", result.stderr)
         self.assert_safe_docker_calls()
 
     def test_failed_first_deployment_stops_containers_but_preserves_database_credentials(self) -> None:
@@ -354,15 +740,64 @@ class DeploymentTransactionTest(unittest.TestCase):
         result = self.run_transaction()
 
         self.assertNotEqual(0, result.returncode)
-        self.assertEqual(["config", "pull", "up", "ps", "down"], self.operations())
+        self.assertEqual(
+            ["config", "config", "pull", "up", "schema-check", "run", "up", "ps", "down"],
+            self.operations(),
+        )
         self.assertFalse((self.install / "compose.yaml").exists())
+        self.assertFalse((self.install / "compose.migration.yaml").exists())
         self.assertFalse((self.install / "runtime.env").exists())
         self.assertFalse((self.install / "10-create-app-users.sh").exists())
         self.assertFalse((self.secrets / "app_secret").exists())
-        self.assertFalse((self.secrets / "encryption_key").exists())
+        self.assert_retained_candidate_keyring()
         for secret_name in DATABASE_SECRET_NAMES:
             self.assertTrue((self.secrets / secret_name).is_file())
             self.assertEqual(0o600, stat.S_IMODE((self.secrets / secret_name).stat().st_mode))
+        self.assertIn("retained for recovery and must not be removed", result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_failed_first_migration_preserves_database_credentials_and_reports_partial_ddl(self) -> None:
+        self.write_state([], failures={"run": [1]})
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(
+            ["config", "config", "pull", "up", "schema-check", "run", "down"],
+            self.operations(),
+        )
+        for artifact in (
+            self.install / "compose.yaml",
+            self.install / "compose.migration.yaml",
+            self.install / "runtime.env",
+            self.install / "10-create-app-users.sh",
+            self.secrets / "app_secret",
+            self.secrets / "encryption_key",
+        ):
+            self.assertFalse(artifact.exists())
+        for secret_name in DATABASE_SECRET_NAMES:
+            self.assertTrue((self.secrets / secret_name).is_file())
+            self.assertEqual(0o600, stat.S_IMODE((self.secrets / secret_name).stat().st_mode))
+        self.assertIn("First-deployment containers were stopped", result.stderr)
+        self.assertIn("MariaDB DDL may already be applied or partially applied", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_migration_failure_restores_application_files_without_claiming_ddl_rollback(self) -> None:
+        self.install_current("old")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"run": [1]}, schema_up_to_date=False)
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertIn("MariaDB DDL may already be applied or partially applied", result.stderr)
+        self.assertIn("forward-only and was not rolled back", result.stderr)
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "schema-check", "run", "up", "ps"],
+            self.operations(),
+        )
         self.assert_safe_docker_calls()
 
     def test_database_credential_change_is_blocked_before_docker_or_file_mutation(self) -> None:
@@ -377,9 +812,368 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertEqual([], self.operations())
         self.assertIn("cannot rotate database users", result.stderr)
 
+    def test_additive_rotation_and_primary_switch_with_revision_increase_deploys(self) -> None:
+        self.install_current("old")
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+        self.assertEqual(
+            json.loads((self.staging / "secrets" / "encryption_key").read_text(encoding="utf-8")),
+            json.loads((self.secrets / "encryption_key").read_text(encoding="utf-8")),
+        )
+        self.assert_safe_docker_calls()
+
+    def test_primary_only_switch_with_revision_increase_deploys(self) -> None:
+        self.install_current("new")
+        keys = [
+            {"id": "key_old", "material": KEY_MATERIAL_OLD},
+            {"id": "key_new", "material": KEY_MATERIAL_NEW},
+        ]
+        self.write_keyring_document(self.secrets / "encryption_key", 1, "key_old", keys)
+        self.write_keyring_document(self.staging / "secrets" / "encryption_key", 2, "key_new", keys)
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+        self.assert_safe_docker_calls()
+
+    def test_additive_key_without_primary_switch_with_revision_increase_deploys(self) -> None:
+        self.install_current("new")
+        self.write_keyring_document(
+            self.secrets / "encryption_key",
+            1,
+            "key_old",
+            [{"id": "key_old", "material": KEY_MATERIAL_OLD}],
+        )
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "key_old",
+            [
+                {"id": "key_old", "material": KEY_MATERIAL_OLD},
+                {"id": "key_new", "material": KEY_MATERIAL_NEW},
+            ],
+        )
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+        self.assert_safe_docker_calls()
+
+    def test_pure_revision_increase_deploys(self) -> None:
+        self.install_current("new")
+        keys = [{"id": "key_old", "material": KEY_MATERIAL_OLD}]
+        self.write_keyring_document(self.secrets / "encryption_key", 1, "key_old", keys)
+        self.write_keyring_document(self.staging / "secrets" / "encryption_key", 2, "key_old", keys)
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+
+    def test_key_entry_reordering_is_semantically_identical_without_revision_increase(self) -> None:
+        self.install_current("new")
+        staged_document = json.loads((self.staging / "secrets" / "encryption_key").read_text(encoding="utf-8"))
+        reversed_keys = list(reversed(staged_document["keys"]))
+        self.write_keyring_document(
+            self.secrets / "encryption_key",
+            2,
+            staged_document["primaryKeyId"],
+            reversed_keys,
+        )
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+
+    def test_revision_regression_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        self.write_keyring_document(
+            self.secrets / "encryption_key",
+            3,
+            "key_new",
+            [
+                {"id": "key_old", "material": KEY_MATERIAL_OLD},
+                {"id": "key_new", "material": KEY_MATERIAL_NEW},
+            ],
+        )
+        self.assert_guard_rejected("revision cannot decrease")
+
+    def test_semantic_change_without_revision_increase_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("old")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            1,
+            "key_new",
+            [
+                {"id": "key_old", "material": KEY_MATERIAL_OLD},
+                {"id": "key_new", "material": KEY_MATERIAL_NEW},
+            ],
+        )
+        self.expected_keyring_revision = "1"
+        self.assert_guard_rejected("require a revision increase")
+
+    def test_existing_identifier_material_change_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("old")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "key_old",
+            [{"id": "key_old", "material": KEY_MATERIAL_NEW}],
+        )
+        self.assert_guard_rejected("cannot change under an existing identifier")
+
+    def test_existing_material_moved_to_new_identifier_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("old")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "renamed_key",
+            [{"id": "renamed_key", "material": KEY_MATERIAL_OLD}],
+        )
+        self.assert_guard_rejected("cannot move to a different identifier")
+
+    def test_historical_key_removal_is_unconditionally_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            3,
+            "key_new",
+            [{"id": "key_new", "material": KEY_MATERIAL_NEW}],
+        )
+        self.expected_keyring_revision = "3"
+        self.assert_guard_rejected("removal is unsupported")
+
+    def test_cli_revision_mismatch_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        self.expected_keyring_revision = "3"
+        self.assert_guard_rejected("does not match the deployment revision")
+
+    def test_invalid_cli_revision_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        self.expected_keyring_revision = "not-an-integer"
+        self.assert_guard_rejected("deployment encryption keyring revision is invalid")
+
+    def test_missing_installed_keyring_on_existing_installation_is_blocked_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        (self.secrets / "encryption_key").unlink()
+        self.assert_guard_rejected("installed encryption keyring is missing")
+
+    def test_malformed_staged_and_installed_keyrings_are_blocked_safely_before_docker(self) -> None:
+        for location in ("staged", "installed"):
+            with self.subTest(location=location):
+                self.reset_case(f"malformed-{location}")
+                self.install_current("new")
+                target = (
+                    self.staging / "secrets" / "encryption_key"
+                    if location == "staged"
+                    else self.secrets / "encryption_key"
+                )
+                target.write_text('{"material":"KEYRING-SENTINEL"', encoding="utf-8")
+
+                result = self.assert_guard_rejected(f"{location} encryption keyring is invalid")
+                self.assertNotIn("KEYRING-SENTINEL", result.stdout)
+                self.assertNotIn("KEYRING-SENTINEL", result.stderr)
+
+    def test_duplicate_json_fields_are_rejected_for_staged_and_installed_keyrings(self) -> None:
+        duplicate_document = (
+            '{"format":1,"format":1,"revision":2,"primaryKeyId":"key_new",'
+            '"keys":[{"id":"key_new","material":"' + KEY_MATERIAL_NEW + '"}]}'
+        )
+        for location in ("staged", "installed"):
+            with self.subTest(location=location):
+                self.reset_case(f"duplicate-{location}")
+                self.install_current("new")
+                target = (
+                    self.staging / "secrets" / "encryption_key"
+                    if location == "staged"
+                    else self.secrets / "encryption_key"
+                )
+                target.write_text(duplicate_document, encoding="utf-8")
+                self.assert_guard_rejected(f"{location} encryption keyring is invalid")
+
+    def test_legacy_lowerhex_key_upgrades_only_to_one_matching_primary_key(self) -> None:
+        self.secrets.mkdir(parents=True, exist_ok=True)
+        (self.secrets / "encryption_key").write_text(KEY_MATERIAL_OLD + "\n", encoding="ascii")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "established_key",
+            [{"id": "established_key", "material": KEY_MATERIAL_OLD}],
+        )
+        self.write_state([], schema_up_to_date=False)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("deployed", json.loads(result.stdout)["status"])
+
+    def test_legacy_key_upgrade_rejects_different_material_and_multiple_keys_before_docker(self) -> None:
+        staged_cases = (
+            [{"id": "established_key", "material": KEY_MATERIAL_NEW}],
+            [
+                {"id": "established_key", "material": KEY_MATERIAL_OLD},
+                {"id": "additional_key", "material": KEY_MATERIAL_NEW},
+            ],
+        )
+        for index, keys in enumerate(staged_cases):
+            with self.subTest(index=index):
+                self.reset_case(f"legacy-bad-{index}")
+                self.secrets.mkdir(parents=True, exist_ok=True)
+                (self.secrets / "encryption_key").write_text(KEY_MATERIAL_OLD + "\n", encoding="ascii")
+                self.write_keyring_document(
+                    self.staging / "secrets" / "encryption_key",
+                    2,
+                    "established_key",
+                    keys,
+                )
+                self.assert_guard_rejected("legacy encryption key cannot be upgraded")
+
+    def test_legacy_key_with_existing_compose_requires_offline_maintenance_before_docker(self) -> None:
+        self.install_current("new")
+        (self.secrets / "encryption_key").write_text(KEY_MATERIAL_OLD + "\n", encoding="ascii")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "established_key",
+            [{"id": "established_key", "material": KEY_MATERIAL_OLD}],
+        )
+
+        self.assert_guard_rejected("requires separate offline maintenance")
+
+    def test_first_deployment_with_legacy_seed_retains_candidate_keyring_after_post_start_failure(self) -> None:
+        self.secrets.mkdir(parents=True, exist_ok=True)
+        (self.secrets / "encryption_key").write_text(KEY_MATERIAL_OLD + "\n", encoding="ascii")
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "established_key",
+            [{"id": "established_key", "material": KEY_MATERIAL_OLD}],
+        )
+        self.write_state([], failures={"ps": [1]})
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        document = json.loads((self.secrets / "encryption_key").read_text(encoding="utf-8"))
+        self.assertEqual(2, document["revision"])
+        self.assertEqual("established_key", document["primaryKeyId"])
+        self.assertEqual(["established_key"], [entry["id"] for entry in document["keys"]])
+        self.assertEqual(0o600, stat.S_IMODE((self.secrets / "encryption_key").stat().st_mode))
+        self.assertIn("retained for recovery and must not be removed", result.stderr)
+
+    def test_post_start_recovery_union_blocks_a_followup_key_removal(self) -> None:
+        self.install_current("old")
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"ps": [2]})
+        failed_deployment = self.run_transaction()
+        self.assertNotEqual(0, failed_deployment.returncode)
+        self.assert_recovery_union_contract()
+
+        self.write_keyring_document(
+            self.staging / "secrets" / "encryption_key",
+            2,
+            "key_old",
+            [{"id": "key_old", "material": KEY_MATERIAL_OLD}],
+        )
+        self.assert_guard_rejected("removal is unsupported")
+
+    def test_transaction_keyring_parser_rejects_every_invalid_contract_without_leaking_values(self) -> None:
+        valid_entry = {"id": "key_one", "material": KEY_MATERIAL_OLD}
+        valid = {"format": 1, "revision": 1, "primaryKeyId": "key_one", "keys": [valid_entry]}
+        invalid_documents: tuple[bytes, ...] = (
+            b"",
+            b"\xff",
+            b"x" * 65537,
+            json.dumps([]).encode(),
+            json.dumps({**valid, "extra": "PARSER-SENTINEL"}).encode(),
+            json.dumps({key: value for key, value in valid.items() if key != "keys"}).encode(),
+            json.dumps({**valid, "format": True}).encode(),
+            json.dumps({**valid, "revision": True}).encode(),
+            json.dumps({**valid, "revision": 0}).encode(),
+            json.dumps({**valid, "primaryKeyId": "INVALID"}).encode(),
+            json.dumps({**valid, "keys": []}).encode(),
+            json.dumps({**valid, "keys": [valid_entry] * 17}).encode(),
+            json.dumps({**valid, "keys": [["not-an-object"]]}).encode(),
+            json.dumps({**valid, "keys": [{**valid_entry, "extra": True}]}).encode(),
+            json.dumps({**valid, "keys": [{"id": "INVALID", "material": KEY_MATERIAL_OLD}]}).encode(),
+            json.dumps({**valid, "keys": [{"id": "key_one", "material": KEY_MATERIAL_OLD.upper()}]}).encode(),
+            json.dumps({**valid, "keys": [valid_entry, {"id": "key_one", "material": KEY_MATERIAL_NEW}]}).encode(),
+            json.dumps({**valid, "keys": [valid_entry, {"id": "key_two", "material": KEY_MATERIAL_OLD}]}).encode(),
+            json.dumps({**valid, "primaryKeyId": "missing"}).encode(),
+            (
+                '{"format":1,"revision":1,"primaryKeyId":"key_one","keys":['
+                '{"id":"key_one","id":"other","material":"' + KEY_MATERIAL_OLD + '"}]}'
+            ).encode(),
+        )
+        parser_directory = self.root / "parser-invalid"
+        parser_directory.mkdir(parents=True, exist_ok=True)
+
+        for index, document in enumerate(invalid_documents):
+            with self.subTest(index=index):
+                path = parser_directory / str(index)
+                path.write_bytes(document)
+                with self.assertRaisesRegex(
+                    TRANSACTION_MODULE.DeploymentError,
+                    "The staged encryption keyring is invalid",
+                ) as caught:
+                    TRANSACTION_MODULE.load_encryption_keyring(
+                        path,
+                        "The staged encryption keyring is invalid.",
+                    )
+                self.assertNotIn("SENTINEL", str(caught.exception))
+
+        key = TRANSACTION_MODULE.EncryptionKey("key_one", bytes.fromhex(KEY_MATERIAL_OLD))
+        keyring = TRANSACTION_MODULE.EncryptionKeyring(1, "key_one", {"key_one": key})
+        self.assertNotIn(KEY_MATERIAL_OLD, repr(key))
+        self.assertNotIn(KEY_MATERIAL_OLD, repr(keyring))
+
+    def test_recovery_union_defensively_rejects_changed_existing_material(self) -> None:
+        recovery_directory = self.root / "recovery-invariant"
+        recovery_directory.mkdir(parents=True, exist_ok=True)
+        installed_file = recovery_directory / "encryption_key"
+        self.write_keyring_document(
+            installed_file,
+            1,
+            "key_old",
+            [{"id": "key_old", "material": KEY_MATERIAL_OLD}],
+        )
+        candidate_file = recovery_directory / "candidate"
+        self.write_keyring_document(
+            candidate_file,
+            2,
+            "key_old",
+            [{"id": "key_old", "material": KEY_MATERIAL_NEW}],
+        )
+        candidate = TRANSACTION_MODULE.load_encryption_keyring(
+            candidate_file,
+            "The candidate encryption keyring is invalid.",
+        )
+        before = installed_file.read_bytes()
+
+        with self.assertRaisesRegex(
+            TRANSACTION_MODULE.DeploymentError,
+            "Recovery encryption keyring invariants are invalid",
+        ) as caught:
+            TRANSACTION_MODULE.install_additive_recovery_keyring(installed_file, candidate)
+
+        self.assertEqual(before, installed_file.read_bytes())
+        self.assertNotIn(KEY_MATERIAL_OLD, str(caught.exception))
+        self.assertNotIn(KEY_MATERIAL_NEW, str(caught.exception))
+
     def test_each_install_failure_restores_bytes_modes_and_removes_backup(self) -> None:
         managed_names = (
             "runtime.env",
+            "compose.migration.yaml",
             "10-create-app-users.sh",
             *SECRET_NAMES,
             "compose.yaml",
@@ -408,7 +1202,7 @@ class DeploymentTransactionTest(unittest.TestCase):
 
                 self.assertTrue(injected)
                 self.assertIsInstance(error, TRANSACTION_MODULE.DeploymentError)
-                self.assertIn("restored and verified", str(error))
+                self.assertIn("managed application files were restored", str(error))
                 self.assertEqual(before, self.current_state())
                 self.assertEqual([], list(self.install.glob(".deployment-backup-*")))
                 self.assert_safe_docker_calls()
@@ -439,7 +1233,7 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("Deployment recovery failed", result.stderr)
         self.assertNotIn("status\": \"deployed", result.stdout)
-        self.assertEqual(before, self.current_state())
+        self.assert_recovered_with_additive_union(before)
         self.assertEqual(1, len(list(self.install.glob(".deployment-backup-*"))))
         self.assert_safe_docker_calls()
 
@@ -476,25 +1270,84 @@ class DeploymentTransactionTest(unittest.TestCase):
     def write_staged(self, marker: str) -> None:
         (self.staging / "secrets").mkdir(parents=True, exist_ok=True)
         (self.staging / "compose.yaml").write_text(f"compose-{marker}\n", encoding="utf-8")
+        (self.staging / "compose.migration.yaml").write_text(f"migration-compose-{marker}\n", encoding="utf-8")
         (self.staging / "runtime.env").write_text(f"RUNTIME={marker}\n", encoding="utf-8")
         (self.staging / "10-create-app-users.sh").write_text(f"init-{marker}\n", encoding="utf-8")
         for index, secret_name in enumerate(SECRET_NAMES, start=1):
+            secret_file = self.staging / "secrets" / secret_name
+            if secret_name == "encryption_key":
+                self.write_keyring(secret_file, marker)
+                continue
             value = f"{index:x}" * 64 if secret_name in DATABASE_SECRET_NAMES else f"{marker}-{secret_name}"
-            (self.staging / "secrets" / secret_name).write_text(value + "\n", encoding="utf-8")
+            secret_file.write_text(value + "\n", encoding="utf-8")
 
     def install_current(self, marker: str) -> None:
         self.install.mkdir(parents=True, exist_ok=True)
         self.secrets.mkdir(parents=True, exist_ok=True)
+        self.secrets.chmod(0o700)
         (self.install / "compose.yaml").write_text(f"compose-{marker}\n", encoding="utf-8")
+        (self.install / "compose.migration.yaml").write_text(f"migration-compose-{marker}\n", encoding="utf-8")
         (self.install / "runtime.env").write_text(f"RUNTIME={marker}\n", encoding="utf-8")
         (self.install / "10-create-app-users.sh").write_text(f"init-{marker}\n", encoding="utf-8")
+        (self.install / "compose.yaml").chmod(0o640)
+        (self.install / "compose.migration.yaml").chmod(0o640)
+        (self.install / "runtime.env").chmod(0o640)
+        (self.install / "10-create-app-users.sh").chmod(0o555)
         for index, secret_name in enumerate(SECRET_NAMES, start=1):
-            value = f"{index:x}" * 64 if secret_name in DATABASE_SECRET_NAMES else f"{marker}-{secret_name}"
-            (self.secrets / secret_name).write_text(value + "\n", encoding="utf-8")
+            secret_file = self.secrets / secret_name
+            if secret_name == "encryption_key":
+                self.write_keyring(secret_file, marker)
+            else:
+                value = f"{index:x}" * 64 if secret_name in DATABASE_SECRET_NAMES else f"{marker}-{secret_name}"
+                secret_file.write_text(value + "\n", encoding="utf-8")
+            secret_file.chmod(0o600)
+
+    def write_keyring(self, path: Path, marker: str) -> None:
+        if marker == "old":
+            document = {
+                "format": 1,
+                "revision": 1,
+                "primaryKeyId": "key_old",
+                "keys": [{"id": "key_old", "material": KEY_MATERIAL_OLD}],
+            }
+        elif marker == "new":
+            document = {
+                "format": 1,
+                "revision": 2,
+                "primaryKeyId": "key_new",
+                "keys": [
+                    {"id": "key_old", "material": KEY_MATERIAL_OLD},
+                    {"id": "key_new", "material": KEY_MATERIAL_NEW},
+                ],
+            }
+        else:
+            raise AssertionError("Unknown test keyring marker.")
+        path.write_text(json.dumps(document, separators=(",", ":")) + "\n", encoding="utf-8")
+
+    def write_keyring_document(
+        self,
+        path: Path,
+        revision: int,
+        primary_key_id: str,
+        keys: list[dict[str, str]],
+    ) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "format": 1,
+                    "revision": revision,
+                    "primaryKeyId": primary_key_id,
+                    "keys": keys,
+                },
+                separators=(",", ":"),
+            ) + "\n",
+            encoding="utf-8",
+        )
 
     def make_all_install_points_changed(self) -> None:
         modes = {
             "runtime.env": 0o600,
+            "compose.migration.yaml": 0o600,
             "10-create-app-users.sh": 0o500,
             "app_secret": 0o640,
             "encryption_key": 0o400,
@@ -508,25 +1361,98 @@ class DeploymentTransactionTest(unittest.TestCase):
         for name, mode in modes.items():
             self.current_path(name).chmod(mode)
 
-    def write_state(self, running_services: list[str], failures: dict[str, list[int]] | None = None) -> None:
+    def write_state(
+        self,
+        running_services: list[str],
+        failures: dict[str, list[int]] | None = None,
+        schema_up_to_date: bool | None = None,
+        schema_check_returncode: int | None = None,
+    ) -> None:
         self.state_file.write_text(
             json.dumps(
                 {
                     "expected_services": sorted(EXPECTED_SERVICES),
                     "running_services": running_services,
                     "failures": failures or {},
+                    "schema_up_to_date": bool(running_services) if schema_up_to_date is None else schema_up_to_date,
+                    "schema_check_returncode": schema_check_returncode,
                     "calls": [],
                 },
             ),
             encoding="utf-8",
         )
 
-    def run_transaction(self) -> subprocess.CompletedProcess[str]:
+    def run_transaction(
+        self,
+        health_statuses: tuple[int, ...] = (200,),
+    ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment["FAKE_DOCKER_STATE"] = str(self.state_file)
-        with health_server() as health_url:
+        with health_server(health_statuses) as health_url:
             command = [sys.executable, str(TRANSACTION_SCRIPT), *self.transaction_arguments(health_url)]
             return run(command, env=environment)
+
+    def assert_guard_rejected(self, expected_message: str) -> subprocess.CompletedProcess[str]:
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES))
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual([], self.operations())
+        self.assertIn(expected_message.lower(), result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+        for sensitive_value in (KEY_MATERIAL_OLD, KEY_MATERIAL_NEW, "SENTINEL"):
+            self.assertNotIn(sensitive_value, result.stdout)
+            self.assertNotIn(sensitive_value, result.stderr)
+        self.assert_transaction_lock_available()
+
+        return result
+
+    def assert_recovered_with_additive_union(self, previous_state: dict[str, tuple[bytes, int]]) -> None:
+        current_state = self.current_state()
+        keyring_path = str(self.secrets / "encryption_key")
+        previous_without_keyring = dict(previous_state)
+        current_without_keyring = dict(current_state)
+        previous_without_keyring.pop(keyring_path)
+        current_without_keyring.pop(keyring_path)
+        self.assertEqual(previous_without_keyring, current_without_keyring)
+        self.assert_recovery_union_contract()
+
+    def assert_recovery_union_contract(self) -> None:
+        keyring_file = self.secrets / "encryption_key"
+        document = json.loads(keyring_file.read_text(encoding="utf-8"))
+        self.assertEqual(1, document["revision"])
+        self.assertEqual("key_old", document["primaryKeyId"])
+        self.assertEqual(
+            {
+                "key_old": KEY_MATERIAL_OLD,
+                "key_new": KEY_MATERIAL_NEW,
+            },
+            {entry["id"]: entry["material"] for entry in document["keys"]},
+        )
+        self.assertEqual(0o600, stat.S_IMODE(keyring_file.stat().st_mode))
+
+    def assert_retained_candidate_keyring(self) -> None:
+        keyring_file = self.secrets / "encryption_key"
+        document = json.loads(keyring_file.read_text(encoding="utf-8"))
+        self.assertEqual(2, document["revision"])
+        self.assertEqual("key_new", document["primaryKeyId"])
+        self.assertEqual(
+            {"key_old", "key_new"},
+            {entry["id"] for entry in document["keys"]},
+        )
+        self.assertEqual(0o600, stat.S_IMODE(keyring_file.stat().st_mode))
+
+    def assert_transaction_lock_available(self) -> None:
+        descriptor = os.open(self.lock_file, os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            self.assertEqual(0o600, stat.S_IMODE(os.fstat(descriptor).st_mode))
+        finally:
+            os.close(descriptor)
 
     def run_transaction_in_process(self):
         environment = os.environ.copy()
@@ -544,11 +1470,15 @@ class DeploymentTransactionTest(unittest.TestCase):
             f"--docker-executable={FAKE_DOCKER}",
             f"--staging-directory={self.staging}",
             f"--current-compose-file={self.install / 'compose.yaml'}",
+            f"--current-migration-compose-file={self.install / 'compose.migration.yaml'}",
             f"--current-environment-file={self.install / 'runtime.env'}",
             f"--current-mariadb-init-script={self.install / '10-create-app-users.sh'}",
             f"--current-secrets-directory={self.secrets}",
             f"--health-url={health_url}",
             "--wait-timeout=10",
+            "--migration-service=schema-migration",
+            f"--encryption-keyring-revision={self.expected_keyring_revision}",
+            f"--transaction-lock-file={self.lock_file}",
         ]
         arguments.extend(f"--expected-service={service}" for service in sorted(EXPECTED_SERVICES))
         return arguments
@@ -561,22 +1491,55 @@ class DeploymentTransactionTest(unittest.TestCase):
         expected_arguments = {
             "config": ["config", "--quiet"],
             "pull": ["pull"],
-            "up": ["up", "--detach", "--remove-orphans", "--wait", "--wait-timeout", "10"],
+            "up": (
+                ["up", "--detach", "--wait", "--wait-timeout", "10", "mariadb"],
+                ["up", "--detach", "--remove-orphans", "--wait", "--wait-timeout", "10"],
+            ),
+            "run": ["run", "--rm", "--no-deps", "schema-migration"],
+            "schema-check": [
+                "run",
+                "--rm",
+                "--no-deps",
+                "schema-migration",
+                "doctrine:migrations:up-to-date",
+                "--no-interaction",
+                "--no-ansi",
+            ],
             "ps": ["ps", "--services", "--filter", "status=running"],
             "down": ["down", "--remove-orphans"],
         }
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
         self.assertFalse(state.get("forbidden_volume_delete", False))
         for call in state["calls"]:
-            self.assertEqual(expected_arguments[call["operation"]], call["arguments"])
+            expected = expected_arguments[call["operation"]]
+            if call["operation"] == "up":
+                self.assertIn(call["arguments"], expected)
+            else:
+                self.assertEqual(expected, call["arguments"])
+            expected_compose_file_count = 1
+            if call["operation"] in {"run", "schema-check"} or (
+                call["operation"] == "config" and call["call"] % 2 == 0
+            ):
+                expected_compose_file_count = 2
+            self.assertEqual(expected_compose_file_count, call["compose_file_count"])
 
     def current_bytes(self) -> dict[str, bytes]:
-        files = [self.install / "compose.yaml", self.install / "runtime.env", self.install / "10-create-app-users.sh"]
+        files = [
+            self.install / "compose.yaml",
+            self.install / "compose.migration.yaml",
+            self.install / "runtime.env",
+            self.install / "10-create-app-users.sh",
+        ]
         files.extend(self.secrets / secret_name for secret_name in SECRET_NAMES)
         return {str(path): path.read_bytes() for path in files if path.is_file()}
 
     def current_state(self) -> dict[str, tuple[bytes, int]]:
-        files = [self.install / "compose.yaml", self.install / "runtime.env", self.install / "10-create-app-users.sh"]
+        files = [
+            self.install / "compose.yaml",
+            self.install / "compose.migration.yaml",
+            self.install / "runtime.env",
+            self.install / "10-create-app-users.sh",
+        ]
         files.extend(self.secrets / secret_name for secret_name in SECRET_NAMES)
         return {
             str(path): (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))

@@ -7,6 +7,8 @@ x-app-environment: &app-environment
   APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
   APP_SECRET_FILE: /run/secrets/app_secret
   ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  ENCRYPTION_KEYRING_REVISION: ${ENCRYPTION_KEYRING_REVISION:-1}
+  APP_BUILD_VERSION: ${APP_BUILD_VERSION:-development}
   DATABASE_HOST: mariadb
   DATABASE_PORT: 3306
   DATABASE_NAME: ${MARIADB_DATABASE:-hoddmimir}
@@ -62,12 +64,12 @@ services:
       context: .
       dockerfile: docker/php/Dockerfile
       target: worker
-    command: ["hoddmimir:worker:data", "--interval=${COLLECTOR_INTERVAL_SECONDS:-120}"]
+    command: ["hoddmimir:worker:data"]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_collector
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
-      COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-120}
+      COLLECTOR_GRID_WIDTH_SECONDS: ${COLLECTOR_GRID_WIDTH_SECONDS:-120}
     secrets:
       - app_secret
       - encryption_key
@@ -76,13 +78,14 @@ services:
       mariadb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "collector"]
+      test: ["CMD", "php", "bin/console", "hoddmimir:worker:health", "collector"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
     networks:
       - internal
+    stop_grace_period: 75s
     <<: *app-security
 
   backup-worker:

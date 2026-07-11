@@ -30,10 +30,7 @@ CREATE USER IF NOT EXISTS 'hoddmimir_web'@'%' IDENTIFIED BY '${web_password}';
 CREATE USER IF NOT EXISTS 'hoddmimir_collector'@'%' IDENTIFIED BY '${collector_password}';
 CREATE USER IF NOT EXISTS 'hoddmimir_backup_worker'@'%' IDENTIFIED BY '${backup_worker_password}';
 
-GRANT ALL PRIVILEGES ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_migration'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_web'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_collector'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_backup_worker'@'%';
+GRANT ALL PRIVILEGES ON \`${MARIADB_DATABASE}\`.* TO 'hoddmimir_migration'@'%' WITH GRANT OPTION;
 
 FLUSH PRIVILEGES;
 SQL

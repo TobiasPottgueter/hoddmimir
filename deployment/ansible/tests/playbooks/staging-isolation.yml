@@ -1,0 +1,48 @@
+---
+- name: Verify isolated deployment staging semantics
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    staging_parent: "{{ lookup('ansible.builtin.env', 'HODDMIMIR_STAGING_TEST_PARENT') }}"
+
+  tasks:
+    - name: Create and compare two staging directories
+      block:
+        - name: Create first unique staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            path: "{{ staging_parent }}"
+            prefix: .deployment-staging-
+          register: first_staging
+
+        - name: Create second unique staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            path: "{{ staging_parent }}"
+            prefix: .deployment-staging-
+          register: second_staging
+
+        - name: Inspect staging directory permissions
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ first_staging.path }}"
+            - "{{ second_staging.path }}"
+          register: staging_stats
+
+        - name: Require unique private staging directories
+          ansible.builtin.assert:
+            that:
+              - first_staging.path != second_staging.path
+              - staging_stats.results | map(attribute='stat.mode') | list == ['0700', '0700']
+
+      always:
+        - name: Remove only the staging directories created by this play
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ first_staging.path | default(staging_parent ~ '/missing-first') }}"
+            - "{{ second_staging.path | default(staging_parent ~ '/missing-second') }}"
+          changed_when: false

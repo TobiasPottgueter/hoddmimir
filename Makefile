@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets config build up down logs ps backend-test frontend-test test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage frontend-test test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_EXAMPLE_INVENTORY := inventories/production/hosts.example.yml
@@ -19,7 +19,7 @@ config: secrets ## Validate the Docker Compose model
 build: secrets ## Build all application and database images
 	docker compose build
 
-up: secrets ## Start the complete local stack
+up: migrate ## Apply migrations and start the complete local stack
 	docker compose up --detach --wait
 
 down: ## Stop the local stack
@@ -31,8 +31,27 @@ logs: ## Follow logs from all services
 ps: ## Show service state
 	docker compose ps
 
+migration-wrapper-test: ## Verify local migration command ordering without Docker
+	sh scripts/tests/test-migrate-database.sh
+
+migrate: secrets ## Apply pending V2 schema migrations through the one-shot container
+	./scripts/migrate-database.sh
+
 backend-test: ## Build and run the PHP validation target
 	docker build --target backend-test --file docker/php/Dockerfile .
+
+backend-integration-wrapper-test: ## Test integration cleanup and exit semantics without Docker
+	sh scripts/tests/test-backend-integration-cleanup.sh
+
+backend-integration: migration-wrapper-test backend-integration-wrapper-test ## Run the isolated MariaDB 11.4 integration suite
+	./scripts/test-backend-integration.sh
+
+backend-coverage: ## Generate the backend coverage foundation report
+	docker build --target backend-coverage-runtime --tag hoddmimir-backend-coverage:local --file docker/php/Dockerfile .
+	mkdir -p backend/coverage
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --env XDEBUG_MODE=coverage --volume "$(CURDIR)/backend/coverage:/app/coverage" hoddmimir-backend-coverage:local php -d memory_limit=1G vendor/bin/phpunit --configuration phpunit.xml.dist --coverage-clover coverage/clover.xml --coverage-text
+	test -s backend/coverage/clover.xml
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --volume "$(CURDIR)/backend/coverage:/app/coverage:ro" hoddmimir-backend-coverage:local php tools/check-coverage.php coverage/clover.xml
 
 frontend-test: ## Build and run the frontend validation target
 	docker build --target frontend-test --file docker/web/Dockerfile .

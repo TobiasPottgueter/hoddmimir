@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": "pve9-nightly",
+      "schedule": "mon..fri 23:00",
+      "enabled": 1,
+      "repeat-missed": 0,
+      "comment": "Constructed nightly backup fixture",
+      "next-run": 1753308000,
+      "node": "pve9-a",
+      "storage": "pbs-backup",
+      "vmid": "401,402",
+      "mode": "snapshot",
+      "compress": "zstd",
+      "prune-backups": {
+        "keep-last": 3,
+        "keep-daily": 7,
+        "keep-weekly": 4
+      },
+      "future-observation": "ignored-pve9-job-field"
+    }
+  ]
+}

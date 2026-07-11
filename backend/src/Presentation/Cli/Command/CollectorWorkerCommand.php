@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace App\Presentation\Cli\Command;
 
-use App\Application\Worker\WorkerLoop;
-use App\Application\Worker\WorkerReadinessReport;
-use App\Domain\Worker\WorkerKind;
+use App\Application\Collector\CollectorWorkerRunner;
 use JsonException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,9 +18,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 final class CollectorWorkerCommand extends Command
 {
-    private const int DEFAULT_INTERVAL_SECONDS = 120;
-
-    public function __construct(private readonly WorkerLoop $workerLoop)
+    public function __construct(private readonly CollectorWorkerRunner $workerRunner)
     {
         parent::__construct();
     }
@@ -30,40 +26,15 @@ final class CollectorWorkerCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('once', null, InputOption::VALUE_NONE, 'Run one iteration and exit.')
-            ->addOption(
-                'interval',
-                null,
-                InputOption::VALUE_REQUIRED,
-                'Seconds to wait between iterations.',
-                (string) self::DEFAULT_INTERVAL_SECONDS,
-            );
+            ->addOption('once', null, InputOption::VALUE_NONE, 'Claim one due cycle at most, then exit.');
     }
 
     /** @throws JsonException */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $interval = filter_var(
-            $input->getOption('interval'),
-            FILTER_VALIDATE_INT,
-            ['options' => ['min_range' => 1]],
-        );
+        $result = $this->workerRunner->run((bool) $input->getOption('once'));
+        $output->writeln(json_encode($result->toArray(), JSON_THROW_ON_ERROR));
 
-        if (false === $interval) {
-            $output->writeln('<error>The --interval value must be a positive integer.</error>');
-
-            return self::INVALID;
-        }
-
-        $this->workerLoop->run(
-            WorkerKind::Collector,
-            $interval,
-            (bool) $input->getOption('once'),
-            static function (WorkerReadinessReport $report) use ($output): void {
-                $output->writeln(json_encode($report->toArray(), JSON_THROW_ON_ERROR));
-            },
-        );
-
-        return self::SUCCESS;
+        return $result->exitCode();
     }
 }

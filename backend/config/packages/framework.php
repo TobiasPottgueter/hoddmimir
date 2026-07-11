@@ -6,6 +6,7 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 
 return static function (ContainerConfigurator $container): void {
     $container->extension('framework', [
+        'secret' => '%env(trim:file:APP_SECRET_FILE)%',
         'handle_all_throwables' => true,
         'http_method_override' => false,
         'router' => [

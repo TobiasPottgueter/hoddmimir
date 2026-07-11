@@ -1,0 +1,46 @@
+{
+  "data": [
+    {
+      "cgroup-mode": 2,
+      "cpu": 0.1,
+      "disk": 8589934592,
+      "id": "node/pve7-standalone.test",
+      "maxcpu": 8,
+      "maxdisk": 274877906944,
+      "maxmem": 34359738368,
+      "mem": 8589934592,
+      "name": "pve7-standalone.test",
+      "node": "pve7-standalone.test",
+      "status": "online",
+      "type": "node",
+      "uptime": 700077
+    },
+    {
+      "id": "qemu/711",
+      "name": "app-711.test",
+      "node": "pve7-standalone.test",
+      "status": "running",
+      "type": "qemu",
+      "vmid": 711
+    },
+    {
+      "id": "lxc/712",
+      "name": "ct-712.test",
+      "node": "pve7-standalone.test",
+      "status": "running",
+      "type": "lxc",
+      "vmid": 712
+    },
+    {
+      "content": "backup",
+      "disk": 137438953472,
+      "id": "storage/pve7-standalone.test/backup-pve7-standalone-test",
+      "maxdisk": 549755813888,
+      "node": "pve7-standalone.test",
+      "plugintype": "dir",
+      "status": "available",
+      "storage": "backup-pve7-standalone-test",
+      "type": "storage"
+    }
+  ]
+}

@@ -70,13 +70,20 @@ jobs:
         with:
           php-version: "8.5"
           tools: composer:2.10.2
-          coverage: none
+          coverage: xdebug
 
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
       - name: Validate, analyse, and test
         run: composer verify
+
+      - name: Generate coverage foundation report
+        run: |
+          mkdir -p coverage
+          XDEBUG_MODE=coverage php -d memory_limit=1G vendor/bin/phpunit --configuration phpunit.xml.dist --coverage-clover coverage/clover.xml --coverage-text
+          test -s coverage/clover.xml
+          php tools/check-coverage.php coverage/clover.xml
 
       - name: Audit dependencies
         run: composer audit --locked
@@ -85,6 +92,19 @@ jobs:
         run: |
           if composer show saleh7/proxmox-ve_php_api >/dev/null 2>&1; then exit 1; fi
           if composer show netzkultur/proxmoxve-php-api >/dev/null 2>&1; then exit 1; fi
+
+  backend-integration:
+    name: Backend Integration
+    needs:
+      - backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Run isolated MariaDB integration tests
+        run: make backend-integration
 
   frontend:
     name: Frontend
@@ -129,6 +149,7 @@ jobs:
     name: Containers and Compose
     needs:
       - backend
+      - backend-integration
       - frontend
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -140,7 +161,9 @@ jobs:
         run: ./scripts/init-dev-secrets.sh
 
       - name: Validate Compose
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose --file compose.yaml --file compose.migration.yaml config --quiet
 
       - name: Verify Hoddmímir Compose identity
         run: |
@@ -153,8 +176,10 @@ jobs:
             and (.services | keys | sort == ["backup-worker", "data-worker", "mariadb", "webapp"])
             and .services.mariadb.environment.MARIADB_DATABASE == "hoddmimir"
             and .services."data-worker".environment.DATABASE_USER == "hoddmimir_collector"
-            and .services."data-worker".environment.COLLECTOR_INTERVAL_SECONDS == "120"
-            and .services."data-worker".command == ["hoddmimir:worker:data", "--interval=120"]
+            and .services."data-worker".environment.COLLECTOR_GRID_WIDTH_SECONDS == "120"
+            and .services."data-worker".command == ["hoddmimir:worker:data"]
+            and .services."data-worker".healthcheck.test == ["CMD", "php", "bin/console", "hoddmimir:worker:health", "collector"]
+            and .services."data-worker".stop_grace_period == "1m15s"
             and .services."backup-worker".environment.DATABASE_USER == "hoddmimir_backup_worker"
             and .services.webapp.environment.DATABASE_USER == "hoddmimir_web"
           ' "$model" >/dev/null
@@ -172,6 +197,7 @@ jobs:
         run: |
           set -eu
           trap 'docker compose down --volumes --remove-orphans' EXIT
+          ./scripts/migrate-database.sh
           docker compose up --detach --wait
           curl --fail --silent --show-error http://localhost:8080/api/health
           docker compose ps

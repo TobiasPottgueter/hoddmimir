@@ -1,0 +1,50 @@
+{
+  "data": [
+    {
+      "cgroup-mode": 2,
+      "cpu": 0.025,
+      "disk": 34359738368,
+      "host-arch": "x86_64",
+      "id": "node/pve9-standalone.test",
+      "maxcpu": 16,
+      "maxdisk": 1099511627776,
+      "maxmem": 137438953472,
+      "mem": 34359738368,
+      "name": "pve9-standalone.test",
+      "node": "pve9-standalone.test",
+      "status": "online",
+      "type": "node",
+      "uptime": 900099
+    },
+    {
+      "id": "qemu/911",
+      "name": "app-911.test",
+      "node": "pve9-standalone.test",
+      "status": "running",
+      "template": false,
+      "type": "qemu",
+      "vmid": 911
+    },
+    {
+      "id": "lxc/912",
+      "name": "ct-912.test",
+      "node": "pve9-standalone.test",
+      "status": "running",
+      "template": false,
+      "type": "lxc",
+      "vmid": 912
+    },
+    {
+      "content": "backup",
+      "disk": 549755813888,
+      "id": "storage/pve9-standalone.test/backup-pve9-standalone-test",
+      "maxdisk": 2199023255552,
+      "node": "pve9-standalone.test",
+      "plugintype": "pbs",
+      "shared": false,
+      "status": "available",
+      "storage": "backup-pve9-standalone-test",
+      "type": "storage"
+    }
+  ]
+}

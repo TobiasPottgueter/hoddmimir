@@ -1,0 +1,33 @@
+{
+  "data": [
+    {
+      "id": "pve7-minimal"
+    },
+    {
+      "id": "pve7-nightly",
+      "schedule": "mon..fri 22:15",
+      "enabled": 1,
+      "storage": "pbs-backup",
+      "vmid": "101,202",
+      "mode": "snapshot",
+      "compress": "zstd",
+      "maxfiles": 3
+    },
+    {
+      "id": "pve7-weekly",
+      "schedule": "sun 03:00",
+      "enabled": 0,
+      "node": "pve7-a",
+      "storage": "pbs-backup",
+      "all": 1,
+      "prune-backups": {
+        "keep-weekly": 4
+      },
+      "future-observation": "ignored-pve7-job-field"
+    },
+    {
+      "id": "pve7-retention-legacy",
+      "prune-backups": "keep-last=3"
+    }
+  ]
+}

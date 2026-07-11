@@ -1,0 +1,14 @@
+{
+  "data": {
+    "pid": 54,
+    "status": "stopped",
+    "type": "vzdump",
+    "id": "302",
+    "user": "backup-observer@pve",
+    "exitstatus": "ERROR",
+    "upid": "UPID:pve8-a:00000036:0010C8E2:677FFF00:vzdump:302:backup-observer@pve:",
+    "starttime": 1736441600,
+    "pstart": 1100002,
+    "node": "pve8-a"
+  }
+}

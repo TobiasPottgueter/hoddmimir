@@ -55,7 +55,7 @@ final class BackupWorkerCommand extends Command
             return self::INVALID;
         }
 
-        $this->workerLoop->run(
+        $report = $this->workerLoop->run(
             WorkerKind::Backup,
             $interval,
             (bool) $input->getOption('once'),
@@ -64,6 +64,10 @@ final class BackupWorkerCommand extends Command
             },
         );
 
-        return self::SUCCESS;
+        if (!$report->isReady()) {
+            $output->writeln(json_encode($report->toArray(), JSON_THROW_ON_ERROR));
+        }
+
+        return $report->isReady() ? self::SUCCESS : self::FAILURE;
     }
 }

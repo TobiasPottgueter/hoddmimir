@@ -1,0 +1,14 @@
+{
+  "data": {
+    "pid": 52,
+    "status": "running",
+    "type": "vzdump",
+    "id": "301",
+    "user": "backup-observer@pve",
+    "upid": "UPID:pve8-a:00000034:0010C8E0:67800000:vzdump:301:backup-observer@pve:",
+    "starttime": 1736441856,
+    "pstart": 1100000,
+    "node": "pve8-a",
+    "future-observation": "ignored-status-field"
+  }
+}

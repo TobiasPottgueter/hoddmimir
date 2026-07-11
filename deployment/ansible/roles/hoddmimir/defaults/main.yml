@@ -3,10 +3,11 @@ hoddmimir_project_name: hoddmimir
 hoddmimir_install_directory: /opt/hoddmimir
 hoddmimir_secrets_directory: /etc/hoddmimir/secrets
 hoddmimir_compose_file: "{{ hoddmimir_install_directory }}/compose.yaml"
+hoddmimir_migration_compose_file: "{{ hoddmimir_install_directory }}/compose.migration.yaml"
 hoddmimir_environment_file: "{{ hoddmimir_install_directory }}/runtime.env"
 hoddmimir_mariadb_init_script: "{{ hoddmimir_install_directory }}/10-create-app-users.sh"
-hoddmimir_transaction_script: "{{ hoddmimir_install_directory }}/deploy_transaction.py"
-hoddmimir_staging_directory: "{{ hoddmimir_install_directory }}/.deployment-staging"
+hoddmimir_transaction_lock_file: "{{ hoddmimir_install_directory }}/.deployment-transaction.lock"
+hoddmimir_staging_prefix: .deployment-staging-
 hoddmimir_docker_executable: docker
 hoddmimir_python_executable: /usr/bin/python3
 
@@ -16,7 +17,7 @@ hoddmimir_webapp_image: ""
 hoddmimir_mariadb_image: ""
 
 hoddmimir_database_name: hoddmimir
-hoddmimir_collector_interval_seconds: 120
+hoddmimir_collector_grid_width_seconds: 120
 hoddmimir_backup_worker_poll_interval_seconds: 5
 hoddmimir_backup_execution_enabled: false
 hoddmimir_backup_execution_activation_ack: ""
@@ -30,3 +31,4 @@ hoddmimir_expected_services:
   - data-worker
   - mariadb
   - webapp
+hoddmimir_migration_service: schema-migration

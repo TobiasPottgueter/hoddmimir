@@ -9,7 +9,8 @@
       - hoddmimir_database_name is match('^[A-Za-z0-9_]+$')
       - hoddmimir_web_port | int > 0
       - hoddmimir_web_port | int <= 65535
-      - hoddmimir_collector_interval_seconds | int > 0
+      - hoddmimir_collector_grid_width_seconds | int > 0
+      - hoddmimir_collector_grid_width_seconds | int <= 31536000
       - hoddmimir_backup_worker_poll_interval_seconds | int > 0
       - hoddmimir_compose_wait_timeout_seconds | int > 0
       - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack
@@ -24,11 +25,10 @@
       - hoddmimir_mariadb_image is match('^.+@sha256:[0-9a-f]{64}$')
     fail_msg: Pin every production image with an @sha256 digest before deployment.
 
-- name: Require strong unique generated secrets
+- name: Require strong generated application and database secrets
   ansible.builtin.assert:
     that:
       - hoddmimir_app_secret is defined and hoddmimir_app_secret is match('^[0-9a-f]{64}$')
-      - hoddmimir_encryption_key is defined and hoddmimir_encryption_key is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_root_password is defined and hoddmimir_mariadb_root_password is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_migration_password is defined and hoddmimir_mariadb_migration_password is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_web_password is defined and hoddmimir_mariadb_web_password is match('^[0-9a-f]{64}$')
@@ -37,12 +37,79 @@
       - >-
         [
           hoddmimir_app_secret,
-          hoddmimir_encryption_key,
           hoddmimir_mariadb_root_password,
           hoddmimir_mariadb_migration_password,
           hoddmimir_mariadb_web_password,
           hoddmimir_mariadb_collector_password,
           hoddmimir_mariadb_backup_worker_password
-        ] | unique | length == 7
-    fail_msg: Create the ignored encrypted vault.yml with seven distinct 64-character hexadecimal secrets.
+        ] | unique | length == 6
+    fail_msg: Create the ignored encrypted vault.yml with distinct 64-character hexadecimal application and database secrets.
+  no_log: true
+
+- name: Validate encryption keyring envelope
+  ansible.builtin.assert:
+    that:
+      - >-
+        hoddmimir_encryption_keyring is defined
+        and hoddmimir_encryption_keyring is mapping
+        and (hoddmimir_encryption_keyring.keys() | list | sort) == ['format', 'keys', 'primaryKeyId', 'revision']
+        and hoddmimir_encryption_keyring['format'] is integer
+        and hoddmimir_encryption_keyring['format'] == 1
+        and hoddmimir_encryption_keyring['revision'] is integer
+        and hoddmimir_encryption_keyring['revision'] >= 1
+        and hoddmimir_encryption_keyring['primaryKeyId'] is string
+        and hoddmimir_encryption_keyring['primaryKeyId'] is match('^[a-z0-9][a-z0-9_-]{0,31}$')
+        and hoddmimir_encryption_keyring['keys'] is sequence
+        and hoddmimir_encryption_keyring['keys'] is not string
+        and hoddmimir_encryption_keyring['keys'] is not mapping
+        and hoddmimir_encryption_keyring['keys'] | length >= 1
+        and hoddmimir_encryption_keyring['keys'] | length <= 16
+    fail_msg: The encryption keyring structure, format, revision, primary key ID, or key count is invalid.
+  no_log: true
+
+- name: Validate encryption keyring entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - (item.keys() | list | sort) == ['id', 'material']
+      - item['id'] is string
+      - item['id'] is match('^[a-z0-9][a-z0-9_-]{0,31}$')
+      - item['material'] is string
+      - item['material'] is match('^[0-9a-f]{64}$')
+    fail_msg: Every encryption keyring entry must contain one valid ID and one 64-character lowercase hexadecimal material value.
+  loop: "{{ hoddmimir_encryption_keyring['keys'] }}"
+  no_log: true
+
+- name: Require unique encryption IDs and materials with an existing primary key
+  ansible.builtin.assert:
+    that:
+      - >-
+        hoddmimir_encryption_keyring['keys']
+        | map(attribute='id')
+        | unique
+        | length
+        == hoddmimir_encryption_keyring['keys'] | length
+      - >-
+        hoddmimir_encryption_keyring['keys']
+        | map(attribute='material')
+        | unique
+        | length
+        == hoddmimir_encryption_keyring['keys'] | length
+      - >-
+        hoddmimir_encryption_keyring['primaryKeyId']
+        in (hoddmimir_encryption_keyring['keys'] | map(attribute='id') | list)
+      - >-
+        (
+          [
+            hoddmimir_app_secret,
+            hoddmimir_mariadb_root_password,
+            hoddmimir_mariadb_migration_password,
+            hoddmimir_mariadb_web_password,
+            hoddmimir_mariadb_collector_password,
+            hoddmimir_mariadb_backup_worker_password
+          ]
+          + (hoddmimir_encryption_keyring['keys'] | map(attribute='material') | list)
+        ) | unique | length
+        == 6 + (hoddmimir_encryption_keyring['keys'] | length)
+    fail_msg: Encryption key IDs and materials must be unique, distinct from other secrets, and include the primary key ID.
   no_log: true

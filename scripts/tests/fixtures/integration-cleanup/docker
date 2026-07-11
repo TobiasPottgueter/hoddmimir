@@ -1,0 +1,30 @@
+#!/bin/sh
+
+set -eu
+
+printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
+
+case " $* " in
+    *' up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
+        status=${FAKE_DOCKER_UP_STATUS:-0}
+
+        if [ "$status" -ne 0 ]; then
+            printf 'simulated docker compose up failure\n' >&2
+        fi
+
+        exit "$status"
+        ;;
+    *' down --volumes --remove-orphans '*)
+        status=${FAKE_DOCKER_DOWN_STATUS:-0}
+
+        if [ "$status" -ne 0 ]; then
+            printf 'simulated docker compose down failure\n' >&2
+        fi
+
+        exit "$status"
+        ;;
+    *)
+        printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+        exit 64
+        ;;
+esac

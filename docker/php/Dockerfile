@@ -20,7 +20,7 @@ COPY --from=composer-bin /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-FROM php-base AS backend-test
+FROM php-base AS backend-test-runtime
 
 ENV APP_ENV=test \
     APP_DEBUG=1
@@ -29,7 +29,21 @@ COPY backend/composer.json backend/composer.lock ./
 RUN composer install --no-interaction --no-progress --prefer-dist
 
 COPY backend/ ./
+RUN mkdir -p var \
+    && chmod 0777 var
+
+FROM backend-test-runtime AS backend-test
+
 RUN composer verify
+
+FROM backend-test-runtime AS backend-coverage-runtime
+
+ARG XDEBUG_VERSION=3.5.3
+
+RUN apk add --no-cache --virtual .coverage-build-deps $PHPIZE_DEPS linux-headers \
+    && pecl install "xdebug-${XDEBUG_VERSION}" \
+    && docker-php-ext-enable xdebug \
+    && apk del .coverage-build-deps
 
 FROM php-base AS worker
 

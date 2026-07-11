@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "storage": "local-backup",
+      "type": "dir",
+      "content": "backup,iso",
+      "nodes": "pve9-a.test",
+      "digest": "fixture-pve-9-storage-cfg"
+    },
+    {
+      "storage": "pbs-backup",
+      "type": "pbs",
+      "content": "backup",
+      "shared": 1,
+      "server": "pbs9.test",
+      "port": 8007,
+      "datastore": "vault9",
+      "digest": "fixture-pve-9-storage-cfg"
+    },
+    {
+      "storage": "installation-media",
+      "type": "future-plugin",
+      "content": "future-content",
+      "digest": "fixture-pve-9-storage-cfg"
+    },
+    {
+      "storage": "disabled-backup",
+      "type": "dir",
+      "content": "backup",
+      "disable": 1,
+      "digest": "fixture-pve-9-storage-cfg"
+    },
+    {
+      "storage": "restricted-backup",
+      "type": "nfs",
+      "content": "backup",
+      "nodes": "pve9-a.test",
+      "shared": true,
+      "digest": "fixture-pve-9-storage-cfg",
+      "future-field": {"ignored": true}
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "data": [
+    {
+      "cgroup-mode": 2,
+      "cpu": 0.05,
+      "disk": 17179869184,
+      "id": "node/pve8-standalone.test",
+      "maxcpu": 12,
+      "maxdisk": 549755813888,
+      "maxmem": 68719476736,
+      "mem": 17179869184,
+      "name": "pve8-standalone.test",
+      "node": "pve8-standalone.test",
+      "status": "online",
+      "type": "node",
+      "uptime": 800088
+    },
+    {
+      "id": "qemu/811",
+      "name": "template-811.test",
+      "node": "pve8-standalone.test",
+      "status": "stopped",
+      "template": true,
+      "type": "qemu",
+      "vmid": 811
+    },
+    {
+      "id": "lxc/812",
+      "name": "ct-812.test",
+      "node": "pve8-standalone.test",
+      "status": "running",
+      "template": false,
+      "type": "lxc",
+      "vmid": 812
+    },
+    {
+      "content": "backup",
+      "disk": 274877906944,
+      "id": "storage/pve8-standalone.test/backup-pve8-standalone-test",
+      "maxdisk": 1099511627776,
+      "node": "pve8-standalone.test",
+      "plugintype": "pbs",
+      "status": "available",
+      "storage": "backup-pve8-standalone-test",
+      "type": "storage"
+    }
+  ]
+}

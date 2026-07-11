@@ -50,14 +50,16 @@ Local PHP and Node.js installations are optional because validation runs in pinn
 1. Optionally copy `.env.example` to `.env` to change non-secret development settings.
 2. Generate local secret files with `./scripts/init-dev-secrets.sh`.
 3. Build the images with `docker compose build`.
-4. Start the stack with `docker compose up --detach --wait`.
+4. Run `make up`; it starts MariaDB, applies pending migrations through the one-shot container, and then starts the four-service stack.
 5. Open the web application at `http://localhost:8080`.
 
 If port `8080` is already in use, set `WEB_PORT=18080` in the local `.env` before starting the stack.
 
 Use `make help` to list the test, build, start, stop, log, and cleanup commands.
 
-The standard Compose model contains exactly four services: `data-worker`, `backup-worker`, `webapp`, and `mariadb`. The data worker runs the collector command continuously with a default inventory cadence of 120 seconds. Scans are not triggered through the WebApp or its API. The Vue application is compiled into the webapp image rather than running as a separate service.
+`make migrate` is available when only the idempotent schema operation is needed. A local migration failure exits nonzero and does not stop containers or delete volumes. MariaDB may remain running, and forward-only DDL may already be fully or partially applied; inspect the migration error before retrying.
+
+The standard Compose model contains exactly four services: `data-worker`, `backup-worker`, `webapp`, and `mariadb`. Schema changes run through the separate `compose.migration.yaml` one-shot overlay and never add a fifth long-running service. Web and worker readiness remain unavailable until every migration expected by the application image is present. The data worker runs the collector command continuously with a default inventory cadence of 120 seconds. Scans are not triggered through the WebApp or its API. The Vue application is compiled into the webapp image rather than running as a separate service.
 
 ## Security
 

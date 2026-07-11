@@ -17,3 +17,22 @@
         src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/compose.yaml.j2"
         dest: "{{ hoddmimir_test_compose_output }}"
         mode: "0600"
+
+    - name: Render production migration Compose model
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/compose.migration.yaml.j2"
+        dest: "{{ hoddmimir_test_migration_compose_output }}"
+        mode: "0600"
+
+    - name: Render production runtime environment
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/runtime.env.j2"
+        dest: "{{ hoddmimir_test_runtime_output }}"
+        mode: "0640"
+
+    - name: Render canonical encryption keyring
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/encryption-keyring.json.j2"
+        dest: "{{ hoddmimir_test_encryption_key_output }}"
+        mode: "0600"
+      no_log: true

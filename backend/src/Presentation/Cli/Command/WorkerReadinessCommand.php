@@ -45,11 +45,9 @@ final class WorkerReadinessCommand extends Command
             return self::INVALID;
         }
 
-        $output->writeln(json_encode(
-            $this->readinessProbe->probe($worker)->toArray(),
-            JSON_THROW_ON_ERROR,
-        ));
+        $report = $this->readinessProbe->probe($worker);
+        $output->writeln(json_encode($report->toArray(), JSON_THROW_ON_ERROR));
 
-        return self::SUCCESS;
+        return $report->isReady() ? self::SUCCESS : self::FAILURE;
     }
 }

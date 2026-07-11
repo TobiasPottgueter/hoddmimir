@@ -1,8 +1,14 @@
 ---
-# Copy this file to vault.yml, replace every placeholder with the output of
-# `openssl rand -hex 32`, then encrypt it with `ansible-vault encrypt vault.yml`.
+# Copy this file to vault.yml, replace every secret placeholder with the output
+# of `openssl rand -hex 32`, then encrypt it with `ansible-vault encrypt vault.yml`.
 hoddmimir_app_secret: REPLACE_WITH_64_HEX_CHARACTERS
-hoddmimir_encryption_key: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_encryption_keyring:
+  format: 1
+  revision: 1
+  primaryKeyId: k2026_07
+  keys:
+    - id: k2026_07
+      material: REPLACE_WITH_64_HEX_CHARACTERS
 hoddmimir_mariadb_root_password: REPLACE_WITH_64_HEX_CHARACTERS
 hoddmimir_mariadb_migration_password: REPLACE_WITH_64_HEX_CHARACTERS
 hoddmimir_mariadb_web_password: REPLACE_WITH_64_HEX_CHARACTERS

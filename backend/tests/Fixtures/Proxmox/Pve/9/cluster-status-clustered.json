@@ -1,0 +1,32 @@
+{
+  "data": [
+    {
+      "id": "cluster",
+      "name": "forest-test",
+      "nodes": 2,
+      "quorate": true,
+      "type": "cluster",
+      "version": 9
+    },
+    {
+      "id": "node/pve9-a.test",
+      "ip": "203.0.113.91",
+      "level": "c",
+      "local": true,
+      "name": "pve9-a.test",
+      "nodeid": 1,
+      "online": true,
+      "type": "node"
+    },
+    {
+      "id": "node/pve9-b.test",
+      "ip": "203.0.113.92",
+      "level": "c",
+      "local": false,
+      "name": "pve9-b.test",
+      "nodeid": 2,
+      "online": true,
+      "type": "node"
+    }
+  ]
+}

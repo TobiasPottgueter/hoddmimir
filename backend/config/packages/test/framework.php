@@ -7,5 +7,6 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 return static function (ContainerConfigurator $container): void {
     $container->extension('framework', [
         'test' => true,
+        'secret' => 'hoddmimir-test-secret-not-for-production',
     ]);
 };

@@ -341,6 +341,7 @@ Das folgende Modell ist ein Greenfield-Entwurf. Gegenüber dem Altschema werden 
 - `pbs_namespaces`
 - `backup_targets`
 - `inventory_sync_runs`
+- `collector_cycles`
 - `worker_heartbeats`
 
 ### 6.2 Policies, Queue und Läufe

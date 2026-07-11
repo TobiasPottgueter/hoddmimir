@@ -4,6 +4,7 @@ name: {{ hoddmimir_project_name | to_json }}
 x-app-environment: &app-environment
   APP_SECRET_FILE: /run/secrets/app_secret
   ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  ENCRYPTION_KEYRING_REVISION: {{ (hoddmimir_encryption_keyring['revision'] | string) | to_json }}
   DATABASE_HOST: mariadb
   DATABASE_PORT: "3306"
   DATABASE_NAME: {{ hoddmimir_database_name | to_json }}
@@ -45,7 +46,7 @@ services:
 
   data-worker:
     image: {{ hoddmimir_data_worker_image | to_json }}
-    command: [hoddmimir:worker:data, "--interval={{ hoddmimir_collector_interval_seconds }}"]
+    command: [hoddmimir:worker:data]
     env_file: [./runtime.env]
     environment:
       <<: *app-environment
@@ -55,12 +56,13 @@ services:
     depends_on:
       mariadb: { condition: service_healthy }
     healthcheck:
-      test: [CMD, php, bin/console, hoddmimir:worker:readiness, collector]
+      test: [CMD, php, bin/console, hoddmimir:worker:health, collector]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
     networks: [internal]
+    stop_grace_period: 75s
     <<: *app-security
 
   backup-worker:

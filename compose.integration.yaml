@@ -1,0 +1,111 @@
+---
+name: hoddmimir-integration
+
+services:
+  mariadb-integration:
+    build:
+      context: .
+      dockerfile: docker/mariadb/Dockerfile
+    environment:
+      MARIADB_DATABASE: hoddmimir_test
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      TZ: Europe/Berlin
+    secrets:
+      - mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+    tmpfs:
+      - /var/lib/mysql:rw,nosuid,nodev,noexec,size=512m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: "no"
+    networks:
+      - integration
+
+  backend-tests:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: backend-test-runtime
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if php bin/console hoddmimir:worker:readiness collector > /tmp/readiness-before-migration.json; then
+          echo "Readiness unexpectedly passed before the schema migration" >&2
+          exit 1
+        fi
+        grep -F '"reason":"migration_metadata_missing"' /tmp/readiness-before-migration.json
+
+        set +e
+        php bin/console doctrine:migrations:up-to-date --no-interaction --no-ansi
+        migration_status=$$?
+        set -e
+        if [ "$$migration_status" -ne 1 ]; then
+          echo "Expected Doctrine migration status 1 for a pending fresh schema, got $$migration_status" >&2
+          exit 1
+        fi
+
+        php bin/console doctrine:migrations:migrate --no-interaction
+        if ! php bin/console doctrine:migrations:up-to-date --no-interaction --no-ansi; then
+          echo "Expected Doctrine migration status 0 after applying migrations" >&2
+          exit 1
+        fi
+        php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
+        php bin/console hoddmimir:worker:readiness collector
+        DATABASE_USER=hoddmimir_collector \
+        DATABASE_PASSWORD_FILE=/run/secrets/mariadb_collector_password \
+        php bin/console hoddmimir:worker:data --once
+        DATABASE_USER=hoddmimir_collector \
+        DATABASE_PASSWORD_FILE=/run/secrets/mariadb_collector_password \
+        php bin/console hoddmimir:worker:health collector
+        vendor/bin/phpunit --configuration phpunit.integration.xml.dist
+    environment:
+      APP_ENV: test
+      APP_DEBUG: "0"
+      APP_TIMEZONE: UTC
+      APP_SECRET_FILE: /run/secrets/app_secret
+      ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+      ENCRYPTION_KEYRING_REVISION: "1"
+      DATABASE_HOST: mariadb-integration
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: hoddmimir_test
+      DATABASE_USER: hoddmimir_migration
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_migration_password
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_migration_password
+      - mariadb_collector_password
+    depends_on:
+      mariadb-integration:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - integration
+
+networks:
+  integration:
+    internal: true
+
+secrets:
+  app_secret:
+    file: ./.secrets/app_secret
+  encryption_key:
+    file: ./.secrets/encryption_key
+  mariadb_root_password:
+    file: ./.secrets/mariadb_root_password
+  mariadb_migration_password:
+    file: ./.secrets/mariadb_migration_password
+  mariadb_web_password:
+    file: ./.secrets/mariadb_web_password
+  mariadb_collector_password:
+    file: ./.secrets/mariadb_collector_password
+  mariadb_backup_worker_password:
+    file: ./.secrets/mariadb_backup_worker_password

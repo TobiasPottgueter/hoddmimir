@@ -12,7 +12,7 @@ cp inventories/production/group_vars/hoddmimir_hosts/vault.yml.example inventori
 
 The ignored `.secrets/deployment.env` supplies `DEPLOYMENT_HOST` and `DEPLOYMENT_USER`. `DEPLOYMENT_FQDN` is optional; for DNS-based hosts the generator uses `DEPLOYMENT_HOST`, while IP-based hosts receive the safe local default `hoddmimir.localdomain` unless an explicit FQDN is provided.
 
-Replace every vault placeholder with `openssl rand -hex 32`, then encrypt the file:
+Replace every secret placeholder with a separate `openssl rand -hex 32` value. The encryption keyring starts with `format: 1`, `revision: 1`, one ID matching `[a-z0-9][a-z0-9_-]{0,31}`, and the same ID in `primaryKeyId`. Then encrypt the file:
 
 ```sh
 ansible-vault encrypt inventories/production/group_vars/hoddmimir_hosts/vault.yml
@@ -43,11 +43,34 @@ make verify
 
 Bootstrap connects initially as `root`, installs Python if absent, and configures Alpine, Docker, and OpenRC. Deploy creates `/opt/hoddmimir` and root-only secrets under `/etc/hoddmimir/secrets`.
 
+`hoddmimir_collector_grid_width_seconds` is the collector's only cadence
+setting, defaults to 120, and is validated against the Application range of one
+second through one year. The runtime fails closed if it differs from the
+already persisted schedule; changing an existing grid requires a future
+explicit maintenance operation, not a normal deployment. The data-worker gets
+75 seconds to stop at a safe checkpoint. Its container healthcheck reads the
+exact process ID from `/app/var` and accepts only that worker's fresh MariaDB
+heartbeat together with base readiness; another replica cannot mask it.
+
+The encrypted Vault stores `hoddmimir_encryption_keyring` as a structured object. Deployment validates its exact shape, a positive revision, one to sixteen unique IDs and unique 32-byte hexadecimal key materials, and the presence of the primary ID. It writes canonical compact JSON to the existing `encryption_key` Docker Secret with mode `0600`; secret-bearing validation, rendering, and copy tasks use `no_log`. Only the non-secret revision is exported as `ENCRYPTION_KEYRING_REVISION` in `runtime.env` and the production Compose model.
+
+Key rotation is additive: append a newly generated key under a new ID, select it with `primaryKeyId`, increment `revision`, and deploy all application components together. Keep old key entries until every active envelope and every retained database backup no longer requires them. The normal deployment transaction rejects revision regression, changed material under an existing ID, moving material to a different ID, and every historical-key removal before its first Docker call or installed-file mutation.
+
+Historical-key removal is currently unsupported. There is no deployment acknowledgement or Ansible variable that bypasses the guard. A future separate maintenance command must first rewrap every active credential, verify directly in MariaDB that no row references the retired IDs, and require proof of a successful database backup-and-restore test. Until that DB-verified maintenance workflow exists, retain historical IDs and never reuse them.
+
 The database is a clean V2 database backed by a named volume; this scaffold performs no legacy migration. `BACKUP_EXECUTION_ENABLED` defaults to `false`. Enabling it later requires both `hoddmimir_backup_execution_enabled: true` and the explicit acknowledgement `hoddmimir_backup_execution_activation_ack: ENABLE_PRODUCTION_BACKUPS`.
 
-Deployment stages every candidate file before touching the installed state. It validates the rendered Compose model and pulls immutable images before mutation, then snapshots Compose, `runtime.env`, the MariaDB initialization script, and all seven secret files. A changed deployment is accepted only after the exact service set and API health pass. On failure, all overwritten files are restored and a previously running stack is restarted and verified again. An unchanged stack is only verified and is never stopped by recovery logic.
+Every play creates its own root-only `0700` staging directory below `/opt/hoddmimir`, stages the transaction executor there, executes that isolated copy, and removes only the directory registered for that play. Concurrent plays therefore cannot overwrite an executor or delete another play's candidate files. The executor takes a non-blocking exclusive advisory lock on the persistent `0600` file `/opt/hoddmimir/.deployment-transaction.lock` before validation and holds it through every Docker call, installed-file mutation, verification, and recovery action. A second transaction fails safely before Docker or managed-state mutation. The empty lock file intentionally persists; it is not a stale-lock marker because the kernel releases `flock` automatically when the owning process exits, including on failure.
 
-Failed first-time deployments are stopped without deleting the MariaDB volume. The five MariaDB credential files remain root-only on disk after such a failure because the persistent database may already have initialized those users; a retry must reuse the same values. Application and encryption secrets without a previous installed state are removed.
+Deployment stages every candidate file before touching the installed state. While holding the transaction lock, it validates the rendered four-service Compose model and the separate migration overlay, pulls immutable images, and snapshots both Compose files, `runtime.env`, the MariaDB initialization script, and all seven secret files. It starts MariaDB alone, runs the one-shot migration container with only the migration identity, and starts the application services only after migration success. A changed deployment is accepted only after the exact service set and API health pass. On failure, overwritten application files are restored; only a previously running stack is restarted and verified. Even when application files are unchanged, deployment starts or verifies MariaDB, applies pending migrations idempotently, and then verifies the existing stack; it never stops application services on an unchanged-path failure.
+
+Keyring recovery changes at the candidate application-start boundary. Failures before candidate services may have started restore every installed keyring byte exactly. After that boundary, recovery of an existing structured installation uses the old revision and old primary and retains a deterministic additive union of old and candidate keys. The restored image therefore keeps writing with its old primary while remaining able to decrypt any candidate envelope. A failed first deployment likewise retains the structured candidate keyring with mode `0600`, whether the original state had no key or an offline raw-key seed. Recovery verifies the old stack with this safe keyring, reports that the additional decryption keys were retained, and the normal removal guard prevents their later deletion.
+
+A 64-character lowercase raw key can be established as a one-key structured keyring only as a first-deployment/offline seed with no installed Compose file, identical material, and exactly one staged primary key. If an installed Compose file exists, normal deployment blocks the raw key before Docker and requires separate offline maintenance; it never assumes the running image is read-only.
+
+MariaDB DDL is forward-only and is never rolled back by the deployment transaction. A failed migration or later application failure may therefore leave a fully or partially applied schema while application artifacts are restored. Every migration must use an expand/contract sequence: expand changes remain compatible with both the previous and candidate images, and destructive contract changes occur only in a later release after rollback to the older image is no longer possible. Readiness requires all migrations expected by an image but deliberately tolerates additional newer migrations during recovery.
+
+Failed first-time deployments are stopped without deleting the MariaDB volume. The five MariaDB credential files remain root-only on disk after such a failure because the persistent database may already have initialized those users; a retry must reuse the same values. Before candidate services may start, application and encryption secrets without a previous installed state are removed. After that boundary, the application secret is removed but the structured encryption keyring is retained so a retry can decrypt any candidate envelope already persisted.
 
 ### MariaDB credential-rotation gate
 

@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "upid": "UPID:pve7-a:0000002A:000F4240:66800000:vzdump:101:backup-observer@pve:",
+      "node": "pve7-a",
+      "pid": 42,
+      "pstart": 1000000,
+      "starttime": 1719664640,
+      "type": "vzdump",
+      "id": "101",
+      "user": "backup-observer@pve",
+      "status": "RUNNING",
+      "future-observation": "ignored-active-field"
+    },
+    {
+      "upid": "UPID:pve7-a:0000002B:000F4241:667FFFF0:vzdump::backup-observer@pve:",
+      "node": "pve7-a",
+      "pid": 43,
+      "pstart": 1000001,
+      "starttime": 1719664624,
+      "type": "vzdump",
+      "id": "",
+      "user": "backup-observer@pve",
+      "endtime": 1719664634,
+      "status": "OK"
+    }
+  ]
+}
