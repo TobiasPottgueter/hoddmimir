@@ -93,6 +93,7 @@ services:
       - encryption_key
       - mariadb_migration_password
       - mariadb_collector_password
+      - mariadb_web_password
     depends_on:
       mariadb-integration:
         condition: service_healthy

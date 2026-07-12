@@ -34,6 +34,17 @@ final class CollectorLeaseStateTest extends TestCase
         self::assertSame('2026-07-10T12:00:30.000000+00:00', $state->activeLease->expiresAt->format('Y-m-d\TH:i:s.uP'));
     }
 
+    public function testMinimumClaimAndRenewTtlsAreAcceptedExactly(): void
+    {
+        $owner = $this->owner('a');
+        $token = $this->token('b');
+        $state = (new CollectorLeaseState())->claim($owner, $token, new DateTimeImmutable(self::NOW), 1);
+        self::assertSame('2026-07-10T12:00:01.000000+00:00', $state->activeLease?->expiresAt->format('Y-m-d\TH:i:s.uP'));
+
+        $state = $state->renew($owner, $token, 1, new DateTimeImmutable('2026-07-10T12:00:00.500000+00:00'), 1);
+        self::assertSame('2026-07-10T12:00:01.500000+00:00', $state->activeLease?->expiresAt->format('Y-m-d\TH:i:s.uP'));
+    }
+
     public function testAnUnexpiredLeaseBlocksAnotherClaim(): void
     {
         $state = (new CollectorLeaseState())->claim($this->owner('a'), $this->token('a'), new DateTimeImmutable(self::NOW), 30);

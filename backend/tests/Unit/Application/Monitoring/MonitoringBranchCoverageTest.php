@@ -339,6 +339,225 @@ final class MonitoringBranchCoverageTest extends TestCase
         self::assertSame($longCode, $snapshot->errors['acl']);
     }
 
+    public function testScopeBoundaryValuesRemainAccepted(): void
+    {
+        $scope = new MonitoringScopeResult(
+            MonitoringScopeType::PveTasksArchive,
+            str_repeat('k', 255),
+            MonitoringSourceKind::Archive,
+            'vzdump',
+            MonitoringScopeStatus::Partial,
+            $this->at(2),
+            $this->at(2),
+            0,
+            0,
+            0,
+            false,
+            false,
+            str_repeat('e', 64),
+            $this->now(),
+        );
+
+        self::assertSame(255, strlen($scope->key));
+        self::assertSame('vzdump', $scope->filter);
+        self::assertSame(64, strlen((string) $scope->errorCode));
+        self::assertSame($scope->windowSince?->getTimestamp(), $scope->windowUntil?->getTimestamp());
+    }
+
+    public function testEachScopeContractRejectsOneWrongDimensionAtATime(): void
+    {
+        $cases = [
+            [MonitoringScopeType::PveBackupJobs, MonitoringSourceKind::Active, null, null, null],
+            [MonitoringScopeType::PveBackupJobs, MonitoringSourceKind::Jobs, 'vzdump', null, null],
+            [MonitoringScopeType::PveBackupJobs, MonitoringSourceKind::Jobs, null, $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PveTasksActive, MonitoringSourceKind::Jobs, 'vzdump', null, null],
+            [MonitoringScopeType::PveTasksActive, MonitoringSourceKind::Active, 'backup', null, null],
+            [MonitoringScopeType::PveTasksActive, MonitoringSourceKind::Active, 'vzdump', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PveTasksArchive, MonitoringSourceKind::Jobs, 'vzdump', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PveTasksArchive, MonitoringSourceKind::Archive, 'backup', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PveTasksArchive, MonitoringSourceKind::Archive, 'vzdump', null, null],
+            [MonitoringScopeType::PbsTasksRunning, MonitoringSourceKind::Jobs, 'backup', null, null],
+            [MonitoringScopeType::PbsTasksRunning, MonitoringSourceKind::Running, 'unknown', null, null],
+            [MonitoringScopeType::PbsTasksRunning, MonitoringSourceKind::Running, 'backup', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PbsTasksWindow, MonitoringSourceKind::Jobs, 'backup', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PbsTasksWindow, MonitoringSourceKind::History, 'unknown', $this->at(1), $this->at(2)],
+            [MonitoringScopeType::PbsTasksWindow, MonitoringSourceKind::History, 'backup', null, null],
+        ];
+
+        foreach ($cases as [$type, $source, $filter, $since, $until]) {
+            $this->assertInvalid(fn () => new MonitoringScopeResult(
+                $type,
+                'scope',
+                $source,
+                $filter,
+                MonitoringScopeStatus::Complete,
+                $since,
+                $until,
+                0,
+                0,
+                0,
+                false,
+                false,
+                null,
+                $this->now(),
+            ));
+        }
+    }
+
+    public function testCommitCanonicalizesScopesAndEveryPayloadType(): void
+    {
+        $filters = ['verif', 'backup', 'syncjob', 'prune'];
+        $scopes = array_map(
+            fn (string $filter): MonitoringScopeResult => new MonitoringScopeResult(
+                MonitoringScopeType::PbsTasksRunning,
+                'pbs-a',
+                MonitoringSourceKind::Running,
+                $filter,
+                MonitoringScopeStatus::Complete,
+                null,
+                null,
+                1,
+                2,
+                3,
+                false,
+                false,
+                null,
+                $this->now(),
+            ),
+            $filters,
+        );
+        $scopeCommit = $this->commit(ProxmoxProduct::Pbs, MonitoringRunKind::ObservedTasks, $scopes);
+        self::assertSame([0, 1, 2, 3], array_keys($scopeCommit->scopes));
+        self::assertSame(['backup', 'prune', 'syncjob', 'verif'], array_column($scopeCommit->scopes, 'filter'));
+        self::assertSame(4, $scopeCommit->pagesRead());
+        self::assertSame(8, $scopeCommit->rowsRead());
+
+        $pveJobs = $this->commit(
+            ProxmoxProduct::Pve,
+            MonitoringRunKind::ExternalJobs,
+            [$this->scope(MonitoringScopeType::PveBackupJobs)],
+            [$this->pveJob('job-z'), $this->pveJob('job-a')],
+        )->pveJobs;
+        self::assertSame([0, 1], array_keys($pveJobs));
+        self::assertSame(['job-a', 'job-z'], array_column($pveJobs, 'id'));
+
+        $pveTasks = $this->commit(
+            ProxmoxProduct::Pve,
+            MonitoringRunKind::ObservedTasks,
+            [$this->scope(MonitoringScopeType::PveTasksActive)],
+            pveTasks: [$this->pveTask('102'), $this->pveTask('101')],
+        )->pveTasks;
+        self::assertSame([0, 1], array_keys($pveTasks));
+        self::assertSame(
+            ['101', '102'],
+            array_map(static fn (PveBackupTask $task): string => (string) $task->upid->id, $pveTasks),
+        );
+
+        $pbsJobs = $this->commit(
+            ProxmoxProduct::Pbs,
+            MonitoringRunKind::ExternalJobs,
+            [$this->scope(MonitoringScopeType::PbsPruneJobs)],
+            pbsJobs: [$this->pbsJob('job-z'), $this->pbsJob('job-a')],
+        )->pbsJobs;
+        self::assertSame([0, 1], array_keys($pbsJobs));
+        self::assertSame(
+            ['job-a', 'job-z'],
+            array_map(static fn (PbsJobObservation $job): string => $job->id->value, $pbsJobs),
+        );
+
+        $pbsTasks = $this->commit(
+            ProxmoxProduct::Pbs,
+            MonitoringRunKind::ObservedTasks,
+            [$this->scope(MonitoringScopeType::PbsTasksRunning)],
+            pbsTasks: [$this->pbsTask('68D927C2'), $this->pbsTask('68D927C0')],
+        )->pbsTasks;
+        self::assertSame([0, 1], array_keys($pbsTasks));
+        self::assertSame(
+            ['68d927c0', '68d927c2'],
+            array_map(static fn (PbsTaskObservation $task): string => $task->upid->startTimeHex, $pbsTasks),
+        );
+    }
+
+    public function testWindowPlannerAcceptsExactBoundsAndPreservesBoundarySemantics(): void
+    {
+        $connection = new ConnectionId(self::bytes('connection'));
+        $zero = (new MonitoringWindowPlanner(new BranchMonitoringCursor(null), 3600))->plan(
+            $connection,
+            MonitoringCursorKind::PveTasksArchive,
+            ['pve-a'],
+            $this->at(0),
+            1,
+        );
+        self::assertSame([0, 0, false], [$zero->since, $zero->until, $zero->historyGap]);
+
+        $exactHorizon = (new MonitoringWindowPlanner(
+            new BranchMonitoringCursor($this->at(400)),
+        ))->plan(
+            $connection,
+            MonitoringCursorKind::PveTasksArchive,
+            ['pve-a'],
+            $this->at(1000),
+            600,
+        );
+        self::assertSame([400, 1000, false], [
+            $exactHorizon->since,
+            $exactHorizon->until,
+            $exactHorizon->historyGap,
+        ]);
+
+        $fullMaximum = (new MonitoringWindowPlanner(new BranchMonitoringCursor(null)))->plan(
+            $connection,
+            MonitoringCursorKind::PveTasksArchive,
+            ['pve-a'],
+            $this->at(86_400),
+            86_400,
+        );
+        self::assertSame([0, 86_400, false], [
+            $fullMaximum->since,
+            $fullMaximum->until,
+            $fullMaximum->historyGap,
+        ]);
+
+        try {
+            (new MonitoringWindowPlanner(new BranchMonitoringCursor(null), 0))->plan(
+                $connection,
+                MonitoringCursorKind::PveTasksArchive,
+                ['pve-a'],
+                new DateTimeImmutable('@-1'),
+                1,
+            );
+            self::fail('A negative cutoff was accepted.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertSame('The monitoring cutoff cannot precede the UNIX epoch.', $exception->getMessage());
+        }
+    }
+
+    public function testPbsSnapshotValidatesEveryErrorBeforePresenceAndSortsCanonicalKeys(): void
+    {
+        $valid = [
+            'verify' => 'verify_failed',
+            'tasks' => 'tasks_failed',
+            'sync' => 'sync_failed',
+            'prune' => 'prune_failed',
+            'acl' => 'acl_failed',
+        ];
+        $snapshot = new PbsExternalMonitoringSnapshot(null, null, null, null, null, $valid);
+        self::assertSame(['acl', 'prune', 'sync', 'tasks', 'verify'], array_keys($snapshot->errors));
+
+        foreach (array_keys($valid) as $key) {
+            $invalid = $valid;
+            $invalid[$key] = 'Invalid';
+            $this->assertInvalid(fn () => new PbsExternalMonitoringSnapshot(
+                null,
+                null,
+                null,
+                null,
+                null,
+                $invalid,
+            ));
+        }
+    }
+
     private function scope(
         MonitoringScopeType $type,
         MonitoringScopeStatus $status = MonitoringScopeStatus::Complete,
@@ -431,26 +650,26 @@ final class MonitoringBranchCoverageTest extends TestCase
         );
     }
 
-    private function pveJob(): PveBackupJob
+    private function pveJob(string $id = 'job-a'): PveBackupJob
     {
-        return new PveBackupJob('job-a', null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new PveBackupJob($id, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    private function pveTask(): PveBackupTask
+    private function pveTask(string $id = '101'): PveBackupTask
     {
         return new PveBackupTask(
-            PveUpid::parse('UPID:pve-a:0000002A:000F4240:67000000:vzdump:101:observer@pve:'),
+            PveUpid::parse('UPID:pve-a:0000002A:000F4240:67000000:vzdump:'.$id.':observer@pve:'),
             PveTaskSource::Active,
             null,
             'RUNNING',
         );
     }
 
-    private function pbsJob(): PbsJobObservation
+    private function pbsJob(string $id = 'prune-a'): PbsJobObservation
     {
         return new PbsJobObservation(
             PbsJobKind::Prune,
-            new PbsJobId('prune-a'),
+            new PbsJobId($id),
             new PbsDatastoreId('store-a'),
             null,
             null,
@@ -466,10 +685,10 @@ final class MonitoringBranchCoverageTest extends TestCase
         );
     }
 
-    private function pbsTask(): PbsTaskObservation
+    private function pbsTask(string $startTimeHex = '68D927C0'): PbsTaskObservation
     {
         return new PbsTaskObservation(
-            new PbsUpid('UPID:pbs-a:0000002A:000F4240:FFFFFFFFFFFFFFFF:68D927C0:backup:store-a:root@pam:'),
+            new PbsUpid('UPID:pbs-a:0000002A:000F4240:FFFFFFFFFFFFFFFF:'.$startTimeHex.':backup:store-a:root@pam:'),
             'pbs-a',
             true,
             false,

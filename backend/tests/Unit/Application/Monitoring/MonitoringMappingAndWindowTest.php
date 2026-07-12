@@ -15,8 +15,8 @@ use App\Application\Monitoring\MonitoringCursorKind;
 use App\Application\Monitoring\MonitoringRunKind;
 use App\Application\Monitoring\MonitoringRunStart;
 use App\Application\Monitoring\MonitoringRunStatus;
+use App\Application\Monitoring\MonitoringScopeResult;
 use App\Application\Monitoring\MonitoringScopeStatus;
-use App\Application\Monitoring\MonitoringSourceKind;
 use App\Application\Monitoring\MonitoringWindowPlanner;
 use App\Application\Monitoring\PbsExternalMonitoringSnapshot;
 use App\Application\Proxmox\Pbs\PbsAclEvidence;
@@ -64,6 +64,10 @@ final class MonitoringMappingAndWindowTest extends TestCase
         );
         self::assertSame(MonitoringRunStatus::Succeeded, $complete->status());
         self::assertCount(1, $complete->pveJobs);
+        self::assertSame([
+            'pve_backup_jobs', '@installation', 'jobs', null, 'complete', null, null,
+            1, 1, 1, false, false, null, 200,
+        ], $this->scopeProjection($complete->scopes[0]));
 
         $issue = new PveBackupInventoryIssue(
             PveBackupInventoryIssueCode::BackupJobReadFailed,
@@ -80,6 +84,10 @@ final class MonitoringMappingAndWindowTest extends TestCase
             new DateTimeImmutable('@200'),
         );
         self::assertSame(MonitoringRunStatus::Partial, $partial->status());
+        self::assertSame([
+            'pve_backup_jobs', '@installation', 'jobs', null, 'partial', null, null,
+            1, 1, 1, false, false, 'job_read_incomplete', 200,
+        ], $this->scopeProjection($partial->scopes[0]));
 
         $failed = $mapper->pveJobs(
             $this->monitoringRun(MonitoringRunKind::ExternalJobs, ProxmoxProduct::Pve),
@@ -91,6 +99,10 @@ final class MonitoringMappingAndWindowTest extends TestCase
             new DateTimeImmutable('@200'),
         );
         self::assertSame(MonitoringRunStatus::Failed, $failed->status());
+        self::assertSame([
+            'pve_backup_jobs', '@installation', 'jobs', null, 'failed', null, null,
+            1, 0, 0, false, false, 'job_read_incomplete', 200,
+        ], $this->scopeProjection($failed->scopes[0]));
     }
 
     public function testPveTaskMappingCoversEmptyTopologyAllStreamStatesAndHistoryGap(): void
@@ -108,6 +120,10 @@ final class MonitoringMappingAndWindowTest extends TestCase
         );
         self::assertSame(MonitoringRunStatus::Failed, $empty->status());
         self::assertCount(2, $empty->scopes);
+        self::assertSame([
+            ['pve_tasks_active', '@installation', 'active', 'vzdump', 'failed', null, null, 0, 0, 0, true, false, 'invalid_topology', 200],
+            ['pve_tasks_archive', '@installation', 'archive', 'vzdump', 'failed', 100, 200, 0, 0, 0, true, true, 'invalid_topology', 200],
+        ], array_map($this->scopeProjection(...), $empty->scopes));
 
         $upid = PveUpid::parse('UPID:pve-a:0000002A:000F4240:67000000:vzdump:101:observer@pve:');
         $tasks = [
@@ -132,13 +148,54 @@ final class MonitoringMappingAndWindowTest extends TestCase
         );
         self::assertSame(MonitoringRunStatus::Partial, $mixed->status());
         self::assertSame(1, $mixed->itemsSeen());
-        $archiveError = null;
-        foreach ($mixed->scopes as $scope) {
-            if ('pve-a' === $scope->key && MonitoringSourceKind::Archive === $scope->source) {
-                $archiveError = $scope->errorCode;
-            }
-        }
-        self::assertSame('history_gap', $archiveError);
+        self::assertSame([
+            ['pve_tasks_active', 'pve-a', 'active', 'vzdump', 'complete', null, null, 1, 1, 1, false, false, null, 200],
+            ['pve_tasks_active', 'pve-b', 'active', 'vzdump', 'partial', null, null, 1, 1, 0, true, false, 'partial', 200],
+            ['pve_tasks_archive', 'pve-a', 'archive', 'vzdump', 'partial', 100, 200, 1, 1, 1, false, true, 'history_gap', 200],
+            ['pve_tasks_archive', 'pve-b', 'archive', 'vzdump', 'failed', 100, 200, 0, 0, 0, false, true, 'history_gap', 200],
+            ['pve_tasks_archive', 'pve-c', 'archive', 'vzdump', 'failed', 100, 200, 0, 0, 0, true, true, 'history_gap', 200],
+        ], array_map($this->scopeProjection(...), $mixed->scopes));
+    }
+
+    public function testMissingPbsTaskSnapshotMapsEveryFamilyAndPassExactly(): void
+    {
+        $commit = (new MapSelectedEndpointMonitoring())->pbsTasks(
+            $this->monitoringRun(),
+            new PbsExternalMonitoringSnapshot(
+                null,
+                null,
+                null,
+                null,
+                null,
+                [
+                    'acl' => 'not_read',
+                    'prune' => 'not_read',
+                    'sync' => 'not_read',
+                    'verify' => 'not_read',
+                    'tasks' => 'permission_denied',
+                ],
+            ),
+            'pbs-a',
+            new \App\Application\Monitoring\MonitoringWindowPlan(100, 200, true),
+            new DateTimeImmutable('@250'),
+        );
+
+        self::assertSame(MonitoringRunStatus::Failed, $commit->status());
+        self::assertSame(0, $commit->pagesRead());
+        self::assertSame(0, $commit->rowsRead());
+        self::assertSame(0, $commit->itemsSeen());
+
+        $actual = array_map($this->scopeProjection(...), $commit->scopes);
+        self::assertSame([
+            ['pbs_tasks_running', 'pbs-a', 'running', 'backup', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'pbs-a', 'running', 'prune', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'pbs-a', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'pbs-a', 'running', 'verif', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'backup', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'prune', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'syncjob', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'verif', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+        ], $actual);
     }
 
     public function testPbsJobMappingSeparatesAclPartialReadFailureAndCompleteFamilies(): void
@@ -162,7 +219,11 @@ final class MonitoringMappingAndWindowTest extends TestCase
         );
         self::assertSame(MonitoringRunStatus::Partial, $commit->status());
         self::assertCount(1, $commit->pbsJobs);
-        self::assertSame('permission_denied', $commit->scopes[1]->errorCode);
+        self::assertSame([
+            ['pbs_prune_jobs', '@installation', 'jobs', 'prune', 'complete', null, null, 1, 1, 1, false, false, null, 200],
+            ['pbs_sync_jobs', '@installation', 'jobs', 'sync', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 200],
+            ['pbs_verify_jobs', '@installation', 'jobs', 'verify', 'complete', null, null, 1, 0, 0, false, false, null, 200],
+        ], array_map($this->scopeProjection(...), $commit->scopes));
 
         $incompleteAcl = new PbsExternalMonitoringSnapshot(
             $this->acl(false),
@@ -178,13 +239,11 @@ final class MonitoringMappingAndWindowTest extends TestCase
             new DateTimeImmutable('@200'),
         );
         self::assertSame(MonitoringRunStatus::Partial, $partial->status());
-        $errors = [];
-        foreach ($partial->scopes as $scope) {
-            $errors[$scope->filter ?? ''] = $scope->errorCode;
-        }
-        self::assertNull($errors['prune']);
-        self::assertSame('acl_incomplete', $errors['sync']);
-        self::assertNull($errors['verify']);
+        self::assertSame([
+            ['pbs_prune_jobs', '@installation', 'jobs', 'prune', 'complete', null, null, 1, 1, 1, false, false, null, 200],
+            ['pbs_sync_jobs', '@installation', 'jobs', 'sync', 'partial', null, null, 1, 0, 0, false, false, 'acl_incomplete', 200],
+            ['pbs_verify_jobs', '@installation', 'jobs', 'verify', 'complete', null, null, 1, 0, 0, false, false, null, 200],
+        ], array_map($this->scopeProjection(...), $partial->scopes));
     }
 
     public function testPbsTaskMappingCoversFailedPartialGapAndAclDerivedErrors(): void
@@ -251,14 +310,12 @@ final class MonitoringMappingAndWindowTest extends TestCase
             new DateTimeImmutable('@200'),
         );
         self::assertSame(MonitoringRunStatus::Partial, $commit->status());
-        $errors = [];
-        foreach ($commit->scopes as $scope) {
-            $errors[$scope->filter ?? ''] = $scope->errorCode;
-        }
-        self::assertSame('acl_incomplete', $errors['backup']);
-        self::assertSame('page_cap_exceeded', $errors['prune']);
-        self::assertSame('read_failed', $errors['syncjob']);
-        self::assertSame('history_gap', $errors['verif']);
+        self::assertSame([
+            ['pbs_tasks_running', 'pbs-a', 'running', 'backup', 'partial', null, null, 1, 1, 0, false, false, 'acl_incomplete', 200],
+            ['pbs_tasks_running', 'pbs-a', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'read_failed', 200],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'prune', 'partial', 100, 200, 1, 1, 0, true, true, 'page_cap_exceeded', 200],
+            ['pbs_tasks_window', 'pbs-a', 'history', 'verif', 'partial', 100, 200, 1, 0, 0, false, true, 'history_gap', 200],
+        ], array_map($this->scopeProjection(...), $commit->scopes));
     }
 
     public function testPbsHistoryScopesRemainPartialWithoutTaskAuditEvidence(): void
@@ -453,6 +510,27 @@ final class MonitoringMappingAndWindowTest extends TestCase
             new PbsEffectivePermission('/datastore', ['Datastore.Audit' => true]),
             new PbsEffectivePermission('/remote', $complete ? ['Remote.Audit' => true] : []),
         );
+    }
+
+    /** @return array{string, string, string, ?string, string, ?int, ?int, int, int, int, bool, bool, ?string, int} */
+    private function scopeProjection(MonitoringScopeResult $scope): array
+    {
+        return [
+            $scope->scope->value,
+            $scope->key,
+            $scope->source->value,
+            $scope->filter,
+            $scope->status->value,
+            null === $scope->windowSince ? null : $scope->windowSince->getTimestamp(),
+            null === $scope->windowUntil ? null : $scope->windowUntil->getTimestamp(),
+            $scope->pagesRead,
+            $scope->rowsRead,
+            $scope->itemsSeen,
+            $scope->truncated,
+            $scope->historyGap,
+            $scope->errorCode,
+            $scope->observedAt->getTimestamp(),
+        ];
     }
 
     private static function bytes(string $seed): string

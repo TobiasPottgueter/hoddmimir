@@ -145,6 +145,9 @@ final class InstallationBindingTest extends TestCase
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->matchesObservation(
             InstallationBinding::pveStandalone('same'),
         ));
+        self::assertFalse(InstallationBinding::pveStandalone('same')->matchesObservation(
+            InstallationBinding::pveCluster('same', ['same']),
+        ));
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->matchesObservation(
             InstallationBinding::pveCluster('other', ['aa']),
         ));

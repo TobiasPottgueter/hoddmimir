@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Infrastructure\Proxmox\Pbs;
 
 use App\Application\Inventory\Connection\ConnectionReadCheckpoint;
+use App\Application\Proxmox\Pbs\PbsDatastoreId;
+use App\Application\Proxmox\Pbs\PbsNamespace;
 use App\Application\Proxmox\Pbs\PbsTasksAndJobsLimits;
 use App\Application\Security\EncryptedSecret;
 use App\Application\Security\PlaintextSecret;
@@ -85,6 +87,43 @@ final class PbsNativeReadConnectorFactoryTest extends TestCase
         ))->createMonitoringClient($this->configuration(), $checkpoint, new PbsTasksAndJobsLimits());
 
         self::assertTrue($client->aclEvidence()->hasBroadReadEvidence());
+        self::assertGreaterThan(0, $checkpoint->calls);
+    }
+
+    public function testFactoryBuildsTheTypedContentClientWithTheSameSafeTransport(): void
+    {
+        $http = new MockHttpClient(static function (string $method, string $url): MockResponse {
+            self::assertSame('GET', $method);
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            if (str_ends_with($path, '/access/permissions')) {
+                parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+                $aclPath = $query['path'] ?? null;
+                self::assertIsString($aclPath);
+                return new MockResponse(json_encode(
+                    ['data' => [$aclPath => ['Datastore.Audit' => true]]],
+                    JSON_THROW_ON_ERROR,
+                ), ['http_code' => 200]);
+            }
+            if (str_ends_with($path, '/namespace')) {
+                return new MockResponse('{"data":[{"ns":""}]}', ['http_code' => 200]);
+            }
+            if (str_ends_with($path, '/snapshots')) {
+                return new MockResponse('{"data":[]}', ['http_code' => 200]);
+            }
+            return self::fail('Unexpected PBS content route.');
+        });
+        $checkpoint = new NativeFactoryRecordingCheckpoint();
+        $client = (new PbsNativeReadConnectorFactory(
+            new NativeFactoryHttpClientFactory($http),
+            new NativeFactorySecretCipher(),
+            new PbsRetryPolicy(1),
+            new NativeFactoryRetryDelay(),
+        ))->createContentClient($this->configuration(), $checkpoint);
+        $store = new PbsDatastoreId('store_a');
+
+        self::assertTrue($client->permission('/datastore/store_a')->grants('Datastore.Audit'));
+        self::assertSame([''], array_column($client->namespaces($store, 65_536), 'value'));
+        self::assertSame([], $client->snapshots($store, PbsNamespace::root(), 1_048_576));
         self::assertGreaterThan(0, $checkpoint->calls);
     }
 

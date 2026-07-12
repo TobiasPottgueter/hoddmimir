@@ -10,8 +10,11 @@ final readonly class PbsNamespace
 {
     public function __construct(public string $value)
     {
+        if ('' === $value) {
+            return;
+        }
         $segments = explode('/', $value);
-        if ('' === $value || strlen($value) > 256 || count($segments) > 8) {
+        if (strlen($value) > 256 || count($segments) > 8) {
             throw new InvalidArgumentException('The PBS namespace is invalid.');
         }
         foreach ($segments as $segment) {
@@ -25,5 +28,34 @@ final readonly class PbsNamespace
                 throw new InvalidArgumentException('The PBS namespace is invalid.');
             }
         }
+    }
+
+    public static function root(): self
+    {
+        return new self('');
+    }
+
+    public function isRoot(): bool
+    {
+        return '' === $this->value;
+    }
+
+    public function depth(): int
+    {
+        return $this->isRoot() ? 0 : substr_count($this->value, '/') + 1;
+    }
+
+    public function parent(): ?self
+    {
+        if ($this->isRoot()) {
+            return null;
+        }
+        $segments = explode('/', $this->value);
+        array_pop($segments);
+        $parent = '';
+        foreach ($segments as $segment) {
+            $parent = '' === $parent ? $segment : $parent.'/'.$segment;
+        }
+        return new self($parent);
     }
 }

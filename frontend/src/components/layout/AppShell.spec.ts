@@ -30,6 +30,15 @@ describe("AppShell", () => {
 
     expect(wrapper.get(".app-brand strong").text()).toBe("Hoddmímir");
     expect(wrapper.get(".app-topbar__eyebrow").text()).toBe("Hoddmímir");
+    expect(wrapper.get(".app-sidebar__footer").text()).toContain(
+      "Automatische Zyklen · Read-only",
+    );
+    expect(wrapper.get(".app-topbar__environment").text()).toBe(
+      "Betriebsansicht",
+    );
+    expect(wrapper.text()).not.toContain("Einrichtung ausstehend");
+    expect(wrapper.text()).not.toContain("Noch keine Systeme verbunden");
+    expect(wrapper.text()).not.toContain("Initialisierung");
     expect(wrapper.text()).not.toContain(
       ["Proxmox", "Backup", "Scheduler"].join(" "),
     );

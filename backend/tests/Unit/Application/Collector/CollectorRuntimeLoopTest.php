@@ -71,7 +71,7 @@ final class CollectorRuntimeLoopTest extends TestCase
 
         $result = $this->loop(
             $schedule,
-            new RuntimeStopRequested([false]),
+            new RuntimeStopRequested([false], maximumCalls: 1),
             $runner,
             waiter: $waiter,
         )->run($this->worker(), true);
@@ -185,12 +185,38 @@ final class CollectorRuntimeLoopTest extends TestCase
         );
     }
 
+    /** @return iterable<string, array{string, int}> */
+    public static function exactIdleWaitBoundaries(): iterable
+    {
+        yield 'same instant still waits one second' => ['+0 microseconds', 1];
+        yield 'one microsecond is ceiled to one second' => ['+1 microsecond', 1];
+        yield 'one exact second remains one second' => ['+1 second', 1];
+        yield 'one microsecond over maximum is capped' => ['+30 seconds +1 microsecond', 30];
+    }
+
+    #[DataProvider('exactIdleWaitBoundaries')]
+    public function testIdleWaitRoundingAndCapBoundariesAreExact(string $retryModifier, int $expectedSeconds): void
+    {
+        $schedule = new RuntimeScheduleStore([$this->waiting($retryModifier)]);
+        $waiter = new RuntimeWaiter();
+
+        $result = $this->loop(
+            $schedule,
+            new RuntimeStopRequested([false, false, true]),
+            new RuntimeCycleRunner([]),
+            waiter: $waiter,
+        )->run($this->worker(), false);
+
+        self::assertSame(CollectorWorkerRunCode::CollectorStopped, $result->code);
+        self::assertSame([$expectedSeconds], $waiter->seconds);
+    }
+
     public function testReadinessFailsClosedBeforeScheduleInitialization(): void
     {
         $schedule = new RuntimeScheduleStore([]);
         $result = $this->loop(
             $schedule,
-            new RuntimeStopRequested([]),
+            new RuntimeStopRequested([], maximumCalls: 1),
             new RuntimeCycleRunner([]),
             readiness: [ReadinessCheckResult::unavailable('database_schema', 'database_unavailable')],
         )->run($this->worker(), true);
@@ -236,7 +262,7 @@ final class CollectorRuntimeLoopTest extends TestCase
         $heartbeats = new RuntimeHeartbeatStore();
         $result = $this->loop(
             $schedule,
-            new RuntimeStopRequested([false, true]),
+            new RuntimeStopRequested([false, true], maximumCalls: 2),
             new RuntimeCycleRunner([]),
             readiness: [ReadinessCheckResult::unavailable('database_schema', 'database_unavailable')],
             waiter: $waiter,
@@ -272,7 +298,7 @@ final class CollectorRuntimeLoopTest extends TestCase
         $heartbeats = new RuntimeHeartbeatStore();
         $result = $this->loop(
             $schedule,
-            new RuntimeStopRequested([true]),
+            new RuntimeStopRequested([true], maximumCalls: 1),
             new RuntimeCycleRunner([]),
             heartbeats: $heartbeats,
         )->run($this->worker(), false);
@@ -541,6 +567,25 @@ final class CollectorRuntimeLoopTest extends TestCase
         );
     }
 
+    public function testRuntimeAcceptsBothGridWidthBoundaries(): void
+    {
+        $minimum = $this->loop(
+            new RuntimeScheduleStore([]),
+            new RuntimeStopRequested([]),
+            new RuntimeCycleRunner([]),
+            gridWidth: 1,
+        );
+        $maximum = $this->loop(
+            new RuntimeScheduleStore([]),
+            new RuntimeStopRequested([]),
+            new RuntimeCycleRunner([]),
+            gridWidth: GridSchedule::MAXIMUM_WIDTH_SECONDS,
+        );
+
+        self::assertInstanceOf(CollectorRuntimeLoop::class, $minimum);
+        self::assertInstanceOf(CollectorRuntimeLoop::class, $maximum);
+    }
+
     /**
      * @param list<ReadinessCheckResult> $readiness
      */
@@ -758,10 +803,19 @@ final class RuntimeStopRequested implements StopRequested
     /** @var list<bool> */
     private array $values;
     private bool $last = false;
+    private int $calls = 0;
     /** @param list<bool> $values */
-    public function __construct(array $values) { $this->values = $values; }
+    public function __construct(array $values, private readonly int $maximumCalls = 64)
+    {
+        $this->values = $values;
+    }
+
     public function isStopRequested(): bool
     {
+        ++$this->calls;
+        if ($this->calls > $this->maximumCalls) {
+            throw new RuntimeException('Stop-request call budget exceeded.');
+        }
         if ([] !== $this->values) {
             $this->last = (bool) array_shift($this->values);
         }

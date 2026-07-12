@@ -20,6 +20,7 @@
         "symfony/runtime": "^7.4"
     },
     "require-dev": {
+        "infection/infection": "0.34.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^12.5",
         "symfony/browser-kit": "^7.4",
@@ -59,13 +60,16 @@
         "test": "phpunit",
         "verify": [
             "@validate-project",
+            "@openapi",
             "@analyse",
             "@test"
         ],
+        "openapi": "php tools/check-openapi.php ../docs/openapi-v1.json",
         "validate-project": "composer validate --strict"
     },
     "config": {
         "allow-plugins": {
+            "infection/extension-installer": true,
             "symfony/runtime": true
         },
         "optimize-autoloader": true,

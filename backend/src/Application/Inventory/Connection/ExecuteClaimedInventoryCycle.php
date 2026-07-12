@@ -11,11 +11,17 @@ use App\Application\Collector\RunCollectorCycle;
 use App\Application\Collector\StopRequested;
 use App\Application\Inventory\InventoryIdentifier;
 use App\Application\Inventory\InventoryIdentifierGenerator;
+use App\Application\Inventory\Capability\BuildVerifiedCapabilityProfile;
+use App\Application\Inventory\Capability\CapabilitySnapshotConflict;
+use App\Application\Inventory\Capability\CapabilitySnapshotObservation;
+use App\Application\Inventory\Capability\CapabilitySnapshotStore;
 use App\Application\Inventory\Pbs\PbsInventoryConflict;
 use App\Application\Inventory\Pbs\PbsInventoryMapper;
 use App\Application\Inventory\Pbs\PbsInventoryMappingFailure;
 use App\Application\Inventory\Pbs\PbsInventoryStore;
 use App\Application\Inventory\Pbs\PersistPbsEndpointReadAttempts;
+use App\Application\Inventory\PbsContent\PbsContentRunStatus;
+use App\Application\Inventory\PbsContent\SelectedEndpointPbsContent;
 use App\Application\Inventory\Pve\PersistPveEndpointReadAttempts;
 use App\Application\Inventory\Pve\PveCoreInventoryConflict;
 use App\Application\Inventory\Pve\PveCoreInventoryConflictCode;
@@ -39,6 +45,9 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
         private PbsInventoryMapper $pbsMapper,
         private PbsInventoryStore $pbsInventoryStore,
         private InventoryIdentifierGenerator $identifierGenerator,
+        private BuildVerifiedCapabilityProfile $capabilityProfileBuilder,
+        private CapabilitySnapshotStore $capabilitySnapshotStore,
+        private SelectedEndpointPbsContent $pbsContent,
         private SelectedEndpointMonitoring $monitoring,
         private Clock $clock,
         private StopRequested $stopRequested,
@@ -126,6 +135,7 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
                     $connectionId,
                 ),
             );
+            $this->persistCapabilities($checkpoint, $runId, $connectionId, $target, $read);
             $commit = $this->pbsMapper->map($runId, $read, $this->clock->now());
             $checkpoint->checkpoint();
             $result = $this->pbsInventoryStore->apply($checkpoint->lease(), $commit);
@@ -133,8 +143,11 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
             if ($result->diagnosticOnly || 'failed' === $result->status) {
                 return $result->status;
             }
+            $content = $this->pbsContent->execute($checkpoint->lease(), $runId, $read, $checkpoint);
             $monitoring = $this->monitoring->execute($checkpoint->lease(), $runId, $read, $checkpoint);
-            return 'succeeded' === $result->status && $monitoring->isComplete()
+            return 'succeeded' === $result->status
+                && PbsContentRunStatus::Succeeded === $content
+                && $monitoring->isComplete()
                 ? 'succeeded' : 'partial';
         } catch (ConnectionReadFailure $failure) {
             $this->finishFailedPbsRun($checkpoint, $runId, $connectionId, $target, $failure->failureCode);
@@ -146,6 +159,17 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
                 $connectionId,
                 $target,
                 ConnectionReadFailureCode::SnapshotInvalid,
+            );
+            return 'failed';
+        } catch (CapabilitySnapshotConflict $conflict) {
+            $this->finishFailedPbsRun(
+                $checkpoint,
+                $runId,
+                $connectionId,
+                $target,
+                $conflict->connectionChanged
+                    ? ConnectionReadFailureCode::ConnectionChanged
+                    : ConnectionReadFailureCode::SnapshotInvalid,
             );
             return 'failed';
         } catch (PbsInventoryConflict $conflict) {
@@ -224,6 +248,7 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
                     $connectionId,
                 ),
             );
+            $this->persistCapabilities($checkpoint, $runId, $connectionId, $target, $read);
             $commit = $this->mapper->map($runId, $read, $this->clock->now());
             $checkpoint->checkpoint();
             $result = $this->inventoryStore->apply($checkpoint->lease(), $commit);
@@ -248,6 +273,17 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
             );
 
             return 'failed';
+        } catch (CapabilitySnapshotConflict $conflict) {
+            $this->finishFailedRun(
+                $checkpoint,
+                $runId,
+                $connectionId,
+                $target,
+                $conflict->connectionChanged
+                    ? ConnectionReadFailureCode::ConnectionChanged
+                    : ConnectionReadFailureCode::SnapshotInvalid,
+            );
+            return 'failed';
         } catch (PveCoreInventoryConflict $conflict) {
             if (PveCoreInventoryConflictCode::ConnectionChanged !== $conflict->failureCode) {
                 throw $conflict;
@@ -262,6 +298,36 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
 
             return 'failed';
         }
+    }
+
+    private function persistCapabilities(
+        ClaimedCycleCheckpoint $checkpoint,
+        InventoryIdentifier $runId,
+        InventoryIdentifier $connectionId,
+        ConnectionScanTarget $target,
+        ConnectionInstallationRead $read,
+    ): void {
+        $checkpoint->checkpoint();
+        try {
+            $profile = $this->capabilityProfileBuilder->build($read);
+            $this->capabilitySnapshotStore->persist(
+                $checkpoint->lease(),
+                new CapabilitySnapshotObservation(
+                    $runId,
+                    $connectionId,
+                    $target->expectedRevision,
+                    $read->endpointId,
+                    $profile,
+                    $this->clock->now(),
+                ),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw CapabilitySnapshotConflict::invariant(
+                'The verified capability snapshot is invalid.',
+                $exception,
+            );
+        }
+        $checkpoint->checkpoint();
     }
 
     private function finishFailedRun(

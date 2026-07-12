@@ -6,12 +6,13 @@ namespace App\Infrastructure\Proxmox\Pbs;
 
 use App\Application\Inventory\Connection\ConnectionReadCheckpoint;
 use App\Application\Proxmox\Pbs\PbsReadConnector;
+use App\Application\Proxmox\Pbs\PbsContentClient;
 use App\Application\Proxmox\Pbs\PbsTasksAndJobsLimits;
 use App\Application\Security\SecretCipher;
 use InvalidArgumentException;
 use RuntimeException;
 
-final readonly class PbsNativeReadConnectorFactory implements PbsReadConnectorFactory, PbsMonitoringClientFactory
+final readonly class PbsNativeReadConnectorFactory implements PbsReadConnectorFactory, PbsMonitoringClientFactory, PbsContentClientFactory
 {
     public function __construct(
         private PbsHttpClientFactory $httpClientFactory,
@@ -52,6 +53,18 @@ final readonly class PbsNativeReadConnectorFactory implements PbsReadConnectorFa
             new PbsJobListReader(),
             new PbsTaskPageReader(),
             $limits,
+        );
+    }
+
+    public function createContentClient(
+        PbsEndpointReadConfiguration $configuration,
+        ConnectionReadCheckpoint $checkpoint,
+    ): PbsContentClient {
+        return new PbsHttpContentClient(
+            $this->transport($configuration, $checkpoint),
+            new PbsPermissionReader(),
+            new PbsNamespaceListReader(),
+            new PbsSnapshotListReader(),
         );
     }
 

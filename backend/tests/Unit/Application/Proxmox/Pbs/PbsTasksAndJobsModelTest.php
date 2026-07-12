@@ -39,6 +39,7 @@ final class PbsTasksAndJobsModelTest extends TestCase
         self::assertSame(str_repeat('a', 32), (new PbsJobId(str_repeat('a', 32)))->value);
         self::assertSame('a/b/c', (new PbsNamespace('a/b/c'))->value);
         self::assertSame(str_repeat('a', 256), (new PbsNamespace(str_repeat('a', 256)))->value);
+        self::assertTrue(PbsNamespace::root()->isRoot());
         self::assertSame(PbsTaskOutcome::Ok, PbsTaskOutcome::fromRemoteStatus('OK'));
         self::assertSame(PbsTaskOutcome::Warning, PbsTaskOutcome::fromRemoteStatus('WARNINGS: 2'));
         self::assertSame(PbsTaskOutcome::Unknown, PbsTaskOutcome::fromRemoteStatus('Unknown'));
@@ -48,7 +49,7 @@ final class PbsTasksAndJobsModelTest extends TestCase
         foreach (['ab', '-bad', 'abc!', str_repeat('a', 33)] as $id) {
             $this->assertInvalid(static fn () => new PbsJobId($id));
         }
-        foreach (['', 'bad//ns', 'bad!/ns', implode('/', array_fill(0, 9, 'x')), str_repeat('a', 257)] as $namespace) {
+        foreach (['bad//ns', 'bad!/ns', implode('/', array_fill(0, 9, 'x')), str_repeat('a', 257)] as $namespace) {
             $this->assertInvalid(static fn () => new PbsNamespace($namespace));
         }
         foreach (['', "bad\nstatus", str_repeat('x', 1025)] as $status) {

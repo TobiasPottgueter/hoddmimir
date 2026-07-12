@@ -80,6 +80,27 @@ then its exact `info.GET` member.
 | 9 | `GET /cluster/status` | `9/cluster-status-clustered.json`, `9/cluster-status-standalone.json` | `4e93e631920828645b5ebc44a21720b88b93affeec94d91d7b5d8188f5e6e96b` |
 | 9 | `GET /cluster/resources` | `9/cluster-resources.json`, `9/cluster-resources-standalone.json` | `ee572342048c90a7a91e49f54b6e2299d9c4f826eec1800a7409a5086e9caf4e` |
 
+## Dormant backup-write contract fixtures
+
+The same pinned API Viewer assets were used to construct a deliberately small
+backup-worker contract for each supported major. This contract is dormant: it
+does not wire execution into the current worker or authorize production
+backups.
+
+| operation | fixture | contract note |
+|---|---|---|
+| `POST /nodes/{node}/vzdump` request | `vzdump-submit-request.json` | Guest-scoped allowlist only; no root-only job fields |
+| `POST /nodes/{node}/vzdump` response | `vzdump-submit-response.json` | Synthetic UPID matching the submitted node and VMID |
+| `GET /nodes/{node}/tasks/{upid}/log` | `task-log-page.json` | Ordered synthetic `n`/`t` rows |
+| `DELETE /nodes/{node}/tasks/{upid}` | `task-stop-response.json` | Successful API2 JSON null envelope |
+
+PVE 7 demonstrates the legacy `maxfiles` request. PVE 8 demonstrates the
+property-string `prune-backups` request. PVE 9 demonstrates the current
+retention request and intentionally contains no `maxfiles` field. All three
+requests are limited to `vmid`, `storage`, `mode`, `compress`, and exactly one
+of the version-supported retention fields. The related status response reuses
+the existing `task-status-*.json` fixtures.
+
 The following provenance-only Node.js program reproduces an endpoint hash
 from an explicitly downloaded local `apidoc.js`. Set `file` to the matching
 major asset and `endpoint` to one of the four exact paths in the table.
@@ -168,6 +189,9 @@ fixtures deliberately.
   measurements are synthetic.
 - No real endpoint, node, cluster, account, token, cookie, CSRF value,
   certificate, fingerprint or other secret was used.
+- Backup-write UPIDs, users, log text, storage IDs, VMIDs, process IDs and
+  timestamps are synthetic. The response fixtures are contract examples, not
+  evidence that a backup was executed against a live installation.
 - PVE 7 intentionally has no `template` field in the resource index fixture.
   PVE 8 demonstrates additive guest metrics and `template`. PVE 9 demonstrates
   additional official fields, the `network` resource type and the intentionally

@@ -14,10 +14,18 @@ The pinned contract sources are:
 - server identity introduction commit prefix `897df9`, first included in PBS
   4.2.
 
-The complete hashes and extraction procedure are recorded in
-`docs/pbs-first-read-contract.md`. Additive `future-*` properties verify that
-readers remain tolerant without enabling capabilities from unknown fields.
-All digest and instance-ID values are synthetic.
+The source versions, hash prefixes and reviewed source files for the first
+inventory read are recorded in `docs/pbs-first-read-contract.md`. The tasks and
+jobs contract records the complete API Viewer hashes used for that separate
+slice. Additive `future-*` properties verify that readers remain tolerant
+without enabling capabilities from unknown fields. All digest and instance-ID
+values are synthetic. No unrecorded extraction procedure or full-hash claim is
+made for the first-read fixtures.
+
+The namespace/snapshot contract is recorded in
+`docs/pbs-content-inventory-contract.md`. The `3` and `4` directories include
+root and nested namespace/snapshot responses. Groups are deliberately derived
+from snapshot rows, so no synthetic `/groups` fixture is maintained.
 
 The GET-only tasks/jobs contract and its complete source pins are recorded in
 `docs/pbs-tasks-jobs-read-contract.md`. Its fixtures are split into `3`,

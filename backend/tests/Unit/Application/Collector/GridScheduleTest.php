@@ -72,6 +72,19 @@ final class GridScheduleTest extends TestCase
         new GridSchedule(new DateTimeImmutable('2026-07-10T12:00:00+00:00'), 0);
     }
 
+    public function testBothValidGridWidthBoundariesAreAccepted(): void
+    {
+        $start = new DateTimeImmutable('2026-07-10T12:00:00.123456+00:00');
+        $minimum = new GridSchedule($start, 1);
+        $maximum = new GridSchedule($start, GridSchedule::MAXIMUM_WIDTH_SECONDS);
+
+        self::assertSame('2026-07-10T12:00:01.123456+00:00', $minimum->nextTickAfter($start)->format('Y-m-d\TH:i:s.uP'));
+        self::assertSame(
+            '2027-07-10T12:00:00.123456+00:00',
+            $maximum->nextTickAfter($start)->format('Y-m-d\TH:i:s.uP'),
+        );
+    }
+
     public function testItRejectsAWidthAboveOneYearBeforeArithmeticCanOverflow(): void
     {
         $this->expectException(InvalidArgumentException::class);

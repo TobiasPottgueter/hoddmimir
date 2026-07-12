@@ -1,31 +1,31 @@
 <script setup lang="ts">
 import Message from "primevue/message";
+import { RouterLink } from "vue-router";
 
-import SetupStatusCard from "@/components/dashboard/SetupStatusCard.vue";
-
-const setupSteps = [
+const overviewLinks = [
   {
-    title: "Proxmox-Systeme",
+    title: "Erkannte Systeme",
     description:
-      "PVE- und PBS-Endpunkte mit getrennten API-Zugängen verbinden.",
+      "PVE-Cluster und PBS-Server aus dem aktuellen Collector-Inventar einsehen.",
     icon: "pi pi-server",
     actionLabel: "Systeme öffnen",
     actionTo: "/systems",
   },
   {
-    title: "Backup-Ziele",
-    description: "Verfügbare Storages, Datastores und Namespaces zuordnen.",
-    icon: "pi pi-database",
-    actionLabel: "Ziele öffnen",
-    actionTo: "/backup-targets",
+    title: "Inventar",
+    description:
+      "Nodes, Gäste, Storages, Datastores und PBS-Inhalte read-only auswerten.",
+    icon: "pi pi-sitemap",
+    actionLabel: "Inventar öffnen",
+    actionTo: "/inventory",
   },
   {
-    title: "Backup-Policies",
+    title: "Collector-Betrieb",
     description:
-      "Gäste auswählen und Regeln für Planung und Priorität festlegen.",
-    icon: "pi pi-sliders-h",
-    actionLabel: "Policies öffnen",
-    actionTo: "/policies",
+      "Heartbeat, Zeitraster, Inventurläufe und Scope-Ergebnisse kontrollieren.",
+    icon: "pi pi-wave-pulse",
+    actionLabel: "Betrieb öffnen",
+    actionTo: "/operations",
   },
 ];
 </script>
@@ -34,12 +34,12 @@ const setupSteps = [
   <section class="dashboard">
     <div class="dashboard-hero">
       <div>
-        <span class="section-kicker">Sauberer Neustart</span>
+        <span class="section-kicker">Betriebsübersicht</span>
         <h2>Willkommen bei Hoddmímir</h2>
         <p>
-          Die Anwendung ist bereit für die neue Konfiguration. Verbinde zuerst
-          deine Proxmox-Systeme; Inventar- und Backupdaten werden anschließend
-          über die Worker aufgebaut.
+          Die WebApp zeigt das vom Collector erfasste Inventar und dessen
+          Betriebszustand. Die Inventarisierung läuft automatisch ohne manuellen
+          Scan.
         </p>
       </div>
       <span class="dashboard-hero__illustration" aria-hidden="true">
@@ -48,24 +48,37 @@ const setupSteps = [
     </div>
 
     <Message severity="info" :closable="false">
-      Es sind noch keine produktiven Daten vorhanden. Version 2.0 übernimmt
-      bewusst keine Konfiguration oder Historie aus dem Altsystem.
+      Version 2.0 arbeitet mit einer eigenständigen Konfiguration und Historie.
+      Daten aus dem Altsystem werden bewusst nicht übernommen.
     </Message>
 
     <div class="section-heading">
       <div>
-        <span class="section-kicker">Erste Schritte</span>
-        <h2>Grundkonfiguration</h2>
+        <span class="section-kicker">Read-only Einblick</span>
+        <h2>Inventar und Betrieb</h2>
       </div>
-      <span>0 von 3 Schritten abgeschlossen</span>
     </div>
 
     <div class="setup-grid">
-      <SetupStatusCard
-        v-for="step in setupSteps"
-        :key="step.actionTo"
-        v-bind="step"
-      />
+      <article
+        v-for="link in overviewLinks"
+        :key="link.actionTo"
+        class="setup-card"
+      >
+        <div class="setup-card__header">
+          <span class="setup-card__icon" aria-hidden="true">
+            <i :class="link.icon" />
+          </span>
+        </div>
+        <div>
+          <h3>{{ link.title }}</h3>
+          <p>{{ link.description }}</p>
+        </div>
+        <RouterLink class="setup-card__action" :to="link.actionTo">
+          {{ link.actionLabel }}
+          <i class="pi pi-arrow-right" aria-hidden="true" />
+        </RouterLink>
+      </article>
     </div>
 
     <section class="system-overview" aria-labelledby="architecture-title">
@@ -99,7 +112,8 @@ const setupSteps = [
           <div>
             <h3>WebApp</h3>
             <p>
-              Stellt Konfiguration, Queue, Historie und Administration bereit.
+              Stellt Inventar und Collector-Betrieb dar; weitere
+              Verwaltungsbereiche werden schrittweise ergänzt.
             </p>
           </div>
         </article>

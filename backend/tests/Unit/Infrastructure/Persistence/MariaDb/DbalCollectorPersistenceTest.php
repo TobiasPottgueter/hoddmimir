@@ -98,7 +98,7 @@ final class DbalCollectorPersistenceTest extends TestCase
         ]);
         $takeover = $this->connection($expired);
         $abandonedStatements = [];
-        $takeover->expects(self::exactly(3))->method('executeStatement')->willReturnCallback(
+        $takeover->expects(self::exactly(4))->method('executeStatement')->willReturnCallback(
             static function (string $sql) use (&$abandonedStatements): int {
                 $abandonedStatements[] = $sql;
                 return 1;
@@ -117,8 +117,10 @@ final class DbalCollectorPersistenceTest extends TestCase
         self::assertSame('10:02:00', $decision->retryAt->format('H:i:s'));
         self::assertStringContainsString('UPDATE proxmox_monitoring_runs', $abandonedStatements[0]);
         self::assertStringContainsString("error_code = 'collector_lease_lost'", $abandonedStatements[0]);
-        self::assertStringContainsString('UPDATE inventory_sync_runs', $abandonedStatements[1]);
-        self::assertStringContainsString('UPDATE collector_cycles', $abandonedStatements[2]);
+        self::assertStringContainsString('UPDATE pbs_content_runs', $abandonedStatements[1]);
+        self::assertStringContainsString("error_code = 'collector_lease_lost'", $abandonedStatements[1]);
+        self::assertStringContainsString('UPDATE inventory_sync_runs', $abandonedStatements[2]);
+        self::assertStringContainsString('UPDATE collector_cycles', $abandonedStatements[3]);
     }
 
     public function testRenewAndFinalizeCancellationCheckEveryLeasePart(): void
@@ -134,7 +136,7 @@ final class DbalCollectorPersistenceTest extends TestCase
         $finalConnection = $this->connection($this->activeScheduleRow());
         $finalConnection->method('update')->willReturn(1);
         $finalStatements = [];
-        $finalConnection->expects(self::exactly(2))->method('executeStatement')->willReturnCallback(
+        $finalConnection->expects(self::exactly(3))->method('executeStatement')->willReturnCallback(
             static function (string $sql, array $values) use (&$finalStatements): int {
                 $finalStatements[] = [$sql, $values];
                 return 1;
@@ -148,8 +150,10 @@ final class DbalCollectorPersistenceTest extends TestCase
         self::assertSame('10:02:00', $next->format('H:i:s'));
         self::assertStringContainsString('UPDATE proxmox_monitoring_runs', $finalStatements[0][0]);
         self::assertSame('collector_shutdown_requested', $finalStatements[0][1]['error_code']);
-        self::assertStringContainsString('UPDATE inventory_sync_runs', $finalStatements[1][0]);
-        self::assertSame('cancelled', $finalStatements[1][1]['status']);
+        self::assertStringContainsString('UPDATE pbs_content_runs', $finalStatements[1][0]);
+        self::assertSame('collector_shutdown_requested', $finalStatements[1][1]['error_code']);
+        self::assertStringContainsString('UPDATE inventory_sync_runs', $finalStatements[2][0]);
+        self::assertSame('cancelled', $finalStatements[2][1]['status']);
 
     }
 

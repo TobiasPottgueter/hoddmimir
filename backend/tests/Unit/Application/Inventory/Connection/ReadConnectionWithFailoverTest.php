@@ -123,16 +123,23 @@ final class ReadConnectionWithFailoverTest extends TestCase
             self::endpoint(2, 2),
             self::endpoint(3, 3),
         ]);
+        $attempts = new RecordingEndpointReadAttemptSink();
 
         $result = (new ReadConnectionWithFailover($reader))->read(
             $target,
             InstallationBinding::pveCluster('forest', ['node-a']),
             new CountingConnectionReadCheckpoint(),
+            $attempts,
         );
 
         self::assertSame($expected, $result->snapshot);
         self::assertSame(self::endpointId(3)->bytes, $result->endpointId->bytes);
         self::assertCount(3, $reader->endpointIds);
+        self::assertSame([
+            [1, EndpointReadAttemptOutcome::Failover, EndpointReadFailureCode::WrongIdentity],
+            [2, EndpointReadAttemptOutcome::Failover, EndpointReadFailureCode::RootUnusable],
+            [3, EndpointReadAttemptOutcome::Selected, null],
+        ], $attempts->finished);
     }
 
     public function testSameClusterNameRequiresKnownMemberIntersection(): void
@@ -174,15 +181,21 @@ final class ReadConnectionWithFailoverTest extends TestCase
         $partial = self::pveSnapshot('forest', false);
         $complete = self::pveSnapshot('forest');
         $reader = new QueuedEndpointInstallationReader([$partial, $complete]);
+        $attempts = new RecordingEndpointReadAttemptSink();
 
         $result = (new ReadConnectionWithFailover($reader))->read(
             self::target(ProxmoxProduct::Pve, [self::endpoint(1, 1), self::endpoint(2, 2)]),
             null,
             new CountingConnectionReadCheckpoint(),
+            $attempts,
         );
 
         self::assertSame($complete, $result->snapshot);
         self::assertCount(2, $reader->endpointIds);
+        self::assertSame([
+            [1, EndpointReadAttemptOutcome::Failover, EndpointReadFailureCode::RootUnusable],
+            [2, EndpointReadAttemptOutcome::Selected, null],
+        ], $attempts->finished);
     }
 
     public function testUnboundCompositeUsesCoreCompletenessForBindingAndKeepsPartialStorageDiagnostic(): void
@@ -319,6 +332,48 @@ final class ReadConnectionWithFailoverTest extends TestCase
         self::assertTrue(InstallationBinding::pbsInstance(str_repeat('a', 32))->equals($result->binding));
     }
 
+    public function testIncompletePbsInstanceCannotUpgradeALegacyBinding(): void
+    {
+        $endpoint = self::endpoint(1, 1);
+        $attempts = new RecordingEndpointReadAttemptSink();
+
+        try {
+            (new ReadConnectionWithFailover(new QueuedEndpointInstallationReader([
+                self::pbsSnapshot(4, 'pbs4', str_repeat('a', 32)),
+            ])))->read(
+                self::target(ProxmoxProduct::Pbs, [$endpoint]),
+                InstallationBinding::pbsLegacyNode('pbs4', $endpoint->endpointId),
+                new CountingConnectionReadCheckpoint(),
+                $attempts,
+            );
+            self::fail('An incomplete instance snapshot upgraded a legacy binding.');
+        } catch (ConnectionReadFailure $failure) {
+            self::assertSame(ConnectionReadFailureCode::EndpointsExhausted, $failure->failureCode);
+            self::assertSame(EndpointReadFailureCode::WrongIdentity, $failure->endpointFailureCode);
+        }
+
+        self::assertSame(
+            [[1, EndpointReadAttemptOutcome::Terminal, EndpointReadFailureCode::WrongIdentity]],
+            $attempts->finished,
+        );
+    }
+
+    public function testUnboundCompletePbsInstanceSelectsOnlyTheFirstOfMultipleEndpoints(): void
+    {
+        $snapshot = self::completePbsInstanceSnapshot('pbs4', str_repeat('a', 32));
+        $reader = new QueuedEndpointInstallationReader([$snapshot]);
+
+        $result = (new ReadConnectionWithFailover($reader))->read(
+            self::target(ProxmoxProduct::Pbs, [self::endpoint(1, 1), self::endpoint(2, 2)]),
+            null,
+            new CountingConnectionReadCheckpoint(),
+        );
+
+        self::assertSame($snapshot, $result->snapshot);
+        self::assertCount(1, $reader->endpointIds);
+        self::assertTrue(InstallationBinding::pbsInstance(str_repeat('a', 32))->equals($result->binding));
+    }
+
     public function testUnboundPbsReadsOnlyTheFirstEndpointUntilItsIdentityIsBound(): void
     {
         $reader = new QueuedEndpointInstallationReader([
@@ -345,18 +400,24 @@ final class ReadConnectionWithFailoverTest extends TestCase
     {
         $snapshot = self::pbsSnapshot(3, 'pbs3', null);
         $reader = new QueuedEndpointInstallationReader([$snapshot]);
+        $attempts = new RecordingEndpointReadAttemptSink();
 
         try {
             (new ReadConnectionWithFailover($reader))->read(
                 self::target(ProxmoxProduct::Pbs, [self::endpoint(1, 1), self::endpoint(2, 2)]),
                 null,
                 new CountingConnectionReadCheckpoint(),
+                $attempts,
             );
             self::fail('A legacy PBS installation accepted multiple enabled endpoints.');
         } catch (ConnectionReadFailure $failure) {
             self::assertSame(ConnectionReadFailureCode::InvalidEndpointConfiguration, $failure->failureCode);
         }
         self::assertCount(1, $reader->endpointIds);
+        self::assertSame(
+            [[1, EndpointReadAttemptOutcome::Terminal, EndpointReadFailureCode::RootUnusable]],
+            $attempts->finished,
+        );
     }
 
     public function testLegacyBindingRejectsWhenItsExactEndpointIsNoLongerConfigured(): void
@@ -380,18 +441,24 @@ final class ReadConnectionWithFailoverTest extends TestCase
     public function testPbsProductMismatchIsEndpointScopedRootUnusable(): void
     {
         $reader = new QueuedEndpointInstallationReader([self::pveSnapshot('forest')]);
+        $attempts = new RecordingEndpointReadAttemptSink();
 
         try {
             (new ReadConnectionWithFailover($reader))->read(
                 self::target(ProxmoxProduct::Pbs, [self::endpoint(1, 1)]),
                 InstallationBinding::pbsLegacyNode('pbs3', new EndpointId(str_repeat(chr(1), 16))),
                 new CountingConnectionReadCheckpoint(),
+                $attempts,
             );
             self::fail('A PVE snapshot was accepted for a PBS target.');
         } catch (ConnectionReadFailure $failure) {
             self::assertSame(ConnectionReadFailureCode::EndpointsExhausted, $failure->failureCode);
             self::assertSame(EndpointReadFailureCode::RootUnusable, $failure->endpointFailureCode);
         }
+        self::assertSame(
+            [[1, EndpointReadAttemptOutcome::Terminal, EndpointReadFailureCode::RootUnusable]],
+            $attempts->finished,
+        );
     }
 
     public function testNoEndpointAndWrongProductBindingFailBeforeRemoteIo(): void

@@ -13,13 +13,15 @@ RUN npm ci --ignore-scripts
 FROM frontend-deps AS frontend-source
 
 COPY .editorconfig ./
+COPY docs/openapi-v1.json /docs/openapi-v1.json
 COPY frontend/ ./
 
 FROM frontend-source AS frontend-test
 
-RUN npm run lint \
+RUN npm run api:check \
+    && npm run lint \
     && npm run typecheck \
-    && npm test \
+    && npm run test:coverage \
     && npm run format:check
 
 FROM frontend-source AS frontend-build
@@ -37,7 +39,11 @@ ENV APP_ENV=prod \
     XDG_CONFIG_HOME=/config \
     XDG_DATA_HOME=/data
 
-RUN docker-php-ext-install -j"$(nproc)" pcntl pdo_mysql
+RUN apk add --no-cache icu-libs \
+    && apk add --no-cache --virtual .php-ext-build-deps $PHPIZE_DEPS icu-dev \
+    && docker-php-ext-install -j"$(nproc)" intl pcntl pdo_mysql \
+    && apk del .php-ext-build-deps \
+    && php -r "exit(extension_loaded('intl') ? 0 : 1);"
 
 COPY --from=composer-bin /usr/bin/composer /usr/bin/composer
 

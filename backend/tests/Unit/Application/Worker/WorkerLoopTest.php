@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Application\Worker;
 
 use App\Application\Readiness\ReadinessAggregator;
+use App\Application\Readiness\ReadinessCheck;
 use App\Application\Readiness\ReadinessCheckResult;
 use App\Application\Worker\WorkerLoop;
 use App\Application\Worker\WorkerReadinessProbe;
 use App\Application\Worker\WorkerReadinessReport;
+use App\Domain\Shared\Clock;
 use App\Domain\Worker\WorkerKind;
-use App\Tests\Fakes\FrozenClock;
-use App\Tests\Fakes\FixedReadinessCheck;
 use App\Tests\Fakes\RecordingSleeper;
 use DateTimeImmutable;
 use InvalidArgumentException;
@@ -131,16 +131,63 @@ final class WorkerLoopTest extends TestCase
         ?ReadinessCheckResult $result = null,
     ): WorkerLoop
     {
-        $clock = new FrozenClock(new DateTimeImmutable('2026-07-09T10:11:12+00:00'));
+        $clock = new BudgetedWorkerClock(new DateTimeImmutable('2026-07-09T10:11:12+00:00'));
 
         return new WorkerLoop(
             new WorkerReadinessProbe(
                 $clock,
                 new ReadinessAggregator([
-                    new FixedReadinessCheck($result ?? ReadinessCheckResult::ready('database_schema')),
+                    new BudgetedWorkerReadinessCheck(
+                        $result ?? ReadinessCheckResult::ready('database_schema'),
+                    ),
                 ]),
             ),
             $sleeper,
         );
+    }
+}
+
+final class BudgetedWorkerClock implements Clock
+{
+    private int $calls = 0;
+
+    public function __construct(
+        private readonly DateTimeImmutable $now,
+        private readonly int $maximumCalls = 64,
+    ) {}
+
+    public function now(): DateTimeImmutable
+    {
+        ++$this->calls;
+        if ($this->calls > $this->maximumCalls) {
+            throw new RuntimeException('Worker clock call budget exceeded.');
+        }
+
+        return $this->now;
+    }
+}
+
+final class BudgetedWorkerReadinessCheck implements ReadinessCheck
+{
+    private int $calls = 0;
+
+    public function __construct(
+        private readonly ReadinessCheckResult $result,
+        private readonly int $maximumCalls = 64,
+    ) {}
+
+    public function name(): string
+    {
+        return 'database_schema';
+    }
+
+    public function check(): ReadinessCheckResult
+    {
+        ++$this->calls;
+        if ($this->calls > $this->maximumCalls) {
+            throw new RuntimeException('Worker readiness call budget exceeded.');
+        }
+
+        return $this->result;
     }
 }

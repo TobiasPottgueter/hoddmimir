@@ -12,6 +12,7 @@ const navigationItems: NavigationItem[] = [
   { label: "Übersicht", icon: "pi pi-home", to: "/" },
   { label: "Systeme", icon: "pi pi-server", to: "/systems" },
   { label: "Inventar", icon: "pi pi-sitemap", to: "/inventory" },
+  { label: "Collector-Betrieb", icon: "pi pi-wave-pulse", to: "/operations" },
   { label: "Backup-Ziele", icon: "pi pi-database", to: "/backup-targets" },
   { label: "Policies", icon: "pi pi-sliders-h", to: "/policies" },
   { label: "Queue", icon: "pi pi-list-check", to: "/queue" },
@@ -68,8 +69,8 @@ function closeNavigation(): void {
       <div class="app-sidebar__footer">
         <span class="status-dot" aria-hidden="true" />
         <span>
-          <strong>Einrichtung ausstehend</strong>
-          <small>Noch keine Systeme verbunden</small>
+          <strong>Collector-Inventar</strong>
+          <small>Automatische Zyklen · Read-only</small>
         </span>
       </div>
     </aside>
@@ -93,8 +94,8 @@ function closeNavigation(): void {
         </div>
 
         <span class="app-topbar__environment">
-          <i class="pi pi-wrench" aria-hidden="true" />
-          Initialisierung
+          <i class="pi pi-eye" aria-hidden="true" />
+          Betriebsansicht
         </span>
       </header>
 

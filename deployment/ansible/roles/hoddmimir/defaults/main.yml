@@ -20,6 +20,12 @@ hoddmimir_database_name: hoddmimir
 hoddmimir_collector_grid_width_seconds: 120
 hoddmimir_pve_storage_max_node_fanout: 128
 hoddmimir_pbs_max_datastore_fanout: 128
+hoddmimir_pbs_content_max_datastores: 128
+hoddmimir_pbs_content_max_namespaces_per_datastore: 1024
+hoddmimir_pbs_content_max_snapshots_per_namespace: 65536
+hoddmimir_pbs_content_max_total_snapshots: 262144
+hoddmimir_pbs_content_namespace_body_bytes: 8388608
+hoddmimir_pbs_content_snapshot_body_bytes: 67108864
 hoddmimir_monitor_history_overlap_seconds: 300
 hoddmimir_pve_monitor_page_size: 100
 hoddmimir_pve_monitor_max_nodes: 128
@@ -38,7 +44,6 @@ hoddmimir_backup_worker_poll_interval_seconds: 5
 hoddmimir_backup_execution_enabled: false
 hoddmimir_backup_execution_activation_ack: ""
 hoddmimir_backup_execution_required_ack: ENABLE_PRODUCTION_BACKUPS
-hoddmimir_web_bind_address: 127.0.0.1
 hoddmimir_web_port: 8080
 hoddmimir_healthcheck_url: "http://127.0.0.1:{{ hoddmimir_web_port }}/api/health"
 hoddmimir_compose_wait_timeout_seconds: 180

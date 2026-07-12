@@ -1,0 +1,9 @@
+{
+  "data": {
+    "vmid": 101,
+    "storage": "backup-vault",
+    "mode": "snapshot",
+    "compress": "zstd",
+    "maxfiles": 3
+  }
+}

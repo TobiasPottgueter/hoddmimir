@@ -1,11 +1,14 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage frontend-test test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test api-schema-drift-test test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_EXAMPLE_INVENTORY := inventories/production/hosts.example.yml
 ANSIBLE_PRODUCTION_INVENTORY := inventories/production/hosts.yml
 ANSIBLE_VAULT_ARGS ?= --ask-vault-pass
+INFECTION_THREADS ?= max
+REUSE_MUTATION_COVERAGE ?= 0
+MUTATION_IMAGE := hoddmimir-backend-mutation:local
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,8 +56,30 @@ backend-coverage: ## Generate the backend coverage foundation report
 	test -s backend/coverage/clover.xml
 	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --volume "$(CURDIR)/backend/coverage:/app/coverage:ro" hoddmimir-backend-coverage:local php tools/check-coverage.php coverage/clover.xml
 
+mutation-image: ## Build the pinned PHP 8.5 Infection runtime
+	docker build --target backend-mutation-runtime --tag $(MUTATION_IMAGE) --file docker/php/Dockerfile .
+
+mutation-config: mutation-image ## Validate both Infection configurations and source buckets
+	mkdir -p backend/var/mutation
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --volume "$(CURDIR)/backend/var/mutation:/app/var/mutation" $(MUTATION_IMAGE) sh tools/run-mutation.sh config
+
+mutation-critical: mutation-image ## Enforce 90 percent MSI for critical scheduler and state-machine code
+	mkdir -p backend/var/mutation
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --env XDEBUG_MODE=coverage --env INFECTION_THREADS="$(INFECTION_THREADS)" --env REUSE_MUTATION_COVERAGE="$(REUSE_MUTATION_COVERAGE)" --volume "$(CURDIR)/backend/var/mutation:/app/var/mutation" $(MUTATION_IMAGE) sh tools/run-mutation.sh critical
+
+mutation-global: mutation-image ## Enforce 80 percent MSI for handwritten backend source
+	mkdir -p backend/var/mutation
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --env XDEBUG_MODE=coverage --env INFECTION_THREADS="$(INFECTION_THREADS)" --env REUSE_MUTATION_COVERAGE="$(REUSE_MUTATION_COVERAGE)" --volume "$(CURDIR)/backend/var/mutation:/app/var/mutation" $(MUTATION_IMAGE) sh tools/run-mutation.sh global
+
+mutation: mutation-image ## Enforce both mutation gates with one reusable coverage run
+	mkdir -p backend/var/mutation
+	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --env XDEBUG_MODE=coverage --env INFECTION_THREADS="$(INFECTION_THREADS)" --env REUSE_MUTATION_COVERAGE="$(REUSE_MUTATION_COVERAGE)" --volume "$(CURDIR)/backend/var/mutation:/app/var/mutation" $(MUTATION_IMAGE) sh tools/run-mutation.sh all
+
 frontend-test: ## Build and run the frontend validation target
 	docker build --target frontend-test --file docker/web/Dockerfile .
+
+api-schema-drift-test: ## Test the official Proxmox schema drift policy offline
+	python3 -m unittest scripts/tests/test_proxmox_api_schema_drift.py -v
 
 test: backend-test frontend-test ## Run backend and frontend validation
 

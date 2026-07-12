@@ -1,0 +1,24 @@
+{
+  "$schema": "vendor/infection/infection/resources/schema.json",
+  "source": {
+    "directories": ["src"],
+    "excludes": ["Kernel.php"]
+  },
+  "timeout": 60,
+  "threads": "max",
+  "testFramework": "phpunit",
+  "mutators": {
+    "@default": true
+  },
+  "minMsi": 80,
+  "ignoreMsiWithNoMutations": false,
+  "timeoutsAsEscaped": true,
+  "maxTimeouts": 0,
+  "logs": {
+    "text": "var/mutation/global/escaped-mutants.log",
+    "summary": "var/mutation/global/summary.log",
+    "summaryJson": "var/mutation/global/summary.json",
+    "perMutator": "var/mutation/global/per-mutator.md"
+  },
+  "tmpDir": "var/mutation/tmp-global"
+}

@@ -184,6 +184,11 @@ Verantwortung:
 
 Der Collector hat gegenüber PVE/PBS ausschließlich Leserechte. Er startet, stoppt und löscht nichts.
 
+Capability-Snapshots werden nach dem erfolgreichen Read des ausgewählten
+Endpunkts und vor dem Inventory-Apply kanonisch, idempotent und gefencet
+persistiert. Der vollständige Hash-, Transaktions- und Fehlervertrag steht in
+[`capability-snapshot-persistence.md`](capability-snapshot-persistence.md).
+
 Die externen Backupjobs und Tasklisten werden nach dem autoritativen
 Core-/Storage-Apply über zwei gefencete Childruns (`external_jobs` und
 `observed_tasks`) persistiert. Beide verwenden genau einen kombinierten Read
@@ -192,6 +197,15 @@ positive-only; unvollständige oder ACL-unzureichende Reads treffen keine
 Abwesenheitsentscheidung. Der vollständige Persistenz-, Cursor- und
 Shutdown-Vertrag steht in
 [`proxmox-external-monitoring-persistence.md`](proxmox-external-monitoring-persistence.md).
+
+PBS namespaces and snapshots run as a third, independently fenced content
+child after the PBS datastore parent apply. The child reuses the parent's
+exact selected endpoint, reads no `/groups` endpoint, derives group projections
+from snapshot rows, and persists scoped positive observations. Namespace
+scopes are always positive-only; only complete ACL-backed exact snapshot
+scopes may archive unseen snapshots and derived groups in that namespace. The
+complete GET, limit, root-namespace, fixture, and persistence contract is in
+[`pbs-content-inventory-contract.md`](pbs-content-inventory-contract.md).
 
 ### 3.3 Backup Worker
 
@@ -534,6 +548,15 @@ Abnahme: Plan ist reviewt; es wurde noch kein produktiver Code ausgeführt.
 
 ### Phase 1 – Repository- und Laufzeitfundament
 
+Status: **im Repository implementiert, formale Abschlussprüfung auf einem
+gefrorenen Kandidaten offen.**
+
+Lokal nachvollziehbar sind Monorepo, Anwendungsgrundgerüste, Alpine-basierte
+Application-Images, MariaDB-Compose, Migrationen, Health-/Readiness-Pfade,
+Ansible-Automation und die zugehörigen CI-/Testdefinitionen. Dieser
+Repositoryzustand ist kein Ersatz für einen frischen Lauf aller Quality Gates
+auf exakt dem zu veröffentlichenden Commit.
+
 - Monorepo-Struktur für PHP, Frontend, Docker, Docs und Tests.
 - PHP-/Symfony- und Vue-/PrimeVue-Grundgerüst.
 - Alpine-Images, Compose, MariaDB 11.4, Healthchecks und non-root Runtime.
@@ -543,6 +566,21 @@ Abnahme: Plan ist reviewt; es wurde noch kein produktiver Code ausgeführt.
 Abnahme: alle drei Applikationscontainer plus MariaDB starten, sind gesund und besitzen noch keine PVE-Schreibfunktion.
 
 ### Phase 2 – Eigene PVE-/PBS-API-Schicht
+
+Status: **lokale Implementierung und bereinigte Contract-Fixtures vorhanden,
+Live-Abnahme offen.**
+
+Im Repository liegen eigene typisierte Transport-, Auth-, TLS-, Envelope-,
+Fehler- und Capability-Verträge sowie lokale Unit-/Contract-Tests für die fünf
+unterstützten Major-Linien. Die Fixtures sind konstruiert und frei von
+Geheimnissen;
+sie sind ausdrücklich kein Live-Nachweis. Offen bleiben die Read-only-Live-
+Matrix gegen aktuelle PVE-7/8/9- und PBS-3/4-Patchstände, echte Handshakes für
+System-CA, Custom-CA und korrektes/falsches Fingerprint-Pinning sowie die
+dokumentierte offene Connect-Timeout-Grenze. Der automatisierte offizielle
+API-Schema-Drift-Nachweis ist als nächtlicher/manueller Read-only-Workflow mit
+gepinnten Baselines und Offline-Regressionstests vorhanden; er ersetzt die
+ausstehende Live-Matrix nicht.
 
 - Transport, TLS, Auth, Redaction, Envelope und Fehlertypen.
 - Versionprobe und Capability-Matrix.
@@ -554,14 +592,31 @@ Abnahme: keine alte Proxmox-Bibliothek im Dependency Tree; alle fünf Versionsli
 
 ### Phase 3 – Collector und Inventarmodell
 
+Status: **Collector-, Persistenz- und read-only Darstellungs-Slices im
+Repository implementiert, Betriebsabnahme offen.**
+
+Lokal vorhanden sind das startzeitbasierte Collector-Raster, Lease/Fencing und
+Heartbeat, PVE-/PBS-Inventarpersistenz einschließlich QEMU/LXC, Storage,
+Datastore, Namespace/Snapshot, Monitoring und Capability-Snapshots sowie eine
+GET-only-Inventar-/Health-API mit Vue-Sichten. Für die formale Abnahme fehlen
+weiterhin ein dokumentierter und reproduzierbarer Einrichtungsweg für neue
+V2-Verbindungen/Credentials, die vollständige unterstützte Live-Matrix und die
+TLS-Nachweise. Sämtliche lokalen Quality Gates müssen anschließend auf dem
+identischen, gefrorenen Kandidaten erneut ausgeführt werden.
+
 - Schema für Verbindungen, Cluster, Nodes, Gäste, Storages und PBS-Datastores.
 - read-only Sync, Placement-Reconciliation, Freshness und Heartbeats.
 - QEMU und LXC.
 - PBS-Kapazität, Snapshots und Tasks.
+- kanonische, gefencete Capability-Snapshots mit stabiler historischer Run-Referenz.
 - kontinuierlicher Collector mit startzeitbasiertem 120-Sekunden-Standardraster ohne Überlappung oder Catch-up-Läufe, Laufstatus und sicherer Teilfehlerbehandlung; kein manueller Scan über WebApp oder API.
 - read-only WebApp-Sichten für Inventar und Health.
 
-Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig scannen; wiederholter Sync ist idempotent und Placementwechsel, Teilfehler oder Node-Ausfall erzeugen keine stale Queue.
+Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig
+scannen; wiederholter Sync ist idempotent und Placementwechsel, Teilfehler oder
+Node-Ausfall erzeugen weder falsche Abwesenheits-/Archivierungsentscheidungen
+noch veraltete Placement-Zuordnungen. Die Wirkung auf Queue-Entscheidungen wird
+erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
 

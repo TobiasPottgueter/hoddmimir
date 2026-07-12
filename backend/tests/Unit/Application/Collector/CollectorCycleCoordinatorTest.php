@@ -64,6 +64,43 @@ final class CollectorCycleCoordinatorTest extends TestCase
         self::assertSame($snapshot->nextScanAt, $heartbeats->records[0]['next']);
     }
 
+    public function testMinimumTtlsMaximumBuildVersionAndDefaultTtlsRemainAcceptedAndExact(): void
+    {
+        $defaultsStore = new RecordingScheduleStore();
+        $defaultsStore->claimDecision = $this->claimedDecision();
+        $defaultsHeartbeats = new RecordingHeartbeatStore();
+        $defaults = new CollectorCycleCoordinator(
+            $defaultsStore,
+            $defaultsHeartbeats,
+            new SequenceMonotonicClock([0]),
+        );
+
+        $defaults->tryStart($this->worker(), $this->token());
+        self::assertSame(240, $defaultsStore->claimedLeaseTtl);
+        self::assertSame(150, $defaultsHeartbeats->records[0]['ttl']);
+        self::assertSame('development', $defaultsHeartbeats->records[0]['build']);
+
+        $minimumStore = new RecordingScheduleStore();
+        $minimumStore->claimDecision = $this->claimedDecision();
+        $minimumHeartbeats = new RecordingHeartbeatStore();
+        $minimum = new CollectorCycleCoordinator(
+            $minimumStore,
+            $minimumHeartbeats,
+            new SequenceMonotonicClock([0]),
+            1,
+            1,
+            str_repeat('v', 64),
+        );
+
+        $started = $minimum->tryStart($this->worker(), $this->token());
+        self::assertNotNull($started->cycle);
+        $minimum->checkpoint($started->cycle);
+        self::assertSame(1, $minimumStore->claimedLeaseTtl);
+        self::assertSame(1, $minimumStore->renewedLeaseTtl);
+        self::assertSame(1, $minimumHeartbeats->records[0]['ttl']);
+        self::assertSame(str_repeat('v', 64), $minimumHeartbeats->records[1]['build']);
+    }
+
     public function testWaitingDecisionDoesNotCreateACycleAndRefreshesReadyHeartbeat(): void
     {
         $now = $this->now();
@@ -190,6 +227,19 @@ final class CollectorCycleCoordinatorTest extends TestCase
         $coordinator->finish($this->activeCycle(100), CollectorCycleStatus::Succeeded);
     }
 
+    public function testZeroAndOneMillisecondDurationBoundariesAreExact(): void
+    {
+        $zeroStore = new RecordingScheduleStore();
+        $this->coordinator($zeroStore, new RecordingHeartbeatStore(), [100])
+            ->finish($this->activeCycle(100), CollectorCycleStatus::Succeeded);
+        self::assertSame(0, $zeroStore->finalDurationMilliseconds);
+
+        $oneStore = new RecordingScheduleStore();
+        $this->coordinator($oneStore, new RecordingHeartbeatStore(), [1_000_001])
+            ->finish($this->activeCycle(0), CollectorCycleStatus::Succeeded);
+        self::assertSame(1, $oneStore->finalDurationMilliseconds);
+    }
+
     public function testIdleStopPublishesStoppingWithoutACycle(): void
     {
         $heartbeats = new RecordingHeartbeatStore();
@@ -265,6 +315,8 @@ final class RecordingScheduleStore implements CollectorScheduleStore
     public ?int $finalDurationMilliseconds = null;
     public DateTimeImmutable $finalNext;
     public ?\Throwable $finalFailure = null;
+    public ?int $claimedLeaseTtl = null;
+    public ?int $renewedLeaseTtl = null;
 
     public function __construct()
     {
@@ -280,7 +332,7 @@ final class RecordingScheduleStore implements CollectorScheduleStore
 
     public function claimDue(CollectorWorkerId $workerId, CollectorCycleToken $cycleToken, int $leaseTtlSeconds): CollectorClaimDecision
     {
-        TestCase::assertSame(240, $leaseTtlSeconds);
+        $this->claimedLeaseTtl = $leaseTtlSeconds;
         TestCase::assertSame(str_repeat('a', 16), $workerId->bytes);
         TestCase::assertSame(str_repeat('b', 16), $cycleToken->binary());
         return $this->claimDecision ?? CollectorClaimDecision::waiting($this->finalNext, $this->finalNext);
@@ -288,6 +340,7 @@ final class RecordingScheduleStore implements CollectorScheduleStore
 
     public function renew(CollectorLease $lease, int $leaseTtlSeconds): CollectorLease
     {
+        $this->renewedLeaseTtl = $leaseTtlSeconds;
         return new CollectorLease(
             $lease->ownerId,
             $lease->token,
@@ -310,7 +363,7 @@ final class RecordingScheduleStore implements CollectorScheduleStore
 
 final class RecordingHeartbeatStore implements CollectorHeartbeatStore
 {
-    /** @var list<array{status: CollectorWorkerStatus, cycle: ?CollectorCycleToken, next: ?DateTimeImmutable}> */
+    /** @var list<array{status: CollectorWorkerStatus, cycle: ?CollectorCycleToken, next: ?DateTimeImmutable, ttl: int, build: string}> */
     public array $records = [];
     public ?CollectorWorkerStatus $failureStatus = null;
 
@@ -325,9 +378,13 @@ final class RecordingHeartbeatStore implements CollectorHeartbeatStore
         if ($status === $this->failureStatus) {
             throw new \RuntimeException('heartbeat_failed');
         }
-        TestCase::assertSame(150, $ttlSeconds);
-        TestCase::assertSame('test-build', $buildVersion);
-        $this->records[] = ['status' => $status, 'cycle' => $cycleToken, 'next' => $nextActionAt];
+        $this->records[] = [
+            'status' => $status,
+            'cycle' => $cycleToken,
+            'next' => $nextActionAt,
+            'ttl' => $ttlSeconds,
+            'build' => $buildVersion,
+        ];
     }
 
     public function isFresh(CollectorWorkerId $workerId): bool

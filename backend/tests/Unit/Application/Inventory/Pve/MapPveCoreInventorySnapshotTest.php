@@ -72,8 +72,10 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
         self::assertSame(InventoryScopeStatus::Complete, $commit->guestScope->status);
         self::assertSame('succeeded', $commit->overallStatus());
         self::assertSame(['node-a', 'node-b'], array_column($commit->nodes, 'name'));
+        self::assertSame([0, 1], array_keys($commit->nodes));
         self::assertSame(['offline', 'unknown'], array_column($commit->nodes, 'apiStatus'));
         self::assertSame(['lxc:200', 'qemu:100'], array_map(static fn ($guest): string => $guest->key(), $commit->guests));
+        self::assertSame([0, 1], array_keys($commit->guests));
         self::assertNull($commit->guests[0]->name);
         self::assertNull($commit->guests[0]->isTemplate);
         self::assertSame('vm-a', $commit->guests[1]->name);
@@ -154,6 +156,36 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
         self::assertSame(['node-a'], array_column($commit->nodes, 'name'));
         self::assertSame(['online'], array_column($commit->nodes, 'apiStatus'));
         self::assertSame(['qemu:100'], array_map(static fn ($guest): string => $guest->key(), $commit->guests));
+    }
+
+    public function testEveryIndividualMappingLossDowngradesAnOtherwiseCompleteSnapshot(): void
+    {
+        $node = new PveClusterNode('node-a', true, 1, true);
+        $resource = new PveNodeResource('node-a', 'online');
+        $guest = new PveGuestResource(PveGuestType::Qemu, 100, 'node-a', 'vm-a', false, 'running');
+        $cases = [
+            self::clusterSnapshot([$node, $node], [$resource], [], true, 2),
+            self::clusterSnapshot([$node], [$resource, $resource], []),
+            self::clusterSnapshot([$node], [$resource, new PveNodeResource('/invalid', 'online')], []),
+            self::clusterSnapshot([$node], [$resource], [
+                new PveGuestResource(PveGuestType::Lxc, 200, 'missing-node', 'orphan', false, null),
+            ]),
+            self::clusterSnapshot([$node], [$resource], [$guest, $guest]),
+            self::clusterSnapshot([$node], [$resource], [
+                new PveGuestResource(PveGuestType::Lxc, 0, 'node-a', 'invalid-vmid', false, null),
+            ]),
+        ];
+
+        foreach ($cases as $index => $snapshot) {
+            $commit = (new MapPveCoreInventorySnapshot())->map(
+                self::id('r'),
+                self::pveRead(InstallationBinding::pveCluster('forest', ['node-a']), $snapshot),
+                new DateTimeImmutable('2026-07-11T13:00:00+00:00'),
+            );
+
+            self::assertSame(InventoryScopeStatus::Partial, $commit->topologyScope->status, 'case '.$index);
+            self::assertSame(InventoryScopeStatus::Partial, $commit->guestScope->status, 'case '.$index);
+        }
     }
 
     public function testItDropsAResourceFromAnotherStandaloneNodeAndFallsBackToTopologyStatus(): void

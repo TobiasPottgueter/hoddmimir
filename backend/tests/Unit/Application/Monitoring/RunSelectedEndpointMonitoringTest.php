@@ -122,6 +122,44 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
         }
     }
 
+    public function testConstructorAcceptsExactProductWindowBounds(): void
+    {
+        [$minimum] = $this->runner(pveMaximumWindow: 1, pbsMaximumWindow: 1);
+        [$maximum] = $this->runner(pveMaximumWindow: 86_400, pbsMaximumWindow: 86_400);
+
+        self::assertInstanceOf(RunSelectedEndpointMonitoring::class, $minimum);
+        self::assertInstanceOf(RunSelectedEndpointMonitoring::class, $maximum);
+    }
+
+    public function testWindowPlanningReceivesExactPveAndPbsScopeKeys(): void
+    {
+        [$pveRunner, , , $checkpoint, $pveCursors] = $this->runner(pveMaximumWindow: 1234);
+        $pveRunner->execute($this->lease(), self::id('parent-pve'), $this->read(), $checkpoint);
+        self::assertSame([[
+            'kind' => MonitoringCursorKind::PveTasksArchive,
+            'scopeKeys' => ['pve-a'],
+        ]], $pveCursors->calls);
+
+        [$emptyRunner, , , $checkpoint, $emptyCursors] = $this->runner(pveMaximumWindow: 1234);
+        $emptyRunner->execute(
+            $this->lease(),
+            self::id('parent-empty'),
+            $this->read(emptyTopology: true),
+            $checkpoint,
+        );
+        self::assertSame([[
+            'kind' => MonitoringCursorKind::PveTasksArchive,
+            'scopeKeys' => ['@installation'],
+        ]], $emptyCursors->calls);
+
+        [$pbsRunner, , , $checkpoint, $pbsCursors] = $this->runner(pbs: true, pbsMaximumWindow: 4321);
+        $pbsRunner->execute($this->lease(), self::id('parent-pbs'), $this->pbsRead(), $checkpoint);
+        self::assertSame([[
+            'kind' => MonitoringCursorKind::PbsTasksWindow,
+            'scopeKeys' => ['pbs-a'],
+        ]], $pbsCursors->calls);
+    }
+
     public function testBeginReadAndPersistCriticalFailuresRemainFailClosed(): void
     {
         [$genericBegin, , $genericBeginStore, $checkpoint] = $this->runner(
@@ -214,6 +252,17 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
             MonitoringRunStatus::Failed,
             $bestEffort->execute($this->lease(), self::id('parent'), $this->read(), $checkpoint)->jobs,
         );
+
+        [$failedCommitCritical, , , $checkpoint] = $this->runner(
+            pbs: true,
+            finishFailedFailure: new \App\Application\Collector\CollectorLeaseOwnershipLost('lost'),
+        );
+        try {
+            $failedCommitCritical->execute($this->lease(), self::id('parent-pbs'), $this->pbsRead(), $checkpoint);
+            self::fail('Failed-commit lease loss was swallowed.');
+        } catch (\App\Application\Collector\CollectorLeaseOwnershipLost) {
+            self::addToAssertionCount(1);
+        }
     }
 
     /** @return iterable<string, array{int, bool, list<MonitoringRunKind>}> */
@@ -225,6 +274,7 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
             MonitoringRunKind::ObservedTasks,
         ]];
         yield 'after jobs persisted' => [5, false, [MonitoringRunKind::ObservedTasks]];
+        yield 'after both children persisted' => [6, false, []];
     }
 
     /** @param list<MonitoringRunKind> $expectedFailures */
@@ -247,7 +297,7 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
         }
     }
 
-    /** @return array{RunSelectedEndpointMonitoring, RecordingMonitoringReader, RecordingMonitoringStore, ShutdownCheckpoint} */
+    /** @return array{RunSelectedEndpointMonitoring, RecordingMonitoringReader, RecordingMonitoringStore, ShutdownCheckpoint, RecordingMonitoringCursors} */
     private function runner(
         ?MonitoringRunKind $failApply = null,
         bool $checkpointInsideRead = false,
@@ -258,6 +308,7 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
         ?int $beginFailureAt = null,
         ?\Throwable $applyFailure = null,
         ?\Throwable $failFailure = null,
+        ?\Throwable $finishFailedFailure = null,
         int $pveMaximumWindow = 86_400,
         int $pbsMaximumWindow = 86_400,
     ): array {
@@ -279,12 +330,14 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
             $beginFailureAt,
             $applyFailure,
             $failFailure,
+            $finishFailedFailure,
         );
         $checkpoint = new ShutdownCheckpoint($shutdownAt, $this->lease());
+        $cursors = new RecordingMonitoringCursors();
         return [
             new RunSelectedEndpointMonitoring(
                 $reader,
-                new MonitoringWindowPlanner(new EmptyMonitoringCursors()),
+                new MonitoringWindowPlanner($cursors),
                 new MapSelectedEndpointMonitoring(),
                 $store,
                 new SequentialMonitoringIds(),
@@ -295,6 +348,7 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
             $reader,
             $store,
             $checkpoint,
+            $cursors,
         ];
     }
 
@@ -459,6 +513,7 @@ final class RecordingMonitoringStore implements MonitoringRunStore
         private readonly ?int $beginFailureAt = null,
         private readonly ?\Throwable $applyFailure = null,
         private readonly ?\Throwable $failFailure = null,
+        private readonly ?\Throwable $finishFailedFailure = null,
     ) {
     }
 
@@ -494,17 +549,24 @@ final class RecordingMonitoringStore implements MonitoringRunStore
 
     public function finishFailedCommit(CollectorLease $lease, MonitoringCommit $commit, string $errorCode): void
     {
+        if (null !== $this->finishFailedFailure) {
+            throw $this->finishFailedFailure;
+        }
         $this->failed[] = $commit->kind;
     }
 }
 
-final class EmptyMonitoringCursors implements MonitoringCursorCatalog
+final class RecordingMonitoringCursors implements MonitoringCursorCatalog
 {
+    /** @var list<array{kind: MonitoringCursorKind, scopeKeys: list<string>}> */
+    public array $calls = [];
+
     public function oldestCompletedUntil(
         ConnectionId $connectionId,
         MonitoringCursorKind $kind,
         array $scopeKeys,
     ): ?DateTimeImmutable {
+        $this->calls[] = ['kind' => $kind, 'scopeKeys' => $scopeKeys];
         return null;
     }
 }

@@ -12,13 +12,26 @@ ENV APP_ENV=prod \
     APP_TIMEZONE=UTC \
     COMPOSER_ALLOW_SUPERUSER=1
 
-RUN docker-php-ext-install -j"$(nproc)" pcntl pdo_mysql \
+RUN apk add --no-cache icu-libs \
+    && apk add --no-cache --virtual .php-ext-build-deps $PHPIZE_DEPS icu-dev \
+    && docker-php-ext-install -j"$(nproc)" intl pcntl pdo_mysql \
+    && apk del .php-ext-build-deps \
+    && php -r "exit(extension_loaded('intl') ? 0 : 1);" \
     && addgroup -g 10001 -S app \
     && adduser -u 10001 -S -D -G app -h /app app
 
 COPY --from=composer-bin /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
+
+FROM php-base AS backend-coverage-base
+
+ARG XDEBUG_VERSION=3.5.3
+
+RUN apk add --no-cache --virtual .coverage-build-deps $PHPIZE_DEPS linux-headers \
+    && pecl install "xdebug-${XDEBUG_VERSION}" \
+    && docker-php-ext-enable xdebug \
+    && apk del .coverage-build-deps
 
 FROM php-base AS backend-test-runtime
 
@@ -29,6 +42,7 @@ COPY backend/composer.json backend/composer.lock ./
 RUN composer install --no-interaction --no-progress --prefer-dist
 
 COPY backend/ ./
+COPY docs/openapi-v1.json /docs/openapi-v1.json
 RUN mkdir -p var \
     && chmod 0777 var
 
@@ -36,14 +50,16 @@ FROM backend-test-runtime AS backend-test
 
 RUN composer verify
 
-FROM backend-test-runtime AS backend-coverage-runtime
+FROM backend-coverage-base AS backend-coverage-runtime
 
-ARG XDEBUG_VERSION=3.5.3
+ENV APP_ENV=test \
+    APP_DEBUG=1
 
-RUN apk add --no-cache --virtual .coverage-build-deps $PHPIZE_DEPS linux-headers \
-    && pecl install "xdebug-${XDEBUG_VERSION}" \
-    && docker-php-ext-enable xdebug \
-    && apk del .coverage-build-deps
+COPY --from=backend-test-runtime /app /app
+
+FROM backend-coverage-runtime AS backend-mutation-runtime
+
+RUN php vendor/bin/infection --version | grep -F 'version 0.34.0'
 
 FROM php-base AS worker
 

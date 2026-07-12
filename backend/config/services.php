@@ -19,7 +19,10 @@ use App\Application\Collector\StopRequested;
 use App\Application\Inventory\Connection\ConnectionScanCatalog;
 use App\Application\Inventory\Connection\EndpointInstallationReader;
 use App\Application\Inventory\Connection\InstallationBindingCatalog;
+use App\Application\Inventory\Capability\CapabilitySnapshotStore;
 use App\Application\Inventory\InventoryIdentifierGenerator;
+use App\Application\Inventory\ReadModel\CollectorReadModel;
+use App\Application\Inventory\ReadModel\InventoryReadModel;
 use App\Application\Inventory\Pve\PveCoreInventoryMapper;
 use App\Application\Inventory\Pve\PveCoreInventoryStore;
 use App\Application\Inventory\Pve\PveInventoryMapper;
@@ -27,6 +30,10 @@ use App\Application\Inventory\Connection\ExecuteClaimedInventoryCycle;
 use App\Application\Inventory\Pbs\PbsInventoryMapper;
 use App\Application\Inventory\Pbs\PbsInventoryStore;
 use App\Application\Inventory\Pbs\MapPbsInventorySnapshot;
+use App\Application\Inventory\PbsContent\PbsContentStore;
+use App\Application\Inventory\PbsContent\RunSelectedEndpointPbsContent;
+use App\Application\Inventory\PbsContent\SelectedEndpointPbsContent;
+use App\Application\Inventory\PbsContent\SelectedEndpointPbsContentReader;
 use App\Application\Monitoring\MonitoringCursorCatalog;
 use App\Application\Monitoring\MonitoringRunStore;
 use App\Application\Monitoring\MonitoringWindowPlanner;
@@ -34,6 +41,7 @@ use App\Application\Monitoring\RunSelectedEndpointMonitoring;
 use App\Application\Monitoring\SelectedEndpointMonitoring;
 use App\Application\Monitoring\SelectedEndpointMonitoringReader;
 use App\Application\Proxmox\Pbs\PbsTasksAndJobsLimits;
+use App\Application\Proxmox\Pbs\PbsContentLimits;
 use App\Application\Proxmox\Pve\PveBackupInventoryLimits;
 use App\Application\Security\ReferencedCredentialKeyIds;
 use App\Application\Security\SecretCipher;
@@ -52,17 +60,21 @@ use App\Infrastructure\Readiness\EncryptionKeyRingReadinessCheck;
 use App\Infrastructure\Persistence\MariaDb\DbalReferencedCredentialKeyIds;
 use App\Infrastructure\Persistence\MariaDb\DbalCollectorHeartbeatStore;
 use App\Infrastructure\Persistence\MariaDb\DbalCollectorScheduleStore;
+use App\Infrastructure\Persistence\MariaDb\DbalCapabilitySnapshotStore;
 use App\Infrastructure\Persistence\MariaDb\DbalConnectionScanCatalog;
 use App\Infrastructure\Persistence\MariaDb\DbalInstallationBindingCatalog;
+use App\Infrastructure\Persistence\MariaDb\DbalInventoryReadModel;
 use App\Infrastructure\Persistence\MariaDb\DbalPveCoreInventoryStore;
 use App\Infrastructure\Persistence\MariaDb\DbalPveEndpointReadConfigurationSource;
 use App\Infrastructure\Persistence\MariaDb\DbalPbsEndpointReadConfigurationSource;
 use App\Infrastructure\Persistence\MariaDb\DbalPbsInventoryStore;
+use App\Infrastructure\Persistence\MariaDb\DbalPbsContentStore;
 use App\Infrastructure\Persistence\MariaDb\DbalMonitoringCursorCatalog;
 use App\Infrastructure\Persistence\MariaDb\DbalMonitoringRunStore;
 use App\Infrastructure\Persistence\MariaDb\SystemUuidV7InventoryIdentifierGenerator;
 use App\Infrastructure\Proxmox\PveCoreEndpointInstallationReader;
 use App\Infrastructure\Proxmox\NativeSelectedEndpointMonitoringReader;
+use App\Infrastructure\Proxmox\NativeSelectedEndpointPbsContentReader;
 use App\Infrastructure\Proxmox\PveCoreReadConnectorFactory;
 use App\Infrastructure\Proxmox\PveEndpointReadConfigurationSource;
 use App\Infrastructure\Proxmox\PveHttpClientFactory;
@@ -74,6 +86,7 @@ use App\Infrastructure\Proxmox\PveSystemJitterSource;
 use App\Infrastructure\Proxmox\PveExponentialJitterDelay;
 use App\Infrastructure\Proxmox\DispatchingEndpointInstallationReader;
 use App\Infrastructure\Proxmox\Pbs\PbsEndpointInstallationReader;
+use App\Infrastructure\Proxmox\Pbs\PbsContentClientFactory;
 use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConfigurationSource;
 use App\Infrastructure\Proxmox\Pbs\PbsExponentialJitterDelay;
 use App\Infrastructure\Proxmox\Pbs\PbsHttpClientFactory;
@@ -103,6 +116,12 @@ return static function (ContainerConfigurator $container): void {
         ->set('env(COLLECTOR_GRID_WIDTH_SECONDS)', '120')
         ->set('env(PVE_STORAGE_MAX_NODE_FANOUT)', '128')
         ->set('env(PBS_MAX_DATASTORE_FANOUT)', '128')
+        ->set('env(PBS_CONTENT_MAX_DATASTORES)', '128')
+        ->set('env(PBS_CONTENT_MAX_NAMESPACES_PER_DATASTORE)', '1024')
+        ->set('env(PBS_CONTENT_MAX_SNAPSHOTS_PER_NAMESPACE)', '65536')
+        ->set('env(PBS_CONTENT_MAX_TOTAL_SNAPSHOTS)', '262144')
+        ->set('env(PBS_CONTENT_NAMESPACE_BODY_BYTES)', '8388608')
+        ->set('env(PBS_CONTENT_SNAPSHOT_BODY_BYTES)', '67108864')
         ->set('env(MONITOR_HISTORY_OVERLAP_SECONDS)', '300')
         ->set('env(PVE_MONITOR_PAGE_SIZE)', '100')
         ->set('env(PVE_MONITOR_MAX_NODES)', '128')
@@ -131,6 +150,7 @@ return static function (ContainerConfigurator $container): void {
         ->exclude([
             '../src/Domain/',
             '../src/Application/Security/',
+            '../src/Infrastructure/Proxmox/PveBackup/',
             '../src/Infrastructure/Security/',
             '../src/Kernel.php',
         ]);
@@ -145,6 +165,8 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(CollectorScheduleStore::class, DbalCollectorScheduleStore::class);
     $services->set(DbalCollectorHeartbeatStore::class);
     $services->alias(CollectorHeartbeatStore::class, DbalCollectorHeartbeatStore::class);
+    $services->set(DbalCapabilitySnapshotStore::class);
+    $services->alias(CapabilitySnapshotStore::class, DbalCapabilitySnapshotStore::class);
     $services
         ->set(CollectorCycleCoordinator::class)
         ->arg('$buildVersion', '%env(APP_BUILD_VERSION)%');
@@ -163,10 +185,15 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(ConnectionScanCatalog::class, DbalConnectionScanCatalog::class);
     $services->set(DbalInstallationBindingCatalog::class);
     $services->alias(InstallationBindingCatalog::class, DbalInstallationBindingCatalog::class);
+    $services->set(DbalInventoryReadModel::class);
+    $services->alias(InventoryReadModel::class, DbalInventoryReadModel::class);
+    $services->alias(CollectorReadModel::class, DbalInventoryReadModel::class);
     $services->set(DbalPveCoreInventoryStore::class);
     $services->alias(PveCoreInventoryStore::class, DbalPveCoreInventoryStore::class);
     $services->set(DbalPbsInventoryStore::class);
     $services->alias(PbsInventoryStore::class, DbalPbsInventoryStore::class);
+    $services->set(DbalPbsContentStore::class);
+    $services->alias(PbsContentStore::class, DbalPbsContentStore::class);
     $services->set(SystemUuidV7InventoryIdentifierGenerator::class);
     $services->alias(InventoryIdentifierGenerator::class, SystemUuidV7InventoryIdentifierGenerator::class);
     $services->set(MapPveCoreInventorySnapshot::class);
@@ -196,6 +223,7 @@ return static function (ContainerConfigurator $container): void {
     $services->set(PbsNativeReadConnectorFactory::class);
     $services->alias(PbsReadConnectorFactory::class, PbsNativeReadConnectorFactory::class);
     $services->alias(PbsMonitoringClientFactory::class, PbsNativeReadConnectorFactory::class);
+    $services->alias(PbsContentClientFactory::class, PbsNativeReadConnectorFactory::class);
     $services
         ->set(PbsEndpointInstallationReader::class)
         ->arg('$maximumDatastoreFanout', '%env(int:PBS_MAX_DATASTORE_FANOUT)%');
@@ -226,6 +254,20 @@ return static function (ContainerConfigurator $container): void {
             '%env(int:PBS_MONITOR_MAX_JOBS_PER_KIND)%',
             '%env(int:PBS_MONITOR_HISTORY_WINDOW_SECONDS)%',
         ]);
+    $services
+        ->set(PbsContentLimits::class)
+        ->args([
+            '%env(int:PBS_CONTENT_MAX_DATASTORES)%',
+            '%env(int:PBS_CONTENT_MAX_NAMESPACES_PER_DATASTORE)%',
+            '%env(int:PBS_CONTENT_MAX_SNAPSHOTS_PER_NAMESPACE)%',
+            '%env(int:PBS_CONTENT_MAX_TOTAL_SNAPSHOTS)%',
+            '%env(int:PBS_CONTENT_NAMESPACE_BODY_BYTES)%',
+            '%env(int:PBS_CONTENT_SNAPSHOT_BODY_BYTES)%',
+        ]);
+    $services->set(NativeSelectedEndpointPbsContentReader::class);
+    $services->alias(SelectedEndpointPbsContentReader::class, NativeSelectedEndpointPbsContentReader::class);
+    $services->set(RunSelectedEndpointPbsContent::class);
+    $services->alias(SelectedEndpointPbsContent::class, RunSelectedEndpointPbsContent::class);
     $services->set(DbalMonitoringCursorCatalog::class);
     $services->alias(MonitoringCursorCatalog::class, DbalMonitoringCursorCatalog::class);
     $services

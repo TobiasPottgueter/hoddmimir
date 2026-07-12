@@ -240,6 +240,19 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
                 );
                 $connection->executeStatement(
                     <<<'SQL'
+                        UPDATE pbs_content_runs
+                        SET status = 'failed', heartbeat_at = :now, finished_at = :now,
+                            error_code = :error_code
+                        WHERE cycle_token = :cycle_token AND status = 'running' AND applied_at IS NULL
+                        SQL,
+                    [
+                        'now' => $formattedNow,
+                        'error_code' => $monitoringErrorCode,
+                        'cycle_token' => $lease->token->binary(),
+                    ],
+                );
+                $connection->executeStatement(
+                    <<<'SQL'
                         UPDATE inventory_sync_runs
                         SET status = :status, authoritative = 0, heartbeat_at = :now, finished_at = :now,
                             error_code = :error_code, error_summary = :error_summary
@@ -284,6 +297,21 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
             if (0 !== (int) $runningMonitoringRuns) {
                 throw new RuntimeException('A collector cycle cannot finish while monitoring runs are still running.');
             }
+            $runningPbsContentRuns = $connection->fetchOne(
+                <<<'SQL'
+                    SELECT COUNT(*)
+                    FROM pbs_content_runs
+                    WHERE cycle_token = :cycle_token AND status = 'running'
+                    SQL,
+                ['cycle_token' => $lease->token->binary()],
+            );
+            if (!is_int($runningPbsContentRuns)
+                && !(is_string($runningPbsContentRuns) && ctype_digit($runningPbsContentRuns))) {
+                throw new RuntimeException('MariaDB returned an invalid running PBS content count.');
+            }
+            if (0 !== (int) $runningPbsContentRuns) {
+                throw new RuntimeException('A collector cycle cannot finish while PBS content runs are still running.');
+            }
 
             $updated = $connection->update('collector_cycles', [
                 'heartbeat_at' => $formattedNow,
@@ -322,6 +350,15 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
         $connection->executeStatement(
             <<<'SQL'
                 UPDATE proxmox_monitoring_runs
+                SET status = 'failed', heartbeat_at = :now, finished_at = :now,
+                    error_code = 'collector_lease_lost'
+                WHERE cycle_token = :cycle_token AND status = 'running' AND applied_at IS NULL
+                SQL,
+            ['now' => $formattedNow, 'cycle_token' => $cycleToken],
+        );
+        $connection->executeStatement(
+            <<<'SQL'
+                UPDATE pbs_content_runs
                 SET status = 'failed', heartbeat_at = :now, finished_at = :now,
                     error_code = 'collector_lease_lost'
                 WHERE cycle_token = :cycle_token AND status = 'running' AND applied_at IS NULL

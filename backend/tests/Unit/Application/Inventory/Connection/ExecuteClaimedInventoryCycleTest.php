@@ -38,6 +38,10 @@ use App\Application\Inventory\InventoryIdentifier;
 use App\Application\Inventory\InventoryIdentifierGenerator;
 use App\Application\Inventory\Connection\ClaimedInventoryCycleResult;
 use App\Application\Inventory\Connection\ExecuteClaimedInventoryCycle;
+use App\Application\Inventory\Capability\BuildVerifiedCapabilityProfile;
+use App\Application\Inventory\Capability\CapabilitySnapshotConflict;
+use App\Application\Inventory\Capability\CapabilitySnapshotObservation;
+use App\Application\Inventory\Capability\CapabilitySnapshotStore;
 use App\Application\Inventory\Pve\MapPveCoreInventorySnapshot;
 use App\Application\Inventory\Pve\PersistPveEndpointReadAttempts;
 use App\Application\Inventory\Pve\PveCoreApplyResult;
@@ -64,6 +68,8 @@ use App\Application\Inventory\Pbs\PbsInventoryConflict;
 use App\Application\Inventory\Pbs\PbsInventoryMapper;
 use App\Application\Inventory\Pbs\PbsInventoryMappingFailure;
 use App\Application\Inventory\Pbs\PbsInventoryStore;
+use App\Application\Inventory\PbsContent\PbsContentRunStatus;
+use App\Application\Inventory\PbsContent\SelectedEndpointPbsContent;
 use App\Application\Monitoring\ConnectionMonitoringResult;
 use App\Application\Monitoring\MonitoringRunStatus;
 use App\Application\Monitoring\SelectedEndpointMonitoring;
@@ -94,6 +100,87 @@ use PHPUnit\Framework\TestCase;
 
 final class ExecuteClaimedInventoryCycleTest extends TestCase
 {
+    public function testCapabilityInvariantFailsPveParentBeforeApply(): void
+    {
+        [$executor, , $store] = $this->executor(
+            [$this->target('conflict', ProxmoxProduct::Pve, [1])],
+            [$this->snapshot('node-a')],
+            capabilityStore: new FailingCapabilitySnapshotStore(CapabilitySnapshotConflict::invariant('invalid')),
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Failed, $result->status);
+        self::assertSame(ConnectionReadFailureCode::SnapshotInvalid, $store->failures[0]->failureCode);
+        self::assertSame(
+            ['begin:conflict', 'attempt:conflict:1:selected', 'finish:conflict:snapshot_invalid'],
+            $store->events,
+        );
+    }
+
+    public function testConnectionDriftInCapabilityStoreFailsPbsParentBeforeApply(): void
+    {
+        [$executor, , , , $store] = $this->executor(
+            [$this->target('pbs', ProxmoxProduct::Pbs, [1])],
+            [$this->pbsSnapshot()],
+            capabilityStore: new FailingCapabilitySnapshotStore(CapabilitySnapshotConflict::connectionChanged()),
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Failed, $result->status);
+        self::assertSame(ConnectionReadFailureCode::ConnectionChanged, $store->failures[0]->failureCode);
+        self::assertSame(
+            ['begin:pbs', 'attempt:pbs:1:selected', 'finish:pbs:connection_changed'],
+            $store->events,
+        );
+    }
+
+    public function testUnsupportedCapabilityVersionFailsClosedBeforePveApply(): void
+    {
+        [$executor, , $store] = $this->executor(
+            [$this->target('conflict', ProxmoxProduct::Pve, [1])],
+            [$this->snapshot('node-a', 6)],
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Failed, $result->status);
+        self::assertSame(ConnectionReadFailureCode::SnapshotInvalid, $store->failures[0]->failureCode);
+        self::assertSame(
+            ['begin:conflict', 'attempt:conflict:1:selected', 'finish:conflict:snapshot_invalid'],
+            $store->events,
+        );
+    }
+
+    public function testConnectionDriftInCapabilityStoreFailsPveParentBeforeApply(): void
+    {
+        [$executor, , $store] = $this->executor(
+            [$this->target('conflict', ProxmoxProduct::Pve, [1])],
+            [$this->snapshot('node-a')],
+            capabilityStore: new FailingCapabilitySnapshotStore(CapabilitySnapshotConflict::connectionChanged()),
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Failed, $result->status);
+        self::assertSame(ConnectionReadFailureCode::ConnectionChanged, $store->failures[0]->failureCode);
+    }
+
+    public function testCapabilityInvariantFailsPbsParentBeforeApply(): void
+    {
+        [$executor, , , , $store] = $this->executor(
+            [$this->target('pbs', ProxmoxProduct::Pbs, [1])],
+            [$this->pbsSnapshot()],
+            capabilityStore: new FailingCapabilitySnapshotStore(CapabilitySnapshotConflict::invariant('invalid')),
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Failed, $result->status);
+        self::assertSame(ConnectionReadFailureCode::SnapshotInvalid, $store->failures[0]->failureCode);
+    }
+
     public function testSuccessfulCoreIsDegradedToPartialWhenMonitoringIsIncomplete(): void
     {
         $monitoring = new RecordingSelectedEndpointMonitoring([
@@ -156,6 +243,25 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
         self::assertSame([], $store->events);
         self::assertSame(['begin:pbs', 'attempt:pbs:1:selected', 'apply:pbs'], $pbsStore->events);
         self::assertSame([], $schedule->finished);
+    }
+
+    public function testPbsContentPartialDegradesTheParentButStillCollectsMonitoring(): void
+    {
+        $content = new RecordingSelectedEndpointPbsContent(PbsContentRunStatus::Partial);
+        $monitoring = new RecordingSelectedEndpointMonitoring([]);
+        [$executor] = $this->executor(
+            [$this->target('pbs', ProxmoxProduct::Pbs, [1])],
+            [$this->pbsSnapshot()],
+            pbsContent: $content,
+            monitoring: $monitoring,
+        );
+
+        $result = $executor->execute($this->cycle());
+
+        self::assertSame(CollectorCycleStatus::Partial, $result->status);
+        self::assertSame(1, $result->pbsPartial);
+        self::assertSame(1, $content->calls);
+        self::assertSame(1, $monitoring->calls);
     }
 
     public function testUnexpectedInvalidArgumentExceptionFromPbsReadPropagatesUnchanged(): void
@@ -357,7 +463,7 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
             $store->events,
         );
         self::assertSame([str_repeat(chr(1), 16), str_repeat(chr(2), 16)], $reader->endpointIds);
-        self::assertSame(23, $schedule->renewals);
+        self::assertSame(27, $schedule->renewals);
     }
 
     public function testReadFailuresAreIsolatedAndEveryOpenedRunEndsExactlyOnce(): void
@@ -468,6 +574,44 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         new ClaimedInventoryCycleResult(CollectorCycleStatus::Cancelled, 0, 0, 0, 0, 0, 0);
+    }
+
+    public function testResultStatusRulesUseEveryProductCounterWithoutSubtraction(): void
+    {
+        $pvePartial = new ClaimedInventoryCycleResult(CollectorCycleStatus::Partial, 0, 1, 0, 0, 0, 0);
+        $pbsPartial = new ClaimedInventoryCycleResult(CollectorCycleStatus::Partial, 0, 0, 0, 0, 1, 0);
+        $mixedPve = new ClaimedInventoryCycleResult(CollectorCycleStatus::Partial, 1, 0, 1, 0, 0, 0);
+        $mixedPbs = new ClaimedInventoryCycleResult(CollectorCycleStatus::Partial, 0, 0, 0, 1, 0, 1);
+
+        self::assertSame(1, $pvePartial->pvePartial);
+        self::assertSame(1, $pbsPartial->pbsPartial);
+        self::assertSame(CollectorCycleStatus::Partial, $mixedPve->status());
+        self::assertSame(CollectorCycleStatus::Partial, $mixedPbs->status());
+
+        foreach ([
+            [CollectorCycleStatus::Partial, 0, 0, 0, 0, 0, 0],
+            [CollectorCycleStatus::Partial, 0, 0, 1, 0, 0, 0],
+            [CollectorCycleStatus::Failed, 0, 0, 0, 0, 0, 0],
+            [CollectorCycleStatus::Failed, 1, 0, 1, 0, 0, 0],
+            [CollectorCycleStatus::Failed, 0, 1, 1, 0, 0, 0],
+            [CollectorCycleStatus::Failed, 0, 0, 0, 1, 0, 1],
+            [CollectorCycleStatus::Failed, 0, 0, 0, 0, 1, 1],
+        ] as [$status, $pveSucceeded, $pvePartialCount, $pveFailed, $pbsSucceeded, $pbsPartialCount, $pbsFailed]) {
+            try {
+                new ClaimedInventoryCycleResult(
+                    $status,
+                    $pveSucceeded,
+                    $pvePartialCount,
+                    $pveFailed,
+                    $pbsSucceeded,
+                    $pbsPartialCount,
+                    $pbsFailed,
+                );
+                self::fail('An inconsistent result counter combination was accepted.');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
     }
 
     public function testApplyResultUsesTypedStatusAndRejectsNegativeCounters(): void
@@ -625,7 +769,9 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
         array $pbsApplyResults = [],
         array $pbsBeginResults = [],
         ?PbsInventoryMapper $pbsMapper = null,
+        ?SelectedEndpointPbsContent $pbsContent = null,
         ?SelectedEndpointMonitoring $monitoring = null,
+        ?CapabilitySnapshotStore $capabilityStore = null,
     ): array {
         $schedule = new CycleScheduleStore();
         $coordinator = new CollectorCycleCoordinator(
@@ -649,6 +795,9 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
                 $pbsMapper ?? new MapPbsInventorySnapshot(),
                 $pbsStore,
                 $ids,
+                new BuildVerifiedCapabilityProfile(),
+                $capabilityStore ?? new RecordingCapabilitySnapshotStore($ids),
+                $pbsContent ?? new RecordingSelectedEndpointPbsContent(),
                 $monitoring ?? new RecordingSelectedEndpointMonitoring([]),
                 new FixedClock(),
                 $stopRequested ?? new NeverStopRequested(),
@@ -685,10 +834,10 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
         );
     }
 
-    private function snapshot(string $node): PveInstallationSnapshot
+    private function snapshot(string $node, int $major = 9): PveInstallationSnapshot
     {
         return new PveInstallationSnapshot(
-            new PveVersion(9, 0, 0, '9.0', '9.0.0', 'repo'),
+            new PveVersion($major, 0, 0, $major.'.0', $major.'.0.0', 'repo'),
             new PvePermissionAssessment([]),
             new PveClusterTopology(
                 PveClusterMode::Standalone,
@@ -729,6 +878,47 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
     private static function namedBytes(string $name): string
     {
         return substr(hash('sha256', $name, true), 0, 16);
+    }
+}
+
+final readonly class RecordingCapabilitySnapshotStore implements CapabilitySnapshotStore
+{
+    public function __construct(private InventoryIdentifierGenerator $ids) {}
+
+    public function persist(
+        CollectorLease $lease,
+        CapabilitySnapshotObservation $observation,
+    ): InventoryIdentifier {
+        return $this->ids->generate();
+    }
+}
+
+final readonly class FailingCapabilitySnapshotStore implements CapabilitySnapshotStore
+{
+    public function __construct(private CapabilitySnapshotConflict $conflict) {}
+
+    public function persist(
+        CollectorLease $lease,
+        CapabilitySnapshotObservation $observation,
+    ): InventoryIdentifier {
+        throw $this->conflict;
+    }
+}
+
+final class RecordingSelectedEndpointPbsContent implements SelectedEndpointPbsContent
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly PbsContentRunStatus $status = PbsContentRunStatus::Succeeded) {}
+
+    public function execute(
+        CollectorLease $lease,
+        InventoryIdentifier $parentRunId,
+        ConnectionInstallationRead $read,
+        ConnectionReadCheckpoint $checkpoint,
+    ): PbsContentRunStatus {
+        ++$this->calls;
+        return $this->status;
     }
 }
 

@@ -12,7 +12,15 @@ The user-facing product name is **Hoddmímir**. Technical identifiers use the AS
 
 ## Status
 
-The repository is being initialized. No production backup execution is enabled yet.
+The repository foundation from Phase 1 and substantial local implementation
+work for the Phase 2 API layer and Phase 3 collector/inventory slice are
+present. Production backup execution remains disabled.
+
+Phase 2 and Phase 3 are not yet formally accepted. Their remaining acceptance
+work includes the supported PVE/PBS live matrix, real TLS handshakes and a
+documented, reproducible way to create the new V2 connections and credentials.
+Repository quality gates must be rerun on the exact release candidate; local
+fixtures and tests are not a substitute for the outstanding live evidence.
 
 ## Architecture
 

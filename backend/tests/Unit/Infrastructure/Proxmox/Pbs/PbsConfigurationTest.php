@@ -95,13 +95,28 @@ final class PbsConfigurationTest extends TestCase
         foreach (["bad\n", '-bad', str_repeat('a', 64)] as $node) {
             try { PbsRequest::nodeStatus($node); self::fail('invalid node'); } catch (InvalidArgumentException) {}
         }
-        foreach (['/', '/datastore/ab', '/datastore/bad/child'] as $path) {
+        foreach (['/', '/datastore/ab', '/datastore/bad//child'] as $path) {
             try { PbsRequest::permission($path); self::fail('invalid permission path'); } catch (InvalidArgumentException) {}
         }
         self::assertSame('/datastore', PbsRequest::permission('/datastore')->query['path']);
         self::assertSame('/system/tasks', PbsRequest::permission('/system/tasks')->query['path']);
         self::assertSame('/remote', PbsRequest::permission('/remote')->query['path']);
         self::assertSame('/datastore/store_a', PbsRequest::permission('/datastore/store_a')->query['path']);
+        self::assertSame('/datastore/store_a/tenant/pve', PbsRequest::permission('/datastore/store_a/tenant/pve')->query['path']);
+        $permissionPrefix = '/datastore/store_a/';
+        $maximumPermissionPath = $permissionPrefix.str_repeat('a', 128 - strlen($permissionPrefix));
+        self::assertSame(128, strlen($maximumPermissionPath));
+        self::assertSame($maximumPermissionPath, PbsRequest::permission($maximumPermissionPath)->query['path']);
+        try {
+            PbsRequest::permission($maximumPermissionPath.'a');
+            self::fail('A PBS permission path beyond the official 128-byte schema was accepted.');
+        } catch (InvalidArgumentException) {}
+        foreach ([65_535, 268_435_457] as $limit) {
+            try {
+                PbsRequest::namespaces(new \App\Application\Proxmox\Pbs\PbsDatastoreId('store_a'), $limit);
+                self::fail('Invalid PBS content body limit accepted.');
+            } catch (InvalidArgumentException) {}
+        }
     }
 
     public function testTokenHeaderPurposeAndCanonicalSecretAreStrict(): void

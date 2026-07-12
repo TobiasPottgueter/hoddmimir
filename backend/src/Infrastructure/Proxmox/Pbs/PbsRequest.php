@@ -38,7 +38,10 @@ final readonly class PbsRequest
         if (isset($fixedPaths[$path])) {
             return new self(['access', 'permissions'], ['path' => $path], 262_144);
         }
-        if (AsciiPatternValidator::matches('/\A\/datastore\/[A-Za-z0-9_][A-Za-z0-9._-]{2,31}\z/D', $path)) {
+        if (strlen($path) <= 128 && AsciiPatternValidator::matches(
+            '/\A\/datastore\/[A-Za-z0-9_][A-Za-z0-9._-]{2,31}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*){0,8}\z/D',
+            $path,
+        )) {
             return new self(['access', 'permissions'], ['path' => $path], 262_144);
         }
         throw new InvalidArgumentException('The PBS permission probe path is not allowed.');
@@ -59,6 +62,27 @@ final readonly class PbsRequest
     public static function datastoreStatus(PbsDatastoreId $id): self
     {
         return new self(['admin', 'datastore', $id->value, 'status'], ['verbose' => 0], 262_144);
+    }
+
+    public static function namespaces(PbsDatastoreId $id, int $maximumBodyBytes): self
+    {
+        return new self(
+            ['admin', 'datastore', $id->value, 'namespace'],
+            ['max-depth' => 7],
+            self::requireBodyLimit($maximumBodyBytes),
+        );
+    }
+
+    public static function snapshots(
+        PbsDatastoreId $id,
+        \App\Application\Proxmox\Pbs\PbsNamespace $namespace,
+        int $maximumBodyBytes,
+    ): self {
+        return new self(
+            ['admin', 'datastore', $id->value, 'snapshots'],
+            $namespace->isRoot() ? [] : ['ns' => $namespace->value],
+            self::requireBodyLimit($maximumBodyBytes),
+        );
     }
 
     public static function tasks(string $node, PbsTaskListQuery $taskQuery): self
@@ -85,5 +109,13 @@ final readonly class PbsRequest
         if (!AsciiPatternValidator::matches('/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\z/D', $node)) {
             throw new InvalidArgumentException('The PBS node name is invalid.');
         }
+    }
+
+    private static function requireBodyLimit(int $maximumBodyBytes): int
+    {
+        if ($maximumBodyBytes < 65_536 || $maximumBodyBytes > 268_435_456) {
+            throw new InvalidArgumentException('The PBS response body limit is invalid.');
+        }
+        return $maximumBodyBytes;
     }
 }

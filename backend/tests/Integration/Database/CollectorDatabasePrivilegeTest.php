@@ -213,6 +213,59 @@ final class CollectorDatabasePrivilegeTest extends DatabaseTestCase
         }
     }
 
+    public function testCollectorHasExactCapabilitySnapshotGrants(): void
+    {
+        $connectionId = random_bytes(16);
+        $endpointId = random_bytes(16);
+        $this->insertPbsConnection($connectionId, $endpointId);
+        $this->connection()->commit();
+
+        $collector = $this->collectorConnection();
+        try {
+            $snapshotId = random_bytes(16);
+            $collector->beginTransaction();
+            $collector->insert('proxmox_capability_snapshots', [
+                'id' => $snapshotId,
+                'connection_id' => $connectionId,
+                'endpoint_id' => $endpointId,
+                'product' => 'pbs',
+                'version_major' => 4,
+                'version_minor' => 2,
+                'version_patch' => 0,
+                'release_name' => '1',
+                'raw_version' => '4.2.0',
+                'profile_version' => 1,
+                'capabilities_json' => '{"instanceIdentitySupported":true,"versionContract":"pbs_4"}',
+                'snapshot_hash' => random_bytes(32),
+                'first_observed_at' => self::NOW,
+                'last_observed_at' => self::NOW,
+            ]);
+            self::assertSame(1, $collector->update(
+                'proxmox_capability_snapshots',
+                ['last_observed_at' => '2026-07-11 10:00:01.000000'],
+                ['id' => $snapshotId],
+            ));
+            self::assertSame(
+                'pbs_4',
+                $collector->fetchOne(
+                    "SELECT JSON_UNQUOTE(JSON_EXTRACT(capabilities_json, '$.versionContract')) FROM proxmox_capability_snapshots WHERE id = :id",
+                    ['id' => $snapshotId],
+                ),
+            );
+            $this->assertDenied(static fn () => $collector->delete(
+                'proxmox_capability_snapshots',
+                ['id' => $snapshotId],
+            ));
+            $collector->rollBack();
+        } finally {
+            if ($collector->isTransactionActive()) {
+                $collector->rollBack();
+            }
+            $collector->close();
+            $this->connection()->delete('proxmox_connections', ['id' => $connectionId]);
+        }
+    }
+
     public function testCollectorHasMonitoringWriteGrantsButNoDeleteOrScopeUpdateGrant(): void
     {
         $connectionId = random_bytes(16);

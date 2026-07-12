@@ -27,12 +27,13 @@ Alle Pfade in diesem Dokument sind relativ zu
 
 ## Aktivierungs- und Testgrenze dieses Slice
 
-Dieser Read-Slice ist noch nicht an den Collector beziehungsweise dessen
-Dependency-Injection-Wiring aktiviert. Die endpointgebundene sichere Factory,
-der revisionsgebundene MariaDB-Konfigurations-Read und der produktive
-GET-only-Core-Reader sind inzwischen implementiert und in
+Dieser Read-Slice ist über den produktiven `EndpointInstallationReader` und den
+Collector-Runtime-Loop im Dependency-Injection-Container aktiviert. Die
+endpointgebundene sichere Factory, der revisionsgebundene
+MariaDB-Konfigurations-Read und der produktive GET-only-Core-Reader sind in
 [`pve-runtime-core-reader.md`](pve-runtime-core-reader.md) dokumentiert. Die
-Unit- und MariaDB-Tests ersetzen weiterhin keinen echten TLS-Handshake.
+lokalen Unit-, Contract- und MariaDB-Tests ersetzen weiterhin keinen echten
+TLS-Handshake.
 
 Lokale Integrations- und Live-Tests für System-CA, Custom-CA sowie korrekten
 und falschen SHA-256-Zertifikatsfingerprint bleiben deshalb ein Phase-2- und

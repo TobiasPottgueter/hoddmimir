@@ -96,7 +96,7 @@ services:
     depends_on:
       mariadb: { condition: service_healthy }
     ports:
-      - {{ (hoddmimir_web_bind_address ~ ':' ~ hoddmimir_web_port ~ ':8080') | to_json }}
+      - {{ ('127.0.0.1:' ~ hoddmimir_web_port ~ ':8080') | to_json }}
     healthcheck:
       test: [CMD, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
       interval: 10s

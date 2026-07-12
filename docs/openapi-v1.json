@@ -1,0 +1,154 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hoddmímir read-only inventory API",
+    "version": "1.0.0",
+    "description": "Phase 3 is unauthenticated and may only be published on host loopback until Phase 6 adds authentication and RBAC."
+  },
+  "servers": [{"url": "/"}],
+  "paths": {
+    "/api/v1/inventory/overview": {
+      "get": {
+        "operationId": "getInventoryOverview",
+        "responses": {
+          "200": {"description": "Current inventory counts and UTC freshness.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InventoryOverview"}}}}
+        }
+      }
+    },
+    "/api/v1/inventory/resources": {
+      "get": {
+        "operationId": "listInventoryResources",
+        "parameters": [
+          {"$ref": "#/components/parameters/Kind"},
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/ConnectionId"},
+          {"$ref": "#/components/parameters/ParentId"},
+          {"$ref": "#/components/parameters/InventoryState"},
+          {"$ref": "#/components/parameters/GuestType"}
+        ],
+        "responses": {
+          "200": {"description": "A bounded keyset page of inventory resources.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InventoryResourcePage"}}}},
+          "400": {"$ref": "#/components/responses/InvalidQuery"}
+        }
+      }
+    },
+    "/api/v1/collector/status": {
+      "get": {
+        "operationId": "getCollectorStatus",
+        "responses": {
+          "200": {"description": "Collector schedule and latest heartbeat without lease identity or credentials.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CollectorStatus"}}}}
+        }
+      }
+    },
+    "/api/v1/collector/runs": {
+      "get": {
+        "operationId": "listCollectorRuns",
+        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {
+          "200": {"description": "Latest bounded keyset page of inventory-sync runs.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CollectorRunPage"}}}},
+          "400": {"$ref": "#/components/responses/InvalidQuery"}
+        }
+      }
+    },
+    "/api/v1/collector/scopes": {
+      "get": {
+        "operationId": "listCollectorScopes",
+        "parameters": [{"$ref": "#/components/parameters/RunId"}, {"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {
+          "200": {"description": "Bounded keyset page of parent and PBS-content scope results for one inventory-sync run.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CollectorScopePage"}}}},
+          "400": {"$ref": "#/components/responses/InvalidQuery"}
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Kind": {"name": "kind", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/InventoryResourceKind"}},
+      "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+      "Cursor": {"name": "cursor", "in": "query", "schema": {"$ref": "#/components/schemas/PageCursor"}},
+      "ConnectionId": {"name": "connectionId", "in": "query", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+      "ParentId": {"name": "parentId", "in": "query", "description": "Cluster, PBS server, datastore/parent namespace, namespace, or backup-group ID as required by the selected kind.", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+      "InventoryState": {"name": "inventoryState", "in": "query", "schema": {"$ref": "#/components/schemas/InventoryState"}},
+      "GuestType": {"name": "guestType", "in": "query", "schema": {"type": "string", "enum": ["qemu", "lxc"]}},
+      "RunId": {"name": "runId", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/CanonicalUuid"}}
+    },
+    "responses": {
+      "InvalidQuery": {"description": "Unknown, malformed, incompatible, or out-of-bounds query.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}}
+    },
+    "schemas": {
+      "CanonicalUuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+      "UtcTimestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$"},
+      "PageCursor": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^[A-Za-z0-9_-]+$"},
+      "InventoryResourceKind": {"type": "string", "enum": ["pve_cluster", "pve_node", "pve_guest", "pve_storage", "pbs_server", "pbs_datastore", "pbs_namespace", "pbs_backup_group", "pbs_snapshot"]},
+      "InventoryState": {"type": "string", "enum": ["active", "archived"], "default": "active"},
+      "PageMetadata": {
+        "type": "object", "additionalProperties": false,
+        "required": ["limit", "count", "hasMore", "nextCursor"],
+        "properties": {
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+          "count": {"type": "integer", "minimum": 0, "maximum": 100},
+          "hasMore": {"type": "boolean"},
+          "nextCursor": {"oneOf": [{"$ref": "#/components/schemas/PageCursor"}, {"type": "null"}]}
+        }
+      },
+      "InventoryCounts": {
+        "type": "object", "additionalProperties": false,
+        "required": ["pveConnections", "pbsConnections", "pveClusters", "pveNodes", "qemuGuests", "lxcGuests", "pveStorages", "pbsServers", "pbsDatastores", "pbsNamespaces", "pbsBackupGroups", "pbsSnapshots"],
+        "properties": {
+          "pveConnections": {"type": "integer", "minimum": 0}, "pbsConnections": {"type": "integer", "minimum": 0},
+          "pveClusters": {"type": "integer", "minimum": 0}, "pveNodes": {"type": "integer", "minimum": 0},
+          "qemuGuests": {"type": "integer", "minimum": 0}, "lxcGuests": {"type": "integer", "minimum": 0},
+          "pveStorages": {"type": "integer", "minimum": 0}, "pbsServers": {"type": "integer", "minimum": 0},
+          "pbsDatastores": {"type": "integer", "minimum": 0}, "pbsNamespaces": {"type": "integer", "minimum": 0},
+          "pbsBackupGroups": {"type": "integer", "minimum": 0}, "pbsSnapshots": {"type": "integer", "minimum": 0}
+        }
+      },
+      "InventoryOverview": {
+        "type": "object", "additionalProperties": false, "required": ["generatedAt", "latestInventoryAt", "counts"],
+        "properties": {"generatedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "latestInventoryAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "counts": {"$ref": "#/components/schemas/InventoryCounts"}}
+      },
+      "InventoryResourceBase": {
+        "type": "object",
+        "required": ["id", "connectionId", "connectionName", "parentId", "displayName", "inventoryState", "firstSeenAt", "lastSeenAt", "archivedAt", "stateObservedAt"],
+        "properties": {
+          "id": {"$ref": "#/components/schemas/CanonicalUuid"}, "connectionId": {"$ref": "#/components/schemas/CanonicalUuid"},
+          "connectionName": {"type": "string"}, "parentId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]},
+          "displayName": {"type": "string"}, "inventoryState": {"$ref": "#/components/schemas/InventoryState"},
+          "firstSeenAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "lastSeenAt": {"$ref": "#/components/schemas/UtcTimestamp"},
+          "archivedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]},
+          "stateObservedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}
+        }
+      },
+      "PveClusterAttributes": {"type": "object", "additionalProperties": false, "required": ["topology"], "properties": {"topology": {"type": "string", "enum": ["clustered", "standalone"]}}},
+      "PveNodeAttributes": {"type": "object", "additionalProperties": false, "required": ["apiStatus"], "properties": {"apiStatus": {"type": "string"}}},
+      "PveGuestAttributes": {"type": "object", "additionalProperties": false, "required": ["guestType", "vmid", "template", "nodeId", "nodeName"], "properties": {"guestType": {"type": "string", "enum": ["qemu", "lxc"]}, "vmid": {"type": "integer", "minimum": 100}, "template": {"oneOf": [{"type": "boolean"}, {"type": "null"}]}, "nodeId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]}, "nodeName": {"oneOf": [{"type": "string"}, {"type": "null"}]}}},
+      "PveStorageAttributes": {"type": "object", "additionalProperties": false, "required": ["storageType", "supportsBackup", "shared", "disabled", "content", "pbsServer", "pbsPort", "pbsDatastore", "pbsNamespace"], "properties": {"storageType": {"type": "string"}, "supportsBackup": {"type": "boolean"}, "shared": {"type": "boolean"}, "disabled": {"type": "boolean"}, "content": {"type": "array", "items": {"type": "string"}}, "pbsServer": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "pbsPort": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "pbsDatastore": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "pbsNamespace": {"oneOf": [{"type": "string"}, {"type": "null"}]}}},
+      "PbsServerAttributes": {"type": "object", "additionalProperties": false, "required": ["nodeName", "version", "release", "repository", "uptimeSeconds", "memoryTotalBytes", "memoryUsedBytes", "rootTotalBytes", "rootUsedBytes", "rootAvailableBytes"], "properties": {"nodeName": {"type": "string"}, "version": {"type": "string"}, "release": {"type": "string"}, "repository": {"type": "string"}, "uptimeSeconds": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "memoryTotalBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "memoryUsedBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "rootTotalBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "rootUsedBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "rootAvailableBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}}},
+      "PbsDatastoreAttributes": {"type": "object", "additionalProperties": false, "required": ["backendType", "mountStatus", "maintenanceMode", "allowsBackupWrites", "capacitySemantics", "totalBytes", "usedBytes", "availableBytes"], "properties": {"backendType": {"type": "string"}, "mountStatus": {"type": "string"}, "maintenanceMode": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "allowsBackupWrites": {"type": "boolean"}, "capacitySemantics": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "totalBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "usedBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}, "availableBytes": {"oneOf": [{"type": "integer"}, {"type": "null"}]}}},
+      "PbsNamespaceAttributes": {"type": "object", "additionalProperties": false, "required": ["datastoreId", "namespacePath", "namespaceDepth", "parentNamespaceId"], "properties": {"datastoreId": {"$ref": "#/components/schemas/CanonicalUuid"}, "namespacePath": {"type": "string"}, "namespaceDepth": {"type": "integer", "minimum": 0, "maximum": 8}, "parentNamespaceId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]}}},
+      "PbsBackupGroupAttributes": {"type": "object", "additionalProperties": false, "required": ["namespaceId", "backupType", "backupId"], "properties": {"namespaceId": {"$ref": "#/components/schemas/CanonicalUuid"}, "backupType": {"type": "string", "enum": ["vm", "ct", "host"]}, "backupId": {"type": "string"}}},
+      "PbsSnapshotAttributes": {"type": "object", "additionalProperties": false, "required": ["backupTime", "protected", "sizeBytes", "verificationState"], "properties": {"backupTime": {"$ref": "#/components/schemas/UtcTimestamp"}, "protected": {"type": "boolean"}, "sizeBytes": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}, "verificationState": {"oneOf": [{"type": "string", "enum": ["ok", "failed"]}, {"type": "null"}]}}},
+      "PveClusterResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pve_cluster"}, "attributes": {"$ref": "#/components/schemas/PveClusterAttributes"}}}], "unevaluatedProperties": false},
+      "PveNodeResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pve_node"}, "attributes": {"$ref": "#/components/schemas/PveNodeAttributes"}}}], "unevaluatedProperties": false},
+      "PveGuestResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pve_guest"}, "attributes": {"$ref": "#/components/schemas/PveGuestAttributes"}}}], "unevaluatedProperties": false},
+      "PveStorageResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pve_storage"}, "attributes": {"$ref": "#/components/schemas/PveStorageAttributes"}}}], "unevaluatedProperties": false},
+      "PbsServerResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_server"}, "attributes": {"$ref": "#/components/schemas/PbsServerAttributes"}}}], "unevaluatedProperties": false},
+      "PbsDatastoreResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_datastore"}, "attributes": {"$ref": "#/components/schemas/PbsDatastoreAttributes"}}}], "unevaluatedProperties": false},
+      "PbsNamespaceResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_namespace"}, "attributes": {"$ref": "#/components/schemas/PbsNamespaceAttributes"}}}], "unevaluatedProperties": false},
+      "PbsBackupGroupResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_backup_group"}, "attributes": {"$ref": "#/components/schemas/PbsBackupGroupAttributes"}}}], "unevaluatedProperties": false},
+      "PbsSnapshotResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_snapshot"}, "attributes": {"$ref": "#/components/schemas/PbsSnapshotAttributes"}}}], "unevaluatedProperties": false},
+      "InventoryResource": {"oneOf": [{"$ref": "#/components/schemas/PveClusterResource"}, {"$ref": "#/components/schemas/PveNodeResource"}, {"$ref": "#/components/schemas/PveGuestResource"}, {"$ref": "#/components/schemas/PveStorageResource"}, {"$ref": "#/components/schemas/PbsServerResource"}, {"$ref": "#/components/schemas/PbsDatastoreResource"}, {"$ref": "#/components/schemas/PbsNamespaceResource"}, {"$ref": "#/components/schemas/PbsBackupGroupResource"}, {"$ref": "#/components/schemas/PbsSnapshotResource"}], "discriminator": {"propertyName": "kind"}},
+      "InventoryResourcePage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/InventoryResource"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
+      "CollectorScheduleUnconfigured": {"type": "object", "additionalProperties": false, "required": ["configured"], "properties": {"configured": {"const": false}}},
+      "CollectorScheduleConfigured": {"type": "object", "additionalProperties": false, "required": ["configured", "intervalSeconds", "nextScanAt", "lastCycleStartedAt", "lastCycleFinishedAt", "leaseActive", "leaseExpiresAt"], "properties": {"configured": {"const": true}, "intervalSeconds": {"type": "integer", "minimum": 1}, "nextScanAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "lastCycleStartedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "lastCycleFinishedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "leaseActive": {"type": "boolean"}, "leaseExpiresAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}}},
+      "CollectorHeartbeat": {"type": "object", "additionalProperties": false, "required": ["status", "startedAt", "heartbeatAt", "expiresAt", "fresh", "currentActivity", "nextActionAt", "buildVersion"], "properties": {"status": {"type": "string", "enum": ["starting", "ready", "busy", "degraded", "stopping"]}, "startedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "heartbeatAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "expiresAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "fresh": {"type": "boolean"}, "currentActivity": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "nextActionAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "buildVersion": {"type": "string"}}},
+      "CollectorStatus": {"type": "object", "additionalProperties": false, "required": ["generatedAt", "schedule", "heartbeat"], "properties": {"generatedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "schedule": {"oneOf": [{"$ref": "#/components/schemas/CollectorScheduleUnconfigured"}, {"$ref": "#/components/schemas/CollectorScheduleConfigured"}]}, "heartbeat": {"oneOf": [{"$ref": "#/components/schemas/CollectorHeartbeat"}, {"type": "null"}]}}},
+      "CollectorRun": {"type": "object", "additionalProperties": false, "required": ["id", "connectionId", "connectionName", "product", "status", "authoritative", "startedAt", "finishedAt", "appliedAt", "nodesSeen", "guestsSeen", "storagesSeen", "errorCode"], "properties": {"id": {"$ref": "#/components/schemas/CanonicalUuid"}, "connectionId": {"$ref": "#/components/schemas/CanonicalUuid"}, "connectionName": {"type": "string"}, "product": {"type": "string", "enum": ["pve", "pbs"]}, "status": {"type": "string", "enum": ["running", "succeeded", "partial", "failed", "cancelled", "abandoned"]}, "authoritative": {"type": "boolean"}, "startedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "finishedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "appliedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "nodesSeen": {"type": "integer", "minimum": 0}, "guestsSeen": {"type": "integer", "minimum": 0}, "storagesSeen": {"type": "integer", "minimum": 0}, "errorCode": {"oneOf": [{"type": "string", "pattern": "^[a-z0-9_]{1,64}$"}, {"type": "null"}]}}},
+      "CollectorScope": {"type": "object", "additionalProperties": false, "required": ["runId", "scopeType", "scopeKey", "status", "observedAt", "errorCode"], "properties": {"runId": {"$ref": "#/components/schemas/CanonicalUuid"}, "scopeType": {"type": "string", "enum": ["pve_topology", "pve_guests", "pve_storages", "pve_node_storages", "pbs_system", "pbs_datastores", "pbs_datastore_status", "pbs_namespaces", "pbs_snapshots", "pve_backup_jobs", "pve_tasks_active", "pve_tasks_archive", "pbs_prune_jobs", "pbs_sync_jobs", "pbs_verify_jobs", "pbs_tasks_running", "pbs_tasks_window"]}, "scopeKey": {"type": "string", "maxLength": 512}, "status": {"type": "string", "enum": ["complete", "partial", "failed"]}, "observedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "errorCode": {"oneOf": [{"type": "string", "pattern": "^[a-z0-9_]{1,64}$"}, {"type": "null"}]}}},
+      "CollectorRunPage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/CollectorRun"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
+      "CollectorScopePage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/CollectorScope"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
+      "ApiError": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": {"code": {"const": "invalid_query"}, "message": {"const": "The query is invalid."}}}}}
+    }
+  }
+}

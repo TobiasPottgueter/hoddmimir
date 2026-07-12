@@ -1,7 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import DashboardView from "@/views/DashboardView.vue";
-import SectionPlaceholderView from "@/views/SectionPlaceholderView.vue";
+
+const InventoryView = () => import("@/views/InventoryView.vue");
+const OperationsView = () => import("@/views/OperationsView.vue");
+const SectionPlaceholderView = () =>
+  import("@/views/SectionPlaceholderView.vue");
+const SystemsView = () => import("@/views/SystemsView.vue");
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -15,21 +20,20 @@ const router = createRouter({
     {
       path: "/systems",
       name: "systems",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Systeme",
-        description: "PVE- und PBS-Verbindungen werden hier verwaltet.",
-      },
+      component: SystemsView,
+      meta: { title: "Systeme" },
     },
     {
       path: "/inventory",
       name: "inventory",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Inventar",
-        description:
-          "Cluster, Nodes, VMs und Container erscheinen automatisch nach dem ersten Collector-Zyklus.",
-      },
+      component: InventoryView,
+      meta: { title: "Inventar" },
+    },
+    {
+      path: "/operations",
+      name: "operations",
+      component: OperationsView,
+      meta: { title: "Collector-Betrieb" },
     },
     {
       path: "/backup-targets",

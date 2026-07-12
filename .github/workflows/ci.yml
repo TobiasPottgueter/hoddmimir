@@ -6,6 +6,9 @@ on: # yamllint disable-line rule:truthy
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
 
 permissions:
   contents: read
@@ -15,6 +18,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  proxmox-schema-policy:
+    name: Proxmox schema drift policy (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+
+      - name: Test schema drift policy without network access
+        run: make api-schema-drift-test
+
   ansible:
     name: Ansible
     runs-on: ubuntu-latest
@@ -106,6 +125,56 @@ jobs:
       - name: Run isolated MariaDB integration tests
         run: make backend-integration
 
+  mutation-critical:
+    name: Critical Mutation Gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # 2.36.0
+        with:
+          php-version: "8.5"
+          tools: composer:2.10.2
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Enforce critical 90 percent MSI
+        run: XDEBUG_MODE=coverage sh tools/run-mutation.sh critical
+
+  mutation-full:
+    name: Scheduled Full Mutation Gates
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # 2.36.0
+        with:
+          php-version: "8.5"
+          tools: composer:2.10.2
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Enforce critical and global MSI
+        run: XDEBUG_MODE=coverage sh tools/run-mutation.sh all
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -127,14 +196,17 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Verify generated OpenAPI client
+        run: npm run api:check
+
       - name: Lint
         run: npm run lint
 
       - name: Type-check
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
+      - name: Test with coverage gates
+        run: npm run test:coverage
 
       - name: Check formatting
         run: npm run format:check
@@ -190,6 +262,9 @@ jobs:
             and .services."data-worker".stop_grace_period == "1m15s"
             and .services."backup-worker".environment.DATABASE_USER == "hoddmimir_backup_worker"
             and .services.webapp.environment.DATABASE_USER == "hoddmimir_web"
+            and (.services.webapp.ports | length == 1)
+            and .services.webapp.ports[0].host_ip == "127.0.0.1"
+            and .services.webapp.ports[0].target == 8080
           ' "$model" >/dev/null
           grep --fixed-strings --quiet "'hoddmimir_migration'@'%'" docker/mariadb/init/10-create-app-users.sh
 

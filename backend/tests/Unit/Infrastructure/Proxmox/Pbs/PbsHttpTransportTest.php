@@ -375,7 +375,14 @@ final class PbsInlineAuthenticator implements PbsRequestAuthenticator
 final class PbsRecordingDelay implements PbsRetryDelay
 {
     /** @var list<int> */ public array $attempts = [];
-    public function pause(int $attempt): void { $this->attempts[] = $attempt; }
+    public function __construct(private readonly int $maximumCalls = 64) {}
+    public function pause(int $attempt): void
+    {
+        $this->attempts[] = $attempt;
+        if (count($this->attempts) > $this->maximumCalls) {
+            throw new \RuntimeException('PBS retry-delay call budget exceeded.');
+        }
+    }
 }
 /** @internal */
 final class PbsNoopCheckpoint implements ConnectionReadCheckpoint

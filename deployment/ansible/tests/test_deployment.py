@@ -255,6 +255,12 @@ class PreflightTest(unittest.TestCase):
             "hoddmimir_pbs_monitor_max_rows_per_stream": (255, 65537),
             "hoddmimir_pbs_monitor_max_jobs_per_kind": (0, 65537),
             "hoddmimir_pbs_monitor_history_window_seconds": (0, 86401),
+            "hoddmimir_pbs_content_max_datastores": (0, 1025),
+            "hoddmimir_pbs_content_max_namespaces_per_datastore": (0, 65537),
+            "hoddmimir_pbs_content_max_snapshots_per_namespace": (0, 1048577),
+            "hoddmimir_pbs_content_max_total_snapshots": (65535, 4194305),
+            "hoddmimir_pbs_content_namespace_body_bytes": (65535, 67108865),
+            "hoddmimir_pbs_content_snapshot_body_bytes": (1048575, 268435457),
         }
         for variable, values in invalid_values.items():
             for value in values:
@@ -472,6 +478,16 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_GRID_WIDTH_SECONDS"])
             self.assertEqual("128", services["data-worker"]["environment"]["PVE_STORAGE_MAX_NODE_FANOUT"])
             self.assertEqual("128", services["data-worker"]["environment"]["PBS_MAX_DATASTORE_FANOUT"])
+            expected_content_environment = {
+                "PBS_CONTENT_MAX_DATASTORES": "128",
+                "PBS_CONTENT_MAX_NAMESPACES_PER_DATASTORE": "1024",
+                "PBS_CONTENT_MAX_SNAPSHOTS_PER_NAMESPACE": "65536",
+                "PBS_CONTENT_MAX_TOTAL_SNAPSHOTS": "262144",
+                "PBS_CONTENT_NAMESPACE_BODY_BYTES": "8388608",
+                "PBS_CONTENT_SNAPSHOT_BODY_BYTES": "67108864",
+            }
+            for name, expected in expected_content_environment.items():
+                self.assertEqual(expected, services["data-worker"]["environment"][name])
             expected_monitoring_environment = {
                 "MONITOR_HISTORY_OVERLAP_SECONDS": "300",
                 "PVE_MONITOR_PAGE_SIZE": "100",
@@ -498,6 +514,8 @@ class ComposeContractTest(unittest.TestCase):
                 )
             self.assertEqual("hoddmimir_backup_worker", services["backup-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("hoddmimir_web", services["webapp"]["environment"]["DATABASE_USER"])
+            self.assertEqual("127.0.0.1", services["webapp"]["ports"][0]["host_ip"])
+            self.assertEqual(8080, services["webapp"]["ports"][0]["target"])
             self.assertEqual("false", services["backup-worker"]["environment"]["BACKUP_EXECUTION_ENABLED"])
             self.assertEqual(
                 ["hoddmimir:worker:data"],
