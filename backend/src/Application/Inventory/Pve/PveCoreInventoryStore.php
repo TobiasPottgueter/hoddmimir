@@ -14,5 +14,5 @@ interface PveCoreInventoryStore
 
     public function finishWithoutSnapshot(CollectorLease $lease, PveSyncRunFailure $failure): void;
 
-    public function apply(CollectorLease $lease, PveCoreInventoryCommit $commit): PveCoreApplyResult;
+    public function apply(CollectorLease $lease, PveInventoryCommit $commit): PveCoreApplyResult;
 }

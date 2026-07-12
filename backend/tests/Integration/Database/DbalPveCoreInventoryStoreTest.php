@@ -19,12 +19,18 @@ use App\Application\Inventory\Pve\PveCoreInventoryCommit;
 use App\Application\Inventory\Pve\PveCoreInventoryConflict;
 use App\Application\Inventory\Pve\PveCoreScope;
 use App\Application\Inventory\Pve\PveCoreScopeResult;
+use App\Application\Inventory\Pve\PveInventoryCommit;
+use App\Application\Inventory\Pve\PveNodeStorageScopeResult;
+use App\Application\Inventory\Pve\PveNodeStorageStateObservation;
+use App\Application\Inventory\Pve\PveStorageCapacityStatus;
+use App\Application\Inventory\Pve\PveStorageObservation;
 use App\Application\Inventory\Pve\PveEndpointAttempt;
 use App\Application\Inventory\Pve\PveGuestObservation;
 use App\Application\Inventory\Pve\PveNodeObservation;
 use App\Application\Inventory\Pve\PveSyncRunStart;
 use App\Application\Inventory\Pve\PveSyncRunFailure;
 use App\Application\Proxmox\Pve\PveGuestType;
+use App\Application\Proxmox\Pve\PvePbsStorageMapping;
 use App\Infrastructure\Persistence\MariaDb\DbalCollectorScheduleStore;
 use App\Infrastructure\Persistence\MariaDb\DbalPveCoreInventoryStore;
 use DateTimeImmutable;
@@ -68,6 +74,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
     {
         if (isset($this->database)) {
             $this->connection()->executeStatement('DROP TRIGGER IF EXISTS hoddmimir_test_pve_core_rollback');
+            $this->connection()->executeStatement('DROP TRIGGER IF EXISTS hoddmimir_test_pve_storage_rollback');
             $this->cleanDatabase();
             $this->database->close();
         }
@@ -166,6 +173,291 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         ));
     }
 
+    public function testCompositeApplyPersistsStorageMappingsDisabledDefinitionsAndCapacityAtomically(): void
+    {
+        [$lease, $run] = $this->startSelectedRun('storage-first');
+        $at = self::at(1);
+        $result = $this->store->apply($lease, $this->commit(
+            $run,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest')],
+            observedAt: $at,
+            storages: [
+                $this->storage('disabled-backup', true, null, $at),
+                $this->storage('local-backup', false, null, $at),
+                $this->storage('pbs-backup', false, new PvePbsStorageMapping(
+                    'pbs.example.test',
+                    8007,
+                    'primary',
+                    'tenant/a',
+                ), $at),
+            ],
+            storageStates: [
+                $this->storageState('node-a', 'local-backup', PveStorageCapacityStatus::Measured, $at, 1000, 400, 600),
+                $this->storageState('node-b', 'local-backup', PveStorageCapacityStatus::Unavailable, $at),
+                $this->storageState('node-a', 'pbs-backup', PveStorageCapacityStatus::Invalid, $at),
+                $this->storageState('node-b', 'pbs-backup', PveStorageCapacityStatus::Measured, $at, 2000, 500, 1500),
+            ],
+        ));
+
+        self::assertSame('succeeded', $result->status);
+        self::assertSame(3, $this->databaseInteger(
+            'SELECT COUNT(*) FROM pve_storages WHERE connection_id = :connection_id',
+        ));
+        self::assertSame(0, $this->databaseInteger(
+            "SELECT COUNT(*) FROM pve_node_storage_state AS state JOIN pve_storages AS storage ON storage.id = state.storage_id WHERE storage.storage_name = 'disabled-backup'",
+        ));
+        self::assertSame(
+            [
+                'server' => 'pbs.example.test',
+                'port' => '8007',
+                'datastore' => 'primary',
+                'namespace' => 'tenant/a',
+            ],
+            $this->connection()->fetchAssociative(
+                'SELECT server, CAST(port AS CHAR) AS port, datastore, namespace FROM pve_storage_pbs_mappings',
+            ),
+        );
+        self::assertSame(
+            [
+                ['capacity_status' => 'invalid', 'total_bytes' => null, 'used_bytes' => null, 'available_bytes' => null],
+                ['capacity_status' => 'measured', 'total_bytes' => '1000', 'used_bytes' => '400', 'available_bytes' => '600'],
+                ['capacity_status' => 'measured', 'total_bytes' => '2000', 'used_bytes' => '500', 'available_bytes' => '1500'],
+                ['capacity_status' => 'unavailable', 'total_bytes' => null, 'used_bytes' => null, 'available_bytes' => null],
+            ],
+            $this->connection()->fetchAllAssociative(
+                <<<'SQL'
+                    SELECT capacity_status, CAST(total_bytes AS CHAR) AS total_bytes,
+                           CAST(used_bytes AS CHAR) AS used_bytes, CAST(available_bytes AS CHAR) AS available_bytes
+                    FROM pve_node_storage_state
+                    ORDER BY capacity_status, total_bytes
+                    SQL,
+            ),
+        );
+        self::assertSame('3', $this->connection()->fetchOne(
+            'SELECT CAST(storages_seen AS CHAR) FROM inventory_sync_runs WHERE id = :id',
+            ['id' => $run->binary()],
+        ));
+
+        $before = $this->connection()->fetchAllAssociative(
+            'SELECT id, storage_name, first_seen_at FROM pve_storages ORDER BY storage_name',
+        );
+        [$repeatLease, $repeatRun] = $this->startSelectedRun('storage-repeat');
+        $repeatAt = self::at(2);
+        $this->store->apply($repeatLease, $this->commit(
+            $repeatRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest')],
+            observedAt: $repeatAt,
+            storages: [
+                $this->storage('disabled-backup', true, null, $repeatAt),
+                $this->storage('local-backup', false, null, $repeatAt),
+                $this->storage('pbs-backup', false, new PvePbsStorageMapping('pbs-2.example.test', 8008, 'secondary', null), $repeatAt),
+            ],
+            storageStates: [
+                $this->storageState('node-a', 'local-backup', PveStorageCapacityStatus::Measured, $repeatAt, 1000, 400, 600),
+                $this->storageState('node-b', 'local-backup', PveStorageCapacityStatus::Unavailable, $repeatAt),
+                $this->storageState('node-a', 'pbs-backup', PveStorageCapacityStatus::Invalid, $repeatAt),
+                $this->storageState('node-b', 'pbs-backup', PveStorageCapacityStatus::Measured, $repeatAt, 2000, 500, 1500),
+            ],
+        ));
+        self::assertSame($before, $this->connection()->fetchAllAssociative(
+            'SELECT id, storage_name, first_seen_at FROM pve_storages ORDER BY storage_name',
+        ));
+        self::assertSame('pbs-2.example.test', $this->connection()->fetchOne(
+            'SELECT server FROM pve_storage_pbs_mappings',
+        ));
+    }
+
+    public function testPartialStorageApplyRetainsAbsenceAndFailClosedReplacesMeasuredCapacity(): void
+    {
+        [$seedLease, $seedRun] = $this->startSelectedRun('storage-partial-seed');
+        $at = self::at(1);
+        $this->store->apply($seedLease, $this->commit(
+            $seedRun,
+            ['node-a'],
+            [],
+            observedAt: $at,
+            storages: [$this->storage('kept', false, null, $at), $this->storage('missing', false, null, $at)],
+            storageStates: [
+                $this->storageState('node-a', 'kept', PveStorageCapacityStatus::Measured, $at, 100, 20, 80),
+                $this->storageState('node-a', 'missing', PveStorageCapacityStatus::Measured, $at, 100, 10, 90),
+            ],
+        ));
+
+        [$partialLease, $partialRun] = $this->startSelectedRun('storage-partial');
+        $partialAt = self::at(2);
+        $result = $this->store->apply($partialLease, $this->commit(
+            $partialRun,
+            ['node-a'],
+            [],
+            observedAt: $partialAt,
+            storageScope: InventoryScopeStatus::Partial,
+            nodeStorageScope: InventoryScopeStatus::Partial,
+            storages: [$this->storage('kept', false, null, $partialAt)],
+            storageStates: [$this->storageState('node-a', 'kept', PveStorageCapacityStatus::Unavailable, $partialAt)],
+        ));
+
+        self::assertSame('partial', $result->status);
+        self::assertSame(0, $result->archived);
+        self::assertSame(2, $this->databaseInteger(
+            "SELECT COUNT(*) FROM pve_storages WHERE inventory_state = 'active'",
+        ));
+        self::assertSame(
+            ['capacity_status' => 'unavailable', 'total_bytes' => null],
+            $this->connection()->fetchAssociative(
+                <<<'SQL'
+                    SELECT state.capacity_status, CAST(state.total_bytes AS CHAR) AS total_bytes
+                    FROM pve_node_storage_state AS state
+                    JOIN pve_storages AS storage ON storage.id = state.storage_id
+                    WHERE storage.storage_name = 'kept'
+                    SQL,
+            ),
+        );
+        self::assertSame('measured', $this->connection()->fetchOne(
+            <<<'SQL'
+                SELECT state.capacity_status FROM pve_node_storage_state AS state
+                JOIN pve_storages AS storage ON storage.id = state.storage_id
+                WHERE storage.storage_name = 'missing'
+                SQL,
+        ));
+
+        [$disabledLease, $disabledRun] = $this->startSelectedRun('storage-partial-disabled');
+        $disabledAt = self::at(3);
+        $disabledResult = $this->store->apply($disabledLease, $this->commit(
+            $disabledRun,
+            ['node-a'],
+            [],
+            observedAt: $disabledAt,
+            storageScope: InventoryScopeStatus::Partial,
+            nodeStorageScope: InventoryScopeStatus::Partial,
+            storages: [$this->storage('kept', true, null, $disabledAt)],
+            storageStates: [],
+        ));
+
+        self::assertSame('partial', $disabledResult->status);
+        self::assertSame('1', $this->connection()->fetchOne(
+            "SELECT CAST(disabled AS CHAR) FROM pve_storages WHERE storage_name = 'kept'",
+        ));
+        self::assertSame(0, $this->databaseInteger(
+            <<<'SQL'
+                SELECT COUNT(*)
+                FROM pve_node_storage_state AS state
+                JOIN pve_storages AS storage ON storage.id = state.storage_id
+                WHERE storage.storage_name = 'kept'
+                SQL,
+        ));
+        self::assertSame('measured', $this->connection()->fetchOne(
+            <<<'SQL'
+                SELECT state.capacity_status FROM pve_node_storage_state AS state
+                JOIN pve_storages AS storage ON storage.id = state.storage_id
+                WHERE storage.storage_name = 'missing'
+                SQL,
+        ));
+    }
+
+    public function testAuthoritativeStorageArchiveAndReactivationKeepIdentityAndFirstSeen(): void
+    {
+        [$seedLease, $seedRun] = $this->startSelectedRun('storage-archive-seed');
+        $firstAt = self::at(1);
+        $mapping = new PvePbsStorageMapping('pbs.example.test', 8007, 'primary', null);
+        $this->store->apply($seedLease, $this->commit(
+            $seedRun,
+            ['node-a'],
+            [],
+            observedAt: $firstAt,
+            storages: [$this->storage('stays', false, null, $firstAt), $this->storage('returns', false, $mapping, $firstAt)],
+            storageStates: [
+                $this->storageState('node-a', 'stays', PveStorageCapacityStatus::Unavailable, $firstAt),
+                $this->storageState('node-a', 'returns', PveStorageCapacityStatus::Measured, $firstAt, 100, 10, 90),
+            ],
+        ));
+        $before = $this->rowByNaturalKey('pve_storages', 'storage_name = :name', ['name' => 'returns']);
+
+        [$archiveLease, $archiveRun] = $this->startSelectedRun('storage-archive');
+        $archiveAt = self::at(2);
+        $archiveResult = $this->store->apply($archiveLease, $this->commit(
+            $archiveRun,
+            ['node-a'],
+            [],
+            observedAt: $archiveAt,
+            storages: [$this->storage('stays', false, null, $archiveAt)],
+            storageStates: [$this->storageState('node-a', 'stays', PveStorageCapacityStatus::Unavailable, $archiveAt)],
+        ));
+        self::assertSame(1, $archiveResult->archived);
+        $archived = $this->rowById('pve_storages', $before['id']);
+        self::assertSame('archived', $archived['inventory_state']);
+        self::assertSame('2026-07-11 00:00:02.000000', $archived['archived_at']);
+        self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_storage_pbs_mappings'));
+        self::assertSame(0, $this->databaseInteger(
+            'SELECT COUNT(*) FROM pve_node_storage_state WHERE storage_id = :storage_id',
+            ['storage_id' => $before['id']],
+        ));
+
+        [$returnLease, $returnRun] = $this->startSelectedRun('storage-return');
+        $returnAt = self::at(3);
+        $this->store->apply($returnLease, $this->commit(
+            $returnRun,
+            ['node-a'],
+            [],
+            observedAt: $returnAt,
+            storages: [$this->storage('stays', false, null, $returnAt), $this->storage('returns', false, $mapping, $returnAt)],
+            storageStates: [
+                $this->storageState('node-a', 'stays', PveStorageCapacityStatus::Unavailable, $returnAt),
+                $this->storageState('node-a', 'returns', PveStorageCapacityStatus::Measured, $returnAt, 100, 10, 90),
+            ],
+        ));
+        $returned = $this->rowById('pve_storages', $before['id']);
+        self::assertSame('active', $returned['inventory_state']);
+        self::assertNull($returned['archived_at']);
+        self::assertSame($before['first_seen_at'], $returned['first_seen_at']);
+        self::assertSame(1, $this->databaseInteger('SELECT COUNT(*) FROM pve_storage_pbs_mappings'));
+        self::assertSame(1, $this->databaseInteger(
+            'SELECT COUNT(*) FROM pve_node_storage_state WHERE storage_id = :storage_id',
+            ['storage_id' => $before['id']],
+        ));
+    }
+
+    public function testStorageMidWriteFailureRollsBackCoreStorageMappingAndRunFinalization(): void
+    {
+        [$lease, $run] = $this->startSelectedRun('storage-rollback');
+        $this->connection()->executeStatement('DROP TRIGGER IF EXISTS hoddmimir_test_pve_storage_rollback');
+        $this->connection()->executeStatement(<<<'SQL'
+            CREATE TRIGGER hoddmimir_test_pve_storage_rollback
+            BEFORE INSERT ON pve_node_storage_state
+            FOR EACH ROW
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'intentional storage rollback'
+            SQL);
+        try {
+            $at = self::at(1);
+            try {
+                $this->store->apply($lease, $this->commit(
+                    $run,
+                    ['node-a'],
+                    [],
+                    observedAt: $at,
+                    storages: [$this->storage('pbs-backup', false, new PvePbsStorageMapping('pbs.test', 8007, 'store', null), $at)],
+                    storageStates: [$this->storageState('node-a', 'pbs-backup', PveStorageCapacityStatus::Unavailable, $at)],
+                ));
+                self::fail('The storage trigger must interrupt the composite write.');
+            } catch (Throwable $failure) {
+                self::assertStringContainsString('intentional storage rollback', $failure->getMessage());
+            }
+            foreach (['proxmox_installation_bindings', 'pve_clusters', 'pve_nodes', 'pve_storages', 'pve_storage_pbs_mappings', 'pve_node_storage_state', 'inventory_sync_scope_results'] as $table) {
+                self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM '.$table), $table);
+            }
+            self::assertSame(
+                ['status' => 'running', 'applied_at' => null],
+                $this->connection()->fetchAssociative(
+                    'SELECT status, applied_at FROM inventory_sync_runs WHERE id = :id',
+                    ['id' => $run->binary()],
+                ),
+            );
+        } finally {
+            $this->connection()->executeStatement('DROP TRIGGER IF EXISTS hoddmimir_test_pve_storage_rollback');
+        }
+    }
+
     public function testGlobalPartialRetainsEveryMissingCoreObjectEvenWithCompleteTopology(): void
     {
         [$fullLease, $fullRun] = $this->startSelectedRun('partial-seed');
@@ -203,6 +495,8 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertSame(
             [
                 ['scope_type' => 'pve_guests', 'status' => 'partial'],
+                ['scope_type' => 'pve_node_storages', 'status' => 'complete'],
+                ['scope_type' => 'pve_storages', 'status' => 'complete'],
                 ['scope_type' => 'pve_topology', 'status' => 'complete'],
             ],
             $this->connection()->fetchAllAssociative(
@@ -236,7 +530,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_clusters'));
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_nodes'));
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM guests'));
-        self::assertSame(2, $this->databaseInteger(
+        self::assertSame(4, $this->databaseInteger(
             'SELECT COUNT(*) FROM inventory_sync_scope_results WHERE sync_run_id = :run_id',
             ['run_id' => $run->binary()],
         ));
@@ -885,6 +1179,8 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
     /**
      * @param list<string>              $nodeNames
      * @param list<PveGuestObservation> $guestObservations
+     * @param list<PveStorageObservation> $storages
+     * @param list<PveNodeStorageStateObservation> $storageStates
      */
     private function commit(
         InventoryIdentifier $run,
@@ -893,8 +1189,12 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         InventoryScopeStatus $topology = InventoryScopeStatus::Complete,
         InventoryScopeStatus $guests = InventoryScopeStatus::Complete,
         ?DateTimeImmutable $observedAt = null,
-    ): PveCoreInventoryCommit {
-        return new PveCoreInventoryCommit(
+        array $storages = [],
+        array $storageStates = [],
+        InventoryScopeStatus $storageScope = InventoryScopeStatus::Complete,
+        InventoryScopeStatus $nodeStorageScope = InventoryScopeStatus::Complete,
+    ): PveInventoryCommit {
+        $core = new PveCoreInventoryCommit(
             $run,
             $this->connectionId,
             $this->primaryEndpointId,
@@ -905,6 +1205,57 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
             array_map(static fn (string $name): PveNodeObservation => new PveNodeObservation($name, 'online'), $nodeNames),
             $guestObservations,
             $observedAt ?? self::at(1),
+        );
+        return new PveInventoryCommit(
+            $core,
+            new PveCoreScopeResult(PveCoreScope::Storages, $storageScope),
+            array_map(
+                static fn (string $name): PveNodeStorageScopeResult => new PveNodeStorageScopeResult($name, $nodeStorageScope),
+                $nodeNames,
+            ),
+            $storages,
+            $storageStates,
+        );
+    }
+
+    private function storage(
+        string $name,
+        bool $disabled,
+        ?PvePbsStorageMapping $mapping,
+        DateTimeImmutable $observedAt,
+    ): PveStorageObservation {
+        return new PveStorageObservation(
+            $name,
+            null === $mapping ? 'dir' : 'pbs',
+            ['backup'],
+            null,
+            $disabled,
+            false,
+            $mapping,
+            $observedAt,
+        );
+    }
+
+    private function storageState(
+        string $node,
+        string $storage,
+        PveStorageCapacityStatus $status,
+        DateTimeImmutable $observedAt,
+        ?int $total = null,
+        ?int $used = null,
+        ?int $available = null,
+    ): PveNodeStorageStateObservation {
+        return new PveNodeStorageStateObservation(
+            $node,
+            $storage,
+            true,
+            true,
+            false,
+            $status,
+            $total,
+            $used,
+            $available,
+            $observedAt,
         );
     }
 
@@ -1042,7 +1393,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
     /** @return list<string> */
     private function runApplyChildren(
         CollectorLease $lease,
-        PveCoreInventoryCommit $commit,
+        PveInventoryCommit $commit,
         int $count,
     ): array {
         /** @var list<array{int, resource}> $children */
@@ -1063,7 +1414,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
     }
 
     /** @return array{int, resource} */
-    private function startApplyChild(CollectorLease $lease, PveCoreInventoryCommit $commit): array
+    private function startApplyChild(CollectorLease $lease, PveInventoryCommit $commit): array
     {
         $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
         if (false === $sockets) {

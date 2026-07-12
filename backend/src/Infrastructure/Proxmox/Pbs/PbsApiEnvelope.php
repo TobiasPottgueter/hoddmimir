@@ -6,7 +6,11 @@ namespace App\Infrastructure\Proxmox\Pbs;
 
 final readonly class PbsApiEnvelope
 {
-    public function __construct(public mixed $data, public ?string $digest)
+    public function __construct(
+        public mixed $data,
+        public ?string $digest,
+        public ?int $total = null,
+    )
     {
     }
 }

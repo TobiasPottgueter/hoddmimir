@@ -1,0 +1,1 @@
+{"data":[{"id":"verify_weekly","store":"archive_a","schedule":"sun 03:00","last-run-upid":"UPID:pbs-three:0000002C:000F4242:66800002:66800000:verificationjob:verify_weekly:root@pam:","last-run-state":"Error: damaged chunk","last-run-endtime":1719664720,"next-run":1720321200,"future-verify":"ignored"}],"digest":"3333333333333333333333333333333333333333333333333333333333333333"}

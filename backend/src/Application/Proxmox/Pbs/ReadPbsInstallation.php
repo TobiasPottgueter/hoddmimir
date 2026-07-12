@@ -9,7 +9,11 @@ final readonly class ReadPbsInstallation
     public function __construct(
         private PbsReadConnector $connector,
         private PbsDatastoreScanScope $scope,
+        private int $maximumDatastoreFanout = 128,
     ) {
+        if ($maximumDatastoreFanout < 1 || $maximumDatastoreFanout > 1024) {
+            throw new \InvalidArgumentException('The PBS datastore fanout must be between 1 and 1024.');
+        }
     }
 
     public function read(): PbsInstallationSnapshot
@@ -52,6 +56,13 @@ final readonly class ReadPbsInstallation
         $definitions = $this->definitions($client, $issues);
 
         $expected = $this->expectedDatastores($startConfiguration);
+        $fanoutExceeded = count($expected) > $this->maximumDatastoreFanout;
+        if ($fanoutExceeded) {
+            $issues[] = new PbsInventoryIssue(
+                PbsInventoryIssueCode::DatastoreFanoutExceeded,
+                '/config/datastore',
+            );
+        }
         /** @var array<string, PbsDatastoreDefinition> $definitionsById */
         $definitionsById = [];
         foreach ($definitions as $definition) {
@@ -77,11 +88,7 @@ final readonly class ReadPbsInstallation
             }
 
             $selectedDefinitions[] = $definition;
-            if (!$definition->allowsBackupWrites()) {
-                $issues[] = new PbsInventoryIssue(PbsInventoryIssueCode::UnavailableDatastore, '/admin/datastore', $id);
-            }
-
-            if (!isset($permitted['*']) && !isset($permitted[$id])) {
+            if ($fanoutExceeded || (!isset($permitted['*']) && !isset($permitted[$id]))) {
                 continue;
             }
 
@@ -226,6 +233,7 @@ final readonly class ReadPbsInstallation
         foreach ($datastores as $datastore) {
             $expected[$datastore->value] = $datastore;
         }
+        ksort($expected, SORT_STRING);
         return $expected;
     }
 }

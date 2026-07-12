@@ -132,7 +132,8 @@ final class PbsReadersTest extends TestCase
         $decoder = new PbsJsonEnvelopeDecoder();
         self::assertSame(1, $decoder->decode('{"data":1,"future":true}', 100)->data);
         self::assertSame('abc', $decoder->decode('{"data":[],"digest":"abc"}', 100)->digest);
-        foreach (['', '[]', '{}', '{', '{"data":1,"digest":2}'] as $json) {
+        self::assertSame(42, $decoder->decode('{"data":[],"total":42}', 100)->total);
+        foreach (['', '[]', '{}', '{', '{"data":1,"digest":2}', '{"data":[],"total":"1"}', '{"data":[],"total":-1}'] as $json) {
             $this->assertFailure(PbsReadFailureCode::InvalidEnvelope, static fn () => $decoder->decode($json, 100));
         }
         $this->assertFailure(PbsReadFailureCode::InvalidEnvelope, static fn () => $decoder->decode('{"data":123}', 3));

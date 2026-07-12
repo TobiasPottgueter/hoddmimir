@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\Proxmox\Pve;
 
+use InvalidArgumentException;
+
 final readonly class PveTaskPage
 {
     /** @var list<PveBackupTask> */
@@ -22,6 +24,9 @@ final readonly class PveTaskPage
         array $tasks,
         array $issues,
     ) {
+        if ($rawRowCount < 0 || $rawRowCount > $query->limit || count($tasks) > $rawRowCount) {
+            throw new InvalidArgumentException('The PVE task page counters are invalid.');
+        }
         $this->tasks = $tasks;
         $this->issues = $issues;
     }

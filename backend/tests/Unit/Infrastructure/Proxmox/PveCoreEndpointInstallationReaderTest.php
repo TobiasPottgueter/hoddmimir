@@ -16,6 +16,8 @@ use App\Application\Inventory\Connection\PveEndpointReadFailureMapper;
 use App\Application\Proxmox\Pve\PveReadConnector;
 use App\Application\Proxmox\Pve\PveReadFailure;
 use App\Application\Proxmox\Pve\PveReadFailureCode;
+use App\Domain\Shared\Clock;
+use DateTimeImmutable;
 use App\Application\Security\EncryptedSecret;
 use App\Application\Security\PlaintextSecret;
 use App\Application\Security\SecretCipher;
@@ -43,7 +45,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class PveCoreEndpointInstallationReaderTest extends TestCase
 {
     #[DataProvider('supportedMajorProvider')]
-    public function testProductionReaderUsesOnlyTheFourCoreGetRoutes(int $major): void
+    public function testProductionReaderUsesOnlyTheCompositeGetRoutes(int $major): void
     {
         $configuration = self::configuration();
         $source = new FixedPveEndpointConfigurationSource($configuration);
@@ -59,6 +61,8 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
                 new NoPausePveRetryDelay(),
             ),
             new PveEndpointReadFailureMapper(),
+            new RuntimeReaderClock(),
+            128,
         );
 
         $snapshot = $reader->read(
@@ -69,16 +73,26 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
             $checkpoint,
         );
 
-        self::assertSame($major, $snapshot->version->major);
-        self::assertTrue($snapshot->isComplete());
+        self::assertSame($major, $snapshot->core->version->major);
+        self::assertTrue(
+            $snapshot->isComplete(),
+            implode(',', array_map(
+                static fn ($issue): string => $issue->code->value.':'.($issue->node ?? '-').':'.($issue->storageId ?? '-'),
+                $snapshot->storage->issues,
+            )),
+        );
         self::assertSame([
             '/api2/json/version',
             '/api2/json/access/permissions',
             '/api2/json/cluster/status',
             '/api2/json/cluster/resources',
+            '/api2/json/storage',
+            sprintf('/api2/json/nodes/pve%d-a.test/storage', $major),
+            sprintf('/api2/json/nodes/pve%d-b.test/storage', $major),
+            '/api2/json/storage',
         ], $http->paths);
-        self::assertSame(4, $cipher->decryptions);
-        self::assertSame(8, $checkpoint->calls, 'Each physical request has one pre and one post checkpoint.');
+        self::assertSame(8, $cipher->decryptions);
+        self::assertSame(16, $checkpoint->calls, 'Each physical request has one pre and one post checkpoint.');
         self::assertSame(1, $source->loads);
         self::assertSame(11, $source->expectedRevisions[0]);
         self::assertStringNotContainsString('TOKEN-SENTINEL', var_export($snapshot, true));
@@ -96,7 +110,13 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
     {
         $source = new ChangedPveEndpointConfigurationSource();
         $factory = new RejectingPveCoreReadConnectorFactory();
-        $reader = new PveCoreEndpointInstallationReader($source, $factory, new PveEndpointReadFailureMapper());
+        $reader = new PveCoreEndpointInstallationReader(
+            $source,
+            $factory,
+            new PveEndpointReadFailureMapper(),
+            new RuntimeReaderClock(),
+            128,
+        );
 
         try {
             $reader->read(
@@ -118,7 +138,13 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
     {
         $source = new FixedPveEndpointConfigurationSource(self::configuration());
         $factory = new RejectingPveCoreReadConnectorFactory(new PveCoreReadConnectorFactoryFailure());
-        $reader = new PveCoreEndpointInstallationReader($source, $factory, new PveEndpointReadFailureMapper());
+        $reader = new PveCoreEndpointInstallationReader(
+            $source,
+            $factory,
+            new PveEndpointReadFailureMapper(),
+            new RuntimeReaderClock(),
+            128,
+        );
 
         try {
             $reader->read(
@@ -154,6 +180,8 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
             new FixedPveEndpointConfigurationSource(self::configuration()),
             new FailingPveReadConnectorFactory(PveReadFailure::for(PveReadFailureCode::PermissionDenied)),
             new PveEndpointReadFailureMapper(),
+            new RuntimeReaderClock(),
+            128,
         );
 
         try {
@@ -182,6 +210,8 @@ final class PveCoreEndpointInstallationReaderTest extends TestCase
                     new NoPausePveRetryDelay(),
                 ),
                 new PveEndpointReadFailureMapper(),
+                new RuntimeReaderClock(),
+                128,
             );
 
             try {
@@ -303,12 +333,21 @@ final class FixturePveHttpClientFactory implements PveHttpClientFactory
 
             $path = parse_url($url, PHP_URL_PATH);
             TestCase::assertIsString($path);
+            $query = parse_url($url, PHP_URL_QUERY);
+            if (str_contains($path, '/nodes/')) {
+                TestCase::assertSame('content=backup', $query);
+            } else {
+                TestCase::assertNull($query);
+            }
             $this->paths[] = $path;
-            $fixture = match ($path) {
-                '/api2/json/version' => 'version.json',
-                '/api2/json/access/permissions' => 'access-permissions.json',
-                '/api2/json/cluster/status' => 'cluster-status-clustered.json',
-                '/api2/json/cluster/resources' => 'cluster-resources.json',
+            $fixture = match (true) {
+                1 === preg_match('#/nodes/pve[789]-a\.test/storage\z#D', $path) => 'storage-node-a.json',
+                1 === preg_match('#/nodes/pve[789]-b\.test/storage\z#D', $path) => 'storage-node-b.json',
+                '/api2/json/version' === $path => 'version.json',
+                '/api2/json/access/permissions' === $path => 'access-permissions.json',
+                '/api2/json/cluster/status' === $path => 'cluster-status-clustered.json',
+                '/api2/json/cluster/resources' === $path => 'cluster-resources.json',
+                '/api2/json/storage' === $path => 'storage-config.json',
                 default => throw new RuntimeException('Unexpected PVE route: '.$path),
             };
             $body = file_get_contents(sprintf(
@@ -323,6 +362,15 @@ final class FixturePveHttpClientFactory implements PveHttpClientFactory
 
             return new MockResponse($body, ['http_code' => 200]);
         }, 'https://pve.example.test:8006');
+    }
+}
+
+/** @internal */
+final class RuntimeReaderClock implements Clock
+{
+    public function now(): DateTimeImmutable
+    {
+        return new DateTimeImmutable('2026-07-11T20:00:00Z');
     }
 }
 

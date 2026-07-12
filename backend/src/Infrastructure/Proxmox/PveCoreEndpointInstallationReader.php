@@ -12,9 +12,11 @@ use App\Application\Inventory\Connection\EndpointReadFailure;
 use App\Application\Inventory\Connection\EndpointReadFailureCode;
 use App\Application\Inventory\Connection\ProxmoxProduct;
 use App\Application\Inventory\Connection\PveEndpointReadFailureMapper;
-use App\Application\Proxmox\Pve\PveInstallationSnapshot;
+use App\Application\Proxmox\Pve\PveInventorySnapshot;
 use App\Application\Proxmox\Pve\PveReadFailure;
-use App\Application\Proxmox\Pve\ReadPveInstallation;
+use App\Application\Proxmox\Pve\ReadPveInventory;
+use App\Application\Proxmox\Pve\ReadPveStorageInventory;
+use App\Domain\Shared\Clock;
 
 /**
  * Productive GET-only PVE core reader. It deliberately has no PBS fallback and
@@ -26,6 +28,8 @@ final readonly class PveCoreEndpointInstallationReader implements EndpointInstal
         private PveEndpointReadConfigurationSource $configurationSource,
         private PveCoreReadConnectorFactory $connectorFactory,
         private PveEndpointReadFailureMapper $failureMapper,
+        private Clock $clock,
+        private int $maximumStorageNodeFanout,
     ) {
     }
 
@@ -35,7 +39,7 @@ final readonly class PveCoreEndpointInstallationReader implements EndpointInstal
         int $expectedRevision,
         ProxmoxProduct $product,
         ConnectionReadCheckpoint $checkpoint,
-    ): PveInstallationSnapshot {
+    ): PveInventorySnapshot {
         if (ProxmoxProduct::Pve !== $product) {
             throw EndpointReadFailure::for(EndpointReadFailureCode::UnsupportedProductOrVersion);
         }
@@ -51,7 +55,10 @@ final readonly class PveCoreEndpointInstallationReader implements EndpointInstal
         try {
             $connector = $this->connectorFactory->create($configuration, $checkpoint);
 
-            return (new ReadPveInstallation($connector))->read();
+            return (new ReadPveInventory(
+                $connector,
+                new ReadPveStorageInventory($this->clock, $this->maximumStorageNodeFanout),
+            ))->read();
         } catch (PveCoreReadConnectorFactoryFailure) {
             throw EndpointReadFailure::for(EndpointReadFailureCode::Tls);
         } catch (PveReadFailure $failure) {

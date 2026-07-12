@@ -7,7 +7,7 @@ namespace App\Infrastructure\Proxmox\Pbs;
 use Symfony\Component\HttpClient\NativeHttpClient;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-final readonly class PbsNativeHttpClientFactory
+final readonly class PbsNativeHttpClientFactory implements PbsHttpClientFactory
 {
     public function __construct(private PbsCustomCaMaterializer $customCaMaterializer) {}
 

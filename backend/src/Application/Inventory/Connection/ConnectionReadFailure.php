@@ -11,6 +11,7 @@ final class ConnectionReadFailure extends RuntimeException
     private const MESSAGES = [
         'no_endpoints' => 'The Proxmox connection has no enabled endpoint.',
         'invalid_binding' => 'The installation binding does not belong to the connection product.',
+        'invalid_endpoint_configuration' => 'The enabled Proxmox endpoints are invalid for the installation identity.',
         'connection_changed' => 'The Proxmox connection changed while its inventory was being read.',
         'snapshot_invalid' => 'The Proxmox inventory snapshot could not be mapped safely.',
         'terminal_endpoint_failure' => 'The Proxmox connection read failed without endpoint failover.',
@@ -38,6 +39,11 @@ final class ConnectionReadFailure extends RuntimeException
     public static function connectionChanged(): self
     {
         return new self(ConnectionReadFailureCode::ConnectionChanged);
+    }
+
+    public static function invalidEndpointConfiguration(): self
+    {
+        return new self(ConnectionReadFailureCode::InvalidEndpointConfiguration);
     }
 
     public static function terminal(EndpointId $endpointId, EndpointReadFailureCode $endpointFailureCode): self

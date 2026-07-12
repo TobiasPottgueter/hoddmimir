@@ -6,6 +6,7 @@ namespace App\Application\Inventory\Connection;
 
 use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
 use App\Application\Proxmox\Pve\PveInstallationSnapshot;
+use App\Application\Proxmox\Pve\PveInventorySnapshot;
 
 /**
  * Infrastructure resolves endpoint and credential details from the opaque IDs.
@@ -20,5 +21,5 @@ interface EndpointInstallationReader
         int $expectedRevision,
         ProxmoxProduct $product,
         ConnectionReadCheckpoint $checkpoint,
-    ): PveInstallationSnapshot|PbsInstallationSnapshot;
+    ): PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot;
 }

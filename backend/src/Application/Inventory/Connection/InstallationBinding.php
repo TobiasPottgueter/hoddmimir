@@ -8,6 +8,7 @@ use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
 use App\Application\Proxmox\Pve\PveClusterMode;
 use App\Application\Proxmox\Pve\PveClusterNode;
 use App\Application\Proxmox\Pve\PveInstallationSnapshot;
+use App\Application\Proxmox\Pve\PveInventorySnapshot;
 use InvalidArgumentException;
 
 final readonly class InstallationBinding
@@ -21,6 +22,7 @@ final readonly class InstallationBinding
         public InstallationBindingKind $kind,
         public string $identity,
         array $knownMemberNodes = [],
+        public ?EndpointId $legacyEndpointId = null,
     ) {
         if (!InstallationIdentityValidator::isValid($identity)) {
             throw new InvalidArgumentException('The installation binding identity is invalid.');
@@ -42,6 +44,12 @@ final readonly class InstallationBinding
             return;
         }
         $this->knownMemberNodes = [];
+        if (InstallationBindingKind::PbsLegacyNode === $kind && null === $legacyEndpointId) {
+            throw new InvalidArgumentException('A legacy PBS binding requires its exact endpoint.');
+        }
+        if (InstallationBindingKind::PbsLegacyNode !== $kind && null !== $legacyEndpointId) {
+            throw new InvalidArgumentException('Only a legacy PBS binding may carry an endpoint.');
+        }
     }
 
     /** @param non-empty-list<string> $knownMemberNodes */
@@ -55,22 +63,34 @@ final readonly class InstallationBinding
         return new self(ProxmoxProduct::Pve, InstallationBindingKind::PveStandalone, $node);
     }
 
-    public static function pbs4Instance(string $instanceIdentity): self
+    public static function pbsInstance(string $instanceIdentity): self
     {
         if (32 !== strlen($instanceIdentity) || 32 !== strspn($instanceIdentity, '0123456789abcdef')) {
             throw new InvalidArgumentException('The PBS 4 instance identity is invalid.');
         }
 
-        return new self(ProxmoxProduct::Pbs, InstallationBindingKind::Pbs4Instance, $instanceIdentity);
+        return new self(ProxmoxProduct::Pbs, InstallationBindingKind::PbsInstance, $instanceIdentity);
     }
 
-    public static function pbs3Node(string $node): self
+    public static function pbsLegacyNode(string $node, EndpointId $endpointId): self
     {
-        return new self(ProxmoxProduct::Pbs, InstallationBindingKind::Pbs3Node, $node);
+        return new self(
+            ProxmoxProduct::Pbs,
+            InstallationBindingKind::PbsLegacyNode,
+            $node,
+            legacyEndpointId: $endpointId,
+        );
     }
 
-    public static function fromSnapshot(PveInstallationSnapshot|PbsInstallationSnapshot $snapshot): ?self
+    public static function fromSnapshot(
+        PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot $snapshot,
+        ?EndpointId $endpointId = null,
+    ): ?self
     {
+        if ($snapshot instanceof PveInventorySnapshot) {
+            $snapshot = $snapshot->core;
+        }
+
         if ($snapshot instanceof PveInstallationSnapshot) {
             if (PveClusterMode::Clustered === $snapshot->topology->mode) {
                 $name = $snapshot->topology->clusterName;
@@ -99,11 +119,16 @@ final readonly class InstallationBinding
                 : null;
         }
 
-        if (3 === $snapshot->version->major) {
-            return InstallationIdentityValidator::isValid($snapshot->node) ? self::pbs3Node($snapshot->node) : null;
+        if (3 !== $snapshot->version->major && 4 !== $snapshot->version->major) {
+            return null;
         }
-        if (4 === $snapshot->version->major && null !== $snapshot->instanceIdentity) {
-            return self::pbs4Instance($snapshot->instanceIdentity->value);
+        if (!$snapshot->version->supportsInstanceIdentity()) {
+            return null !== $endpointId && InstallationIdentityValidator::isValid($snapshot->node)
+                ? self::pbsLegacyNode($snapshot->node, $endpointId)
+                : null;
+        }
+        if (null !== $snapshot->instanceIdentity) {
+            return self::pbsInstance($snapshot->instanceIdentity->value);
         }
 
         return null;
@@ -114,7 +139,8 @@ final readonly class InstallationBinding
         return $this->product === $other->product
             && $this->kind === $other->kind
             && hash_equals($this->identity, $other->identity)
-            && $this->knownMemberNodes === $other->knownMemberNodes;
+            && $this->knownMemberNodes === $other->knownMemberNodes
+            && $this->legacyEndpointId?->bytes === $other->legacyEndpointId?->bytes;
     }
 
     public function matchesObservation(self $observed): bool

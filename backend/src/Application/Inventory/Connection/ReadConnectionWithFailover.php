@@ -6,6 +6,7 @@ namespace App\Application\Inventory\Connection;
 
 use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
 use App\Application\Proxmox\Pve\PveInstallationSnapshot;
+use App\Application\Proxmox\Pve\PveInventorySnapshot;
 
 final readonly class ReadConnectionWithFailover
 {
@@ -70,7 +71,7 @@ final readonly class ReadConnectionWithFailover
                 continue;
             }
 
-            $actualBinding = InstallationBinding::fromSnapshot($snapshot);
+            $actualBinding = InstallationBinding::fromSnapshot($snapshot, $endpoint->endpointId);
             if (null === $actualBinding) {
                 $this->finishAttempt(
                     $attemptSink,
@@ -82,10 +83,24 @@ final readonly class ReadConnectionWithFailover
                 $lastFailure = EndpointReadFailureCode::RootUnusable;
                 continue;
             }
+            if (ProxmoxProduct::Pbs === $target->product
+                && InstallationBindingKind::PbsLegacyNode === $actualBinding->kind
+                && (null === $expectedBinding
+                    || InstallationBindingKind::PbsLegacyNode === $expectedBinding->kind)
+                && count($target->endpoints) > 1) {
+                $this->finishAttempt(
+                    $attemptSink,
+                    $checkpoint,
+                    $attempt,
+                    EndpointReadAttemptOutcome::Terminal,
+                    EndpointReadFailureCode::RootUnusable,
+                );
+                throw ConnectionReadFailure::invalidEndpointConfiguration();
+            }
             if (
                 null === $expectedBinding
                 && InstallationBindingKind::PveCluster === $actualBinding->kind
-                && !$snapshot->isComplete()
+                && !$this->pveCoreIsComplete($snapshot)
             ) {
                 $this->finishAttempt(
                     $attemptSink,
@@ -97,7 +112,12 @@ final readonly class ReadConnectionWithFailover
                 $lastFailure = EndpointReadFailureCode::RootUnusable;
                 continue;
             }
-            if (null !== $expectedBinding && !$expectedBinding->matchesObservation($actualBinding)) {
+            if (null !== $expectedBinding && !$this->matchesExpectedBinding(
+                $expectedBinding,
+                $actualBinding,
+                $snapshot,
+                $endpoint->endpointId,
+            )) {
                 $this->finishAttempt(
                     $attemptSink,
                     $checkpoint,
@@ -159,9 +179,20 @@ final readonly class ReadConnectionWithFailover
     ): array {
         if (
             ProxmoxProduct::Pbs === $target->product
-            && (null === $binding || InstallationBindingKind::Pbs4Instance !== $binding->kind)
+            && null === $binding
         ) {
             return [$target->endpoints[0]];
+        }
+
+        if (ProxmoxProduct::Pbs === $target->product
+            && InstallationBindingKind::PbsLegacyNode === $binding->kind) {
+            foreach ($target->endpoints as $endpoint) {
+                if ($endpoint->endpointId->bytes === $binding->legacyEndpointId?->bytes) {
+                    return [$endpoint];
+                }
+            }
+
+            throw ConnectionReadFailure::invalidEndpointConfiguration();
         }
 
         /** @var non-empty-list<EndpointScanReference> $endpoints */
@@ -170,14 +201,43 @@ final readonly class ReadConnectionWithFailover
         return $endpoints;
     }
 
+    private function matchesExpectedBinding(
+        InstallationBinding $expected,
+        InstallationBinding $actual,
+        PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot $snapshot,
+        EndpointId $endpointId,
+    ): bool {
+        if ($expected->matchesObservation($actual)) {
+            return true;
+        }
+
+        return InstallationBindingKind::PbsLegacyNode === $expected->kind
+            && InstallationBindingKind::PbsInstance === $actual->kind
+            && $snapshot instanceof PbsInstallationSnapshot
+            && $snapshot->scope->installationWide
+            && $snapshot->isComplete()
+            && $expected->legacyEndpointId?->bytes === $endpointId->bytes
+            && hash_equals($expected->identity, $snapshot->node);
+    }
+
     private function matchesProduct(
         ProxmoxProduct $product,
-        PveInstallationSnapshot|PbsInstallationSnapshot $snapshot,
+        PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot $snapshot,
     ): bool {
         if (ProxmoxProduct::Pve === $product) {
-            return $snapshot instanceof PveInstallationSnapshot;
+            return $snapshot instanceof PveInstallationSnapshot || $snapshot instanceof PveInventorySnapshot;
         }
 
         return $snapshot instanceof PbsInstallationSnapshot;
+    }
+
+    private function pveCoreIsComplete(
+        PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot $snapshot,
+    ): bool {
+        if ($snapshot instanceof PveInventorySnapshot) {
+            return $snapshot->core->isComplete();
+        }
+
+        return $snapshot instanceof PveInstallationSnapshot && $snapshot->isComplete();
     }
 }

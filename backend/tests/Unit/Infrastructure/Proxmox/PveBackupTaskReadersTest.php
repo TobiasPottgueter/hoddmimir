@@ -299,6 +299,20 @@ final class PveBackupTaskReadersTest extends TestCase
         $clean = (new PveTaskPageReader())->read('pve', PveTaskQuery::active(), [$withoutOptionals]);
         self::assertTrue($clean->isComplete());
         self::assertNull($clean->tasks[0]->listStatus);
+
+        $beforeStart = $this->taskRow();
+        $beforeStart['endtime'] = 1;
+        $invalidEnd = (new PveTaskPageReader())->read('pve', PveTaskQuery::archive(0, 10), [$beforeStart]);
+        self::assertFalse($invalidEnd->isComplete());
+        self::assertNull($invalidEnd->tasks[0]->endTime);
+        self::assertSame('/data/0/endtime', $invalidEnd->issues[0]->field);
+
+        $oversizedStatus = $this->taskRow();
+        $oversizedStatus['status'] = str_repeat('A', 256);
+        $invalidStatus = (new PveTaskPageReader())->read('pve', PveTaskQuery::active(), [$oversizedStatus]);
+        self::assertFalse($invalidStatus->isComplete());
+        self::assertNull($invalidStatus->tasks[0]->listStatus);
+        self::assertSame('/data/0/status', $invalidStatus->issues[0]->field);
     }
 
     public function testStatusReaderImplementsVersionedStarttimePstartAndSuccessRules(): void

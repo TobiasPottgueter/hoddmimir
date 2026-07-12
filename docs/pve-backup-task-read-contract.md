@@ -3,8 +3,12 @@
 This document pins the GET-only Proxmox VE 7/8/9 contract used to inventory
 configured `vzdump` jobs and observe their tasks. It is intentionally narrower
 than the complete Proxmox API. It does not authorize backup execution, task
-stopping, task-log access, persistence, collector scheduling, or dependency
-injection activation.
+stopping, or task-log access. The bounded reader is active after every usable
+PVE core/storage apply: two fenced monitoring child runs consume one combined
+GET-only read from the exact endpoint selected by the parent, without a second
+failover decision, and persist only positive job/task observations. Schema,
+collector orchestration, and dependency-injection wiring are part of this
+activated monitoring slice.
 
 The fixtures described here are hand-constructed and sanitized. They are not
 captures from a live installation and are not release evidence. A live,
@@ -39,6 +43,10 @@ The following requests are explicitly outside the allow-list:
 
 The validated UPID is encoded as one path segment only after parsing. It is
 never accepted as an arbitrary raw path fragment.
+
+The inventory reader never calls the status endpoint. That targeted adapter is
+reserved for later Backup Worker reconciliation of one already known
+Hoddmímir-owned UPID. Inventory fan-out is limited to job and task-list GETs.
 
 ## Pinned official sources
 
@@ -116,18 +124,84 @@ A task is successful only when `status` is exactly `stopped` and `exitstatus`
 is exactly `OK`. Running, missing, 404, malformed, unknown, stopped without an
 exit status, and every non-`OK` exit status are never successful.
 
+## Runtime read order, fixed window, and topology authority
+
+The backup inventory is appended to the existing composite read on the same
+selected endpoint, client, and session. Within this slice its request order is
+deterministic:
+
+1. `GET /cluster/backup`;
+2. for each binary-sorted authoritative topology node, read the active stream;
+3. read the archived stream for that same node;
+4. repeat steps 2 and 3 for the next node.
+
+The reader accepts one typed immutable archive window from the monitoring
+window planner. This permits a persisted authoritative cursor plus overlap to
+choose `since`/`until`; the reader never advances that cursor itself. For an
+initial/default read only, it derives one window exactly once from an injected
+clock before the first remote request: `until` is that instant's UNIX epoch in
+UTC and `since` is `max(0, until - archive-window-seconds)`. Every archive page
+and node in the read receives those same immutable inclusive bounds. A supplied
+window wider than the configured bound is rejected before remote I/O.
+
+The typed window also carries a `historyGap` flag. The planner sets it when the
+persisted cursor is older than the bounded catch-up horizon. A successfully
+read recent window may still be complete while retaining that explicit gap;
+only the integration layer advances a node's cursor, and only after that
+node's archive stream is complete.
+
+The supplied nodes must be valid and unique. Invalid or duplicate nodes, or a
+node count above the configured hard limit, fail closed before every task-list
+GET. The reader sorts valid nodes itself for deterministic ordering; it never
+discovers extra nodes from task rows or resource observations.
+
 ## Bounded pagination and completeness
 
 Active and archived sources have independent offset sequences. Each sequence
 starts at `start=0`, advances by its explicit `limit`, and stops at the first
 short response. A configured page cap is a hard upper bound; reaching it before
-a short page marks the result partial. There is no catch-up or unbounded scan.
+a short page marks the stream partial. There is no catch-up or unbounded scan.
 
-Rows are de-duplicated by their complete UPID across pages and sources. An
-identical duplicate is retained once. A duplicate UPID with conflicting
-content marks the result partial and records an issue. Absence from a bounded
-window has no deletion semantics because archived tasks can age out and a task
-can move between active and archived sources during the read.
+The production defaults and hard maxima for one connection/read are:
+
+| Bound | Default |
+|---|---:|
+| topology nodes | 128 |
+| page size | 100 |
+| active pages per node | 2 |
+| archive pages per node | 10 |
+| task-list GETs in total | 512 |
+| raw task rows in total | 25,000 |
+| distinct UPIDs in total | 25,000 |
+| archive window | 86,400 seconds |
+
+The reader reserves enough raw-row capacity for a complete next page before
+issuing that GET. Request, raw-row, or distinct-UPID exhaustion marks the
+current stream partial or not-scanned and prevents every remaining task-list
+request. Per-node/source cursor outcomes retain request and raw-row counts so
+the persistence slice can map complete, partial, failed, and
+`not_scanned_limit` scopes without inference. Safe positive observations read
+before a limit remain available.
+
+Rows are de-duplicated by their complete UPID across pages and sources. The raw
+UPID remains bounded to 1,024 bytes. An identical duplicate is retained once.
+A later observation may monotonically enrich `RUNNING` with a final status
+and/or an end time. A later `RUNNING` or missing field never regresses an
+already observed final status or end time. `seenActive` and `seenArchive`
+evidence is accumulated with a monotone OR so cross-source de-duplication never
+loses provenance. The compatibility `source` value becomes archive when either
+observation came from the archive stream.
+
+Conflicting non-null end times or two different final statuses mark the result
+partial, record `conflicting_duplicate_task`, and retain the first consistent
+state. End times before the UPID start time are invalid optional observations
+and are not retained. Remote list status is non-empty visible ASCII and bounded
+to 255 bytes, matching the persistence boundary.
+
+Absence from a bounded window has no deletion semantics because archived tasks
+can age out and a task can move between active and archived sources during the
+read. The reader never claims that a bounded window is a complete historical
+record.
 
 ## Constructed fixture matrix
 

@@ -6,6 +6,7 @@ namespace App\Application\Inventory\Connection;
 
 use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
 use App\Application\Proxmox\Pve\PveInstallationSnapshot;
+use App\Application\Proxmox\Pve\PveInventorySnapshot;
 
 final readonly class ConnectionInstallationRead
 {
@@ -14,7 +15,7 @@ final readonly class ConnectionInstallationRead
         public int $expectedRevision,
         public EndpointId $endpointId,
         public InstallationBinding $binding,
-        public PveInstallationSnapshot|PbsInstallationSnapshot $snapshot,
+        public PveInstallationSnapshot|PveInventorySnapshot|PbsInstallationSnapshot $snapshot,
     ) {
     }
 

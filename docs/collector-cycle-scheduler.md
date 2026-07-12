@@ -31,10 +31,15 @@ an expiry exactly on a grid boundary both advance to the following future tick.
 
 The collector command uses its dedicated runtime loop and never the generic
 readiness `WorkerLoop`. The runtime wires the production credential/TLS reader
-for the fixed GET-only PVE core routes. PBS targets make the global result
-partial, while an empty enabled-target catalog is an honest successful cycle.
-PVE storage, backup-job and task persistence and all PBS persistence remain
-explicitly deferred.
+for the fixed GET-only PVE core/storage and PBS server/datastore routes. PVE
+and PBS targets are processed independently: one failed target makes the global
+cycle partial without preventing the remaining targets from being persisted.
+An empty enabled-target catalog is an honest successful cycle. After a usable
+core/storage apply, the collector opens the two fenced `external_jobs` and
+`observed_tasks` child runs and performs one combined GET-only monitoring read
+against the exact endpoint selected by the parent; monitoring never performs
+its own failover. Failed or incomplete child reads remain positive-only and do
+not roll back the parent inventory apply.
 
 `COLLECTOR_GRID_WIDTH_SECONDS` is the only runtime grid-width source, defaults
 to 120, and accepts 1 through 31,536,000 seconds. It must equal the persisted

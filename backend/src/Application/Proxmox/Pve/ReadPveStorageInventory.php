@@ -8,8 +8,13 @@ use App\Domain\Shared\Clock;
 
 final readonly class ReadPveStorageInventory
 {
-    public function __construct(private Clock $clock)
-    {
+    public function __construct(
+        private Clock $clock,
+        private int $maximumNodeFanout = 128,
+    ) {
+        if ($maximumNodeFanout < 1 || $maximumNodeFanout > 1024) {
+            throw new \InvalidArgumentException('The PVE storage node fanout must be between 1 and 1024.');
+        }
     }
 
     public function read(
@@ -39,7 +44,17 @@ final readonly class ReadPveStorageInventory
         $statusSets = [];
         $observations = [];
 
-        foreach ($this->uniqueTopologyNodes($topology) as $node) {
+        $nodes = $this->uniqueTopologyNodes($topology);
+        if (count($nodes) > $this->maximumNodeFanout) {
+            $issues[] = new PveStorageIssue(
+                PveStorageIssueCode::NodeFanoutExceeded,
+                '/cluster/status',
+                '/data/*/name',
+            );
+            $nodes = [];
+        }
+
+        foreach ($nodes as $node) {
             try {
                 $statusSet = $client->nodeBackupStorages($node);
             } catch (PveReadFailure) {
@@ -244,7 +259,10 @@ final readonly class ReadPveStorageInventory
             }
         }
 
-        return array_keys($nodes);
+        $nodeNames = array_keys($nodes);
+        usort($nodeNames, static fn (string $left, string $right): int => strcmp($left, $right));
+
+        return $nodeNames;
     }
 
     /** @param list<PveStorageIssue> $issues */

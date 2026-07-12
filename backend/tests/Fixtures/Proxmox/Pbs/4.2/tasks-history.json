@@ -1,0 +1,1 @@
+{"data":[{"upid":"UPID:pbs-four:0000005D:100000003:68800003:68800000:backup:object_s3:backup@pbs!collector:","node":"localhost","pid":93,"pstart":4294967299,"starttime":1753219072,"worker_type":"backup","worker_id":"object_s3","user":"backup@pbs!collector","endtime":1753219160,"status":"OK","future-task":"ignored"}],"total":2}

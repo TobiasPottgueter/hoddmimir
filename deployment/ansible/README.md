@@ -52,6 +52,15 @@ explicit maintenance operation, not a normal deployment. The data-worker gets
 exact process ID from `/app/var` and accepts only that worker's fresh MariaDB
 heartbeat together with base readiness; another replica cannot mask it.
 
+`hoddmimir_pve_storage_max_node_fanout` defaults to `128` and accepts values
+from `1` through `1024`. Exceeding the configured limit fails the storage
+scope without issuing a truncated subset of node requests; it does not alter
+the collector cadence.
+
+`hoddmimir_pbs_max_datastore_fanout` defaults to `128` and accepts values
+from `1` through `1024`. Exceeding it fails the PBS datastore scope without
+issuing a truncated subset of datastore status requests.
+
 The encrypted Vault stores `hoddmimir_encryption_keyring` as a structured object. Deployment validates its exact shape, a positive revision, one to sixteen unique IDs and unique 32-byte hexadecimal key materials, and the presence of the primary ID. It writes canonical compact JSON to the existing `encryption_key` Docker Secret with mode `0600`; secret-bearing validation, rendering, and copy tasks use `no_log`. Only the non-secret revision is exported as `ENCRYPTION_KEYRING_REVISION` in `runtime.env` and the production Compose model.
 
 Key rotation is additive: append a newly generated key under a new ID, select it with `primaryKeyId`, increment `revision`, and deploy all application components together. Keep old key entries until every active envelope and every retained database backup no longer requires them. The normal deployment transaction rejects revision regression, changed material under an existing ID, moving material to a different ID, and every historical-key removal before its first Docker call or installed-file mutation.

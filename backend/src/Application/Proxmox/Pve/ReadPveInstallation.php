@@ -12,8 +12,16 @@ final readonly class ReadPveInstallation
 
     public function read(): PveInstallationSnapshot
     {
-        $client = $this->connector->connect();
+        return self::readClient($this->connector->connect());
+    }
 
+    /**
+     * Read the core inventory from an already established endpoint session.
+     * Composite readers use this method so all scopes share exactly one
+     * selected endpoint and one transport session.
+     */
+    public static function readClient(PveReadClient $client): PveInstallationSnapshot
+    {
         return new PveInstallationSnapshot(
             $client->version(),
             $client->permissions(),

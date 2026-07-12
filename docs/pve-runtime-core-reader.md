@@ -4,17 +4,24 @@ Stand: 11. Juli 2026
 
 ## Umfang und Aktivierungsgrenze
 
-Dieser Slice stellt den produktiven `EndpointInstallationReader` für das
-PVE-Core-Inventar bereit. Er ist ausschließlich lesend und führt pro
-ausgewähltem Endpoint genau diese Requests aus:
+Dieser Reader stellt den produktiven `EndpointInstallationReader` für das
+PVE-Core- und Storage-Inventar bereit. Er ist ausschließlich lesend und führt
+pro ausgewähltem Endpoint die Core-Requests aus:
 
 - `GET /version`;
 - `GET /access/permissions`;
 - `GET /cluster/status`;
-- `GET /cluster/resources`.
+- `GET /cluster/resources`;
 
-PVE-Storages, Backupjobs, Tasks, PBS und jede schreibende Route bleiben
-außerhalb. Der Reader ist im Symfony-DI-Container ausschließlich mit dem
+danach folgen auf demselben Connector die in
+[`pve-storage-inventory-persistence.md`](pve-storage-inventory-persistence.md)
+festgelegten Storage-Requests mit Config-Start/Ende und sortiertem Node-Fanout.
+
+Backupjobs, Tasks und jede schreibende Route bleiben außerhalb. PBS wird über
+den getrennten Reader aus
+[`pbs-runtime-inventory-persistence.md`](pbs-runtime-inventory-persistence.md)
+bedient; der strikte Dispatcher erzeugt keine PVE/PBS-Cross-Calls. Dieser
+PVE-Reader ist im Symfony-DI-Container ausschließlich mit dem
 dedizierten Collector-Runtime-Loop verdrahtet. Jeder Request verwendet den
 fenced `ClaimedCycleCheckpoint`; es existiert kein produktiver Noop-Checkpoint
 und kein vorgetäuschter Scanlauf.
@@ -100,7 +107,7 @@ enthalten und muss durch die Deployment-Dateirechte geschützt bleiben.
 
 Die Unit-/Contract-Tests prüfen:
 
-- PVE 7, 8 und 9 gegen die vier exakten GET-Routen;
+- PVE 7, 8 und 9 gegen die exakte Composite-GET-Sequenz;
 - Checkpoint-Reihenfolge für physische Retries und geschlossenen
   Klartext-Scope;
 - identische Checkpoint-Ausnahmen ohne Retry;

@@ -16,14 +16,26 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         'inventory_sync_failures',
         'inventory_sync_runs',
         'inventory_sync_scope_results',
+        'pbs_datastore_capacity_state',
+        'pbs_datastores',
+        'pbs_external_jobs',
+        'pbs_observed_tasks',
+        'pbs_server_status',
+        'pbs_servers',
         'proxmox_capability_snapshots',
         'proxmox_connection_endpoints',
         'proxmox_connections',
         'proxmox_credentials',
         'proxmox_installation_bindings',
+        'proxmox_monitoring_cursors',
+        'proxmox_monitoring_runs',
+        'proxmox_monitoring_scope_results',
         'pve_clusters',
+        'pve_external_backup_jobs',
         'pve_node_storage_state',
         'pve_nodes',
+        'pve_observed_backup_tasks',
+        'pve_storage_pbs_mappings',
         'pve_storages',
         'worker_heartbeats',
     ];
@@ -69,15 +81,21 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         );
     }
 
-    public function testInitialMigrationWasAppliedExactlyOnce(): void
+    public function testSchemaMigrationsWereAppliedExactlyOnce(): void
     {
         $versions = $this->connection()->fetchFirstColumn(
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(1, $versions);
+        self::assertCount(4, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
+        self::assertIsString($versions[1]);
+        self::assertStringEndsWith('Version20260711000100', $versions[1]);
+        self::assertIsString($versions[2]);
+        self::assertStringEndsWith('Version20260711000200', $versions[2]);
+        self::assertIsString($versions[3]);
+        self::assertStringEndsWith('Version20260711000300', $versions[3]);
     }
 
     public function testDomainTimestampsUseMicrosecondUtcSafeStorage(): void

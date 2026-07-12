@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Application\Proxmox\Pve;
 
 use App\Application\Proxmox\Pve\PveBackupInventoryIssue;
 use App\Application\Proxmox\Pve\PveBackupInventoryIssueCode;
+use App\Application\Proxmox\Pve\PveBackupInventoryLimits;
 use App\Application\Proxmox\Pve\PveBackupInventorySnapshot;
 use App\Application\Proxmox\Pve\PveBackupJob;
 use App\Application\Proxmox\Pve\PveBackupJobCapabilities;
@@ -18,13 +19,18 @@ use App\Application\Proxmox\Pve\PveReadClient;
 use App\Application\Proxmox\Pve\PveReadFailure;
 use App\Application\Proxmox\Pve\PveReadFailureCode;
 use App\Application\Proxmox\Pve\PveTaskLifecycle;
+use App\Application\Proxmox\Pve\PveTaskArchiveWindow;
 use App\Application\Proxmox\Pve\PveTaskPage;
 use App\Application\Proxmox\Pve\PveTaskQuery;
 use App\Application\Proxmox\Pve\PveTaskSource;
 use App\Application\Proxmox\Pve\PveTaskStatus;
+use App\Application\Proxmox\Pve\PveTaskStreamScanResult;
+use App\Application\Proxmox\Pve\PveTaskStreamScanStatus;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Application\Proxmox\Pve\PveVersion;
 use App\Application\Proxmox\Pve\ReadPveBackupInventory;
+use App\Domain\Shared\Clock;
+use DateTimeImmutable;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -172,15 +178,50 @@ final class PveBackupTaskValueObjectsTest extends TestCase
         self::assertFalse($partialOk->isSuccessful());
 
         $jobs = $this->jobs([]);
-        $complete = new PveBackupInventorySnapshot($jobs, [$task], []);
-        $partial = new PveBackupInventorySnapshot($jobs, [$task], [$issue]);
+        $window = new PveTaskArchiveWindow(1, 2);
+        $stream = new PveTaskStreamScanResult(
+            'pve',
+            PveTaskSource::Active,
+            PveTaskStreamScanStatus::Complete,
+            1,
+            1,
+        );
+        $complete = new PveBackupInventorySnapshot($jobs, [$task], [], $window, [$stream], 1, 1);
+        $partial = new PveBackupInventorySnapshot($jobs, [$task], [$issue], $window, [$stream], 1, 1);
         self::assertTrue($complete->isComplete());
         self::assertFalse($partial->isComplete());
         self::assertFalse($complete->permitsDeletionDecisions());
         self::assertSame($task->signature(), $this->task(1, '100', PveTaskSource::Archive)->signature());
+
+        $incompleteStream = new PveTaskStreamScanResult(
+            'pve',
+            PveTaskSource::Archive,
+            PveTaskStreamScanStatus::Partial,
+            1,
+            1,
+        );
+        self::assertFalse((new PveBackupInventorySnapshot(
+            $jobs,
+            [$task],
+            [],
+            $window,
+            [$incompleteStream],
+            1,
+            1,
+        ))->isComplete());
+
+        $invalidCounters = 0;
+        foreach ([[-1, 0], [0, -1]] as [$requests, $rows]) {
+            try {
+                new PveBackupInventorySnapshot($jobs, [], [], $window, [], $requests, $rows);
+            } catch (InvalidArgumentException) {
+                ++$invalidCounters;
+            }
+        }
+        self::assertSame(2, $invalidCounters);
     }
 
-    public function testPaginatorSeparatesStreamsPaginatesAndDeduplicatesIdenticalUpids(): void
+    public function testPaginatorUsesOneFixedClockWindowAndMonotonicallyEnrichesDuplicateUpids(): void
     {
         $one = $this->task(1, '100', PveTaskSource::Active, null, 'RUNNING');
         $two = $this->task(2, '200', PveTaskSource::Active);
@@ -193,63 +234,137 @@ final class PveBackupTaskValueObjectsTest extends TestCase
                 ['raw' => 1, 'tasks' => [new PveBackupTask(
                     $one->upid,
                     PveTaskSource::Archive,
-                    null,
-                    'RUNNING',
+                    50,
+                    'OK',
                 )], 'issues' => []],
             ],
         ]);
+        $clock = new BackupInventoryFixedClock(new DateTimeImmutable('1970-01-02T00:00:20+00:00'));
 
-        $snapshot = (new ReadPveBackupInventory())->read($client, ['pve', 'pve'], 10, 20);
+        $snapshot = (new ReadPveBackupInventory(
+            $clock,
+            new PveBackupInventoryLimits(archiveWindowSeconds: 10),
+        ))->read($client, ['pve']);
 
         self::assertTrue($snapshot->isComplete());
         self::assertCount(2, $snapshot->tasks);
+        self::assertSame(1, $clock->calls);
+        self::assertSame(86_410, $snapshot->archiveWindow->since);
+        self::assertSame(86_420, $snapshot->archiveWindow->until);
+        self::assertSame(PveTaskSource::Archive, $snapshot->tasks[0]->source);
+        self::assertTrue($snapshot->tasks[0]->seenActive);
+        self::assertTrue($snapshot->tasks[0]->seenArchive);
+        self::assertSame(50, $snapshot->tasks[0]->endTime);
+        self::assertSame('OK', $snapshot->tasks[0]->listStatus);
         self::assertSame([
             ['pve', 'active', 0, 100, null, null],
             ['pve', 'active', 100, 100, null, null],
-            ['pve', 'archive', 0, 100, 10, 20],
+            ['pve', 'archive', 0, 100, 86_410, 86_420],
         ], $client->pageCalls);
     }
 
-    public function testPaginatorKeepsPositiveRowsButMarksConflictsAndInvalidNodesPartial(): void
+    public function testPlannerWindowBypassesClockAndAllNodesReuseItInBinaryOrder(): void
+    {
+        $client = new BackupInventoryClient($this->jobs([]), []);
+        $clock = new BackupInventoryFixedClock(new DateTimeImmutable('@999'));
+        $snapshot = (new ReadPveBackupInventory($clock))->read(
+            $client,
+            ['z-node', 'a-node'],
+            new PveTaskArchiveWindow(10, 20, true),
+        );
+
+        self::assertTrue($snapshot->isComplete());
+        self::assertSame(0, $clock->calls);
+        self::assertTrue($snapshot->archiveWindow->historyGap);
+        self::assertSame([
+            ['a-node', 'active', 0, 100, null, null],
+            ['a-node', 'archive', 0, 100, 10, 20],
+            ['z-node', 'active', 0, 100, null, null],
+            ['z-node', 'archive', 0, 100, 10, 20],
+        ], $client->pageCalls);
+    }
+
+    public function testDuplicateMergeNeverRegressesAndFinalConflictsRemainPartial(): void
     {
         $task = $this->task(3, '300', PveTaskSource::Active, null, 'RUNNING');
-        $conflict = new PveBackupTask($task->upid, PveTaskSource::Archive, 50, 'OK');
-        $pageIssue = new PveBackupInventoryIssue(
-            PveBackupInventoryIssueCode::InvalidField,
-            '/nodes/pve/tasks',
-            '/data/0/status',
-        );
+        $final = new PveBackupTask($task->upid, PveTaskSource::Archive, 50, 'OK');
+        $regression = new PveBackupTask($task->upid, PveTaskSource::Active, null, 'RUNNING');
+        $enriched = $task->enrich($final)?->enrich($regression);
+        self::assertNotNull($enriched);
+        self::assertSame('OK', $enriched->listStatus);
+        self::assertSame(50, $enriched->endTime);
+
+        $conflict = new PveBackupTask($task->upid, PveTaskSource::Archive, 51, 'ERROR');
         $client = new BackupInventoryClient($this->jobs([]), [
-            'active' => [['raw' => 1, 'tasks' => [$task], 'issues' => [$pageIssue]]],
-            'archive' => [['raw' => 1, 'tasks' => [$conflict], 'issues' => []]],
+            'active' => [['raw' => 1, 'tasks' => [$task], 'issues' => []]],
+            'archive' => [['raw' => 2, 'tasks' => [$final, $conflict], 'issues' => []]],
         ]);
 
-        $snapshot = (new ReadPveBackupInventory())->read(
-            $client,
-            ['', '-bad', 'pve.', 'pve_', 'pve-', 'pve.test', str_repeat('a', 64), "bad\nnode", 'pve'],
-            0,
-            1,
-        );
+        $snapshot = $this->reader()->read($client, ['pve']);
         $codes = array_map(static fn (PveBackupInventoryIssue $issue) => $issue->code, $snapshot->issues);
 
         self::assertFalse($snapshot->isComplete());
         self::assertCount(1, $snapshot->tasks);
-        self::assertSame(8, count(array_filter(
-            $codes,
-            static fn (PveBackupInventoryIssueCode $code): bool => PveBackupInventoryIssueCode::InvalidNode === $code,
-        )));
-        self::assertContains(PveBackupInventoryIssueCode::InvalidField, $codes);
+        self::assertSame('OK', $snapshot->tasks[0]->listStatus);
+        self::assertSame(50, $snapshot->tasks[0]->endTime);
         self::assertContains(PveBackupInventoryIssueCode::ConflictingDuplicateTask, $codes);
     }
 
-    public function testPaginatorMapsReadFailuresAndCapsEveryFullStream(): void
+    public function testDuplicateMergeCoversEveryMonotonicStateTransition(): void
+    {
+        $activeNull = $this->task(20, '20', PveTaskSource::Active);
+        $activeOk = $this->task(20, '20', PveTaskSource::Active, null, 'OK');
+        $activeRunning = $this->task(20, '20', PveTaskSource::Active, null, 'RUNNING');
+        $activeError = $this->task(20, '20', PveTaskSource::Active, null, 'ERROR');
+
+        self::assertSame('OK', $activeNull->enrich($activeOk)?->listStatus);
+        self::assertSame('OK', $activeOk->enrich($activeRunning)?->listStatus);
+        self::assertSame('OK', $activeOk->enrich($activeNull)?->listStatus);
+        self::assertSame(PveTaskSource::Active, $activeOk->enrich($activeOk)?->source);
+        self::assertNull($activeOk->enrich($activeError));
+        self::assertNull($activeOk->enrich($this->task(21, '21', PveTaskSource::Active)));
+
+        $archiveOk = $this->task(20, '20', PveTaskSource::Archive, null, 'OK');
+        $archiveRepeat = $archiveOk->enrich($archiveOk);
+        self::assertNotNull($archiveRepeat);
+        self::assertFalse($archiveRepeat->seenActive);
+        self::assertTrue($archiveRepeat->seenArchive);
+    }
+
+    public function testInvalidDuplicateAndExcessTopologyNodesFailClosedBeforeTaskCalls(): void
+    {
+        $invalidClient = new BackupInventoryClient($this->jobs([]), []);
+        $invalid = $this->reader()->read($invalidClient, ['pve', 'pve', 'bad.node']);
+        self::assertFalse($invalid->isComplete());
+        self::assertSame([], $invalidClient->pageCalls);
+        self::assertSame(2, count(array_filter(
+            $invalid->issues,
+            static fn (PveBackupInventoryIssue $issue): bool => PveBackupInventoryIssueCode::InvalidNode === $issue->code,
+        )));
+
+        $limitedClient = new BackupInventoryClient($this->jobs([]), []);
+        $limited = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(nodeLimit: 1),
+        ))->read($limitedClient, ['a', 'b']);
+        self::assertSame([], $limitedClient->pageCalls);
+        self::assertSame(PveBackupInventoryIssueCode::NodeLimitReached, $limited->issues[0]->code);
+
+        $wrongTypeClient = new BackupInventoryClient($this->jobs([]), []);
+        // @phpstan-ignore-next-line runtime boundary: array members are not PHP-enforced
+        $wrongType = $this->reader()->read($wrongTypeClient, [123]);
+        self::assertSame(PveBackupInventoryIssueCode::InvalidNode, $wrongType->issues[0]->code);
+        self::assertSame([], $wrongTypeClient->pageCalls);
+    }
+
+    public function testPaginatorMapsReadFailuresAndUsesSmallPerStreamCaps(): void
     {
         $failure = PveReadFailure::for(PveReadFailureCode::RemoteUnavailable);
         $client = new BackupInventoryClient($failure, [
             'active' => [$failure],
             'archive' => [$failure],
         ]);
-        $failed = (new ReadPveBackupInventory())->read($client, ['pve'], 0, 1);
+        $failed = $this->reader()->read($client, ['pve']);
         self::assertFalse($failed->jobs->isComplete());
         self::assertSame(PveBackupInventoryIssueCode::BackupJobReadFailed, $failed->jobs->issues[0]->code);
         self::assertSame(2, count(array_filter(
@@ -258,21 +373,234 @@ final class PveBackupTaskValueObjectsTest extends TestCase
         )));
 
         $cappedClient = new BackupInventoryClient($this->jobs([]), [], true);
-        $capped = (new ReadPveBackupInventory())->read($cappedClient, ['pve'], 0, 1);
-        self::assertSame(200, count($cappedClient->pageCalls));
+        $capped = $this->reader()->read($cappedClient, ['pve']);
+        self::assertSame(12, count($cappedClient->pageCalls));
         self::assertSame(2, count(array_filter(
             $capped->issues,
             static fn (PveBackupInventoryIssue $issue): bool => PveBackupInventoryIssueCode::PageCapReached === $issue->code,
         )));
 
-        $empty = (new ReadPveBackupInventory())->read(
+        $empty = $this->reader()->read(
             new BackupInventoryClient($this->jobs([]), []),
             [],
-            0,
-            1,
         );
         self::assertTrue($empty->isComplete());
         self::assertSame([], $empty->tasks);
+    }
+
+    public function testGlobalRequestRawRowAndDistinctTaskLimitsStopRemainingStreams(): void
+    {
+        $requestClient = new BackupInventoryClient($this->jobs([]), [], true);
+        $requestLimited = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(
+                pageSize: 1,
+                requestLimit: 1,
+                rawRowLimit: 10,
+                distinctTaskLimit: 10,
+            ),
+        ))->read($requestClient, ['pve']);
+        self::assertSame(1, $requestLimited->taskRequests);
+        self::assertSame(PveBackupInventoryIssueCode::RequestLimitReached, $requestLimited->issues[0]->code);
+        self::assertSame(PveTaskStreamScanStatus::NotScannedLimit, $requestLimited->taskStreams[1]->status);
+
+        $rawClient = new BackupInventoryClient($this->jobs([]), [], true);
+        $rawLimited = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(
+                pageSize: 2,
+                rawRowLimit: 2,
+                distinctTaskLimit: 2,
+            ),
+        ))->read($rawClient, ['pve']);
+        self::assertSame(2, $rawLimited->rawTaskRows);
+        self::assertSame(PveBackupInventoryIssueCode::RawRowLimitReached, $rawLimited->issues[0]->code);
+
+        $distinctClient = new BackupInventoryClient($this->jobs([]), [
+            'active' => [[
+                'raw' => 2,
+                'tasks' => [
+                    $this->task(10, '10', PveTaskSource::Active),
+                    $this->task(11, '11', PveTaskSource::Active),
+                ],
+                'issues' => [],
+            ]],
+        ]);
+        $distinctLimited = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(pageSize: 2, rawRowLimit: 2, distinctTaskLimit: 1),
+        ))->read($distinctClient, ['pve']);
+        self::assertCount(1, $distinctLimited->tasks);
+        self::assertSame(PveBackupInventoryIssueCode::DistinctTaskLimitReached, $distinctLimited->issues[0]->code);
+
+        $betweenStreamsClient = new BackupInventoryClient($this->jobs([]), []);
+        $betweenStreams = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(pageSize: 1, requestLimit: 1, rawRowLimit: 2, distinctTaskLimit: 2),
+        ))->read($betweenStreamsClient, ['pve']);
+        self::assertSame(PveTaskStreamScanStatus::Complete, $betweenStreams->taskStreams[0]->status);
+        self::assertSame(PveTaskStreamScanStatus::NotScannedLimit, $betweenStreams->taskStreams[1]->status);
+
+        $pageIssue = new PveBackupInventoryIssue(
+            PveBackupInventoryIssueCode::InvalidField,
+            '/nodes/pve/tasks',
+            '/data/0/status',
+        );
+        $pageIssueClient = new BackupInventoryClient($this->jobs([]), [
+            'active' => [['raw' => 1, 'tasks' => [], 'issues' => [$pageIssue]]],
+        ]);
+        $pageIssueSnapshot = $this->reader()->read($pageIssueClient, ['pve']);
+        self::assertSame(PveTaskStreamScanStatus::Partial, $pageIssueSnapshot->taskStreams[0]->status);
+
+        $failure = PveReadFailure::for(PveReadFailureCode::RemoteUnavailable);
+        $lateFailureClient = new BackupInventoryClient($this->jobs([]), [
+            'active' => [
+                ['raw' => 1, 'tasks' => [$this->task(30, '30', PveTaskSource::Active)], 'issues' => []],
+                $failure,
+            ],
+        ]);
+        $lateFailure = (new ReadPveBackupInventory(
+            new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+            new PveBackupInventoryLimits(pageSize: 1),
+        ))->read($lateFailureClient, ['pve']);
+        self::assertSame(PveTaskStreamScanStatus::Partial, $lateFailure->taskStreams[0]->status);
+        self::assertSame(2, $lateFailure->taskStreams[0]->requests);
+    }
+
+    public function testLimitsAndArchiveWindowsRejectUnsafeValues(): void
+    {
+        $rejections = 0;
+        foreach ([
+            static fn () => new PveBackupInventoryLimits(pageSize: 0),
+            static fn () => new PveBackupInventoryLimits(pageSize: 101),
+            static fn () => new PveBackupInventoryLimits(nodeLimit: 0),
+            static fn () => new PveBackupInventoryLimits(nodeLimit: 129),
+            static fn () => new PveBackupInventoryLimits(activePageCap: 0),
+            static fn () => new PveBackupInventoryLimits(activePageCap: 3),
+            static fn () => new PveBackupInventoryLimits(archivePageCap: 0),
+            static fn () => new PveBackupInventoryLimits(archivePageCap: 11),
+            static fn () => new PveBackupInventoryLimits(requestLimit: 0),
+            static fn () => new PveBackupInventoryLimits(requestLimit: 513),
+            static fn () => new PveBackupInventoryLimits(rawRowLimit: 99),
+            static fn () => new PveBackupInventoryLimits(rawRowLimit: 25_001),
+            static fn () => new PveBackupInventoryLimits(distinctTaskLimit: 0),
+            static fn () => new PveBackupInventoryLimits(distinctTaskLimit: 25_001),
+            static fn () => new PveBackupInventoryLimits(archiveWindowSeconds: 0),
+            static fn () => new PveBackupInventoryLimits(archiveWindowSeconds: 86_401),
+            static fn () => new PveTaskArchiveWindow(-1, 1),
+            static fn () => new PveTaskArchiveWindow(0, 86_401),
+        ] as $factory) {
+            try {
+                $factory();
+                self::fail('Unsafe PVE backup inventory bounds must fail closed.');
+            } catch (InvalidArgumentException) {
+                ++$rejections;
+            }
+        }
+        self::assertSame(18, $rejections);
+
+        $client = new BackupInventoryClient($this->jobs([]), []);
+        try {
+            (new ReadPveBackupInventory(
+                new BackupInventoryFixedClock(new DateTimeImmutable('@100')),
+                new PveBackupInventoryLimits(archiveWindowSeconds: 10),
+            ))->read($client, ['pve'], new PveTaskArchiveWindow(0, 11));
+            self::fail('A planner window wider than the configured limit must fail closed.');
+        } catch (InvalidArgumentException) {
+            self::assertSame([], $client->pageCalls);
+        }
+
+        $invalidFactories = [
+            static fn () => PveTaskArchiveWindow::endingAt(new DateTimeImmutable('@1'), 0),
+            static fn () => PveTaskArchiveWindow::endingAt(new DateTimeImmutable('@1'), 86_401),
+            static fn () => PveTaskArchiveWindow::endingAt(new DateTimeImmutable('@-1'), 1),
+            static fn () => new PveTaskArchiveWindow(2, 1),
+        ];
+        $invalidWindows = 0;
+        foreach ($invalidFactories as $factory) {
+            try {
+                $factory();
+            } catch (InvalidArgumentException) {
+                ++$invalidWindows;
+            }
+        }
+        self::assertSame(4, $invalidWindows);
+        self::assertSame(0, PveTaskArchiveWindow::endingAt(new DateTimeImmutable('@10'), 10)->since);
+    }
+
+    public function testTaskObservationsMatchPersistenceBounds(): void
+    {
+        $upid = PveUpid::parse('UPID:pve:00000001:00000002:00000003:vzdump:1:user@pve:');
+        $valid = new PveBackupTask(
+            $upid,
+            PveTaskSource::Archive,
+            3,
+            str_repeat('A', PveBackupTask::MAXIMUM_LIST_STATUS_LENGTH),
+        );
+        self::assertSame(PveUpid::MAXIMUM_LENGTH, 1024);
+        self::assertSame(255, strlen($valid->listStatus ?? ''));
+
+        $rejections = 0;
+        foreach ([
+            static fn () => new PveBackupTask($upid, PveTaskSource::Archive, 2, 'OK'),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Active, null, ''),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Active, null, "bad\nstatus"),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Active, null, str_repeat('A', 256)),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Active, null, 'OK', false, false),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Active, null, 'OK', false, true),
+            static fn () => new PveBackupTask($upid, PveTaskSource::Archive, null, 'OK', true, false),
+        ] as $factory) {
+            try {
+                $factory();
+            } catch (InvalidArgumentException) {
+                ++$rejections;
+            }
+        }
+        self::assertSame(7, $rejections);
+    }
+
+    public function testPageAndStreamCursorDtosRejectInconsistentCounters(): void
+    {
+        $task = $this->task(40, '40', PveTaskSource::Active);
+        $invalidPages = 0;
+        foreach ([
+            static fn () => new PveTaskPage(PveTaskQuery::active(limit: 1), -1, [], []),
+            static fn () => new PveTaskPage(PveTaskQuery::active(limit: 1), 2, [], []),
+            static fn () => new PveTaskPage(PveTaskQuery::active(limit: 1), 0, [$task], []),
+        ] as $factory) {
+            try {
+                $factory();
+            } catch (InvalidArgumentException) {
+                ++$invalidPages;
+            }
+        }
+        self::assertSame(3, $invalidPages);
+
+        $invalidStreams = 0;
+        foreach ([
+            static fn () => new PveTaskStreamScanResult('', PveTaskSource::Active, PveTaskStreamScanStatus::Partial, 0, 0),
+            static fn () => new PveTaskStreamScanResult('pve', PveTaskSource::Active, PveTaskStreamScanStatus::Partial, -1, 0),
+            static fn () => new PveTaskStreamScanResult('pve', PveTaskSource::Active, PveTaskStreamScanStatus::Partial, 0, -1),
+            static fn () => new PveTaskStreamScanResult('pve', PveTaskSource::Active, PveTaskStreamScanStatus::Complete, 0, 0),
+            static fn () => new PveTaskStreamScanResult('pve', PveTaskSource::Active, PveTaskStreamScanStatus::NotScannedLimit, 1, 0),
+            static fn () => new PveTaskStreamScanResult('pve', PveTaskSource::Active, PveTaskStreamScanStatus::NotScannedLimit, 0, 1),
+        ] as $factory) {
+            try {
+                $factory();
+            } catch (InvalidArgumentException) {
+                ++$invalidStreams;
+            }
+        }
+        self::assertSame(6, $invalidStreams);
+
+        $partial = new PveTaskStreamScanResult(
+            'pve',
+            PveTaskSource::Active,
+            PveTaskStreamScanStatus::Partial,
+            1,
+            0,
+        );
+        self::assertFalse($partial->isComplete());
     }
 
     /** @param list<PveBackupInventoryIssue> $issues */
@@ -292,6 +620,11 @@ final class PveBackupTaskValueObjectsTest extends TestCase
     ): PveBackupTask {
         $raw = sprintf('UPID:pve:%08X:%08X:%08X:vzdump:%s:user@pve:', $pid, $pid + 1, $pid + 2, $id);
         return new PveBackupTask(PveUpid::parse($raw), $source, $endTime, $status);
+    }
+
+    private function reader(): ReadPveBackupInventory
+    {
+        return new ReadPveBackupInventory(new BackupInventoryFixedClock(new DateTimeImmutable('@100')));
     }
 }
 
@@ -377,5 +710,22 @@ final class BackupInventoryClient implements PveReadClient
     public function backupTaskStatus(string $node, PveUpid $upid): PveTaskStatus
     {
         throw new \LogicException('Not used by the backup inventory slice.');
+    }
+}
+
+/** @internal */
+final class BackupInventoryFixedClock implements Clock
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly DateTimeImmutable $time)
+    {
+    }
+
+    public function now(): DateTimeImmutable
+    {
+        ++$this->calls;
+
+        return $this->time;
     }
 }

@@ -177,6 +177,14 @@ jobs:
             and .services.mariadb.environment.MARIADB_DATABASE == "hoddmimir"
             and .services."data-worker".environment.DATABASE_USER == "hoddmimir_collector"
             and .services."data-worker".environment.COLLECTOR_GRID_WIDTH_SECONDS == "120"
+            and .services."data-worker".environment.PVE_STORAGE_MAX_NODE_FANOUT == "128"
+            and .services."data-worker".environment.PBS_MAX_DATASTORE_FANOUT == "128"
+            and .services."data-worker".environment.MONITOR_HISTORY_OVERLAP_SECONDS == "300"
+            and .services."data-worker".environment.PVE_MONITOR_PAGE_SIZE == "100"
+            and .services."data-worker".environment.PVE_MONITOR_MAX_NODES == "128"
+            and .services."data-worker".environment.PVE_MONITOR_HISTORY_WINDOW_SECONDS == "86400"
+            and .services."data-worker".environment.PBS_MONITOR_PAGE_SIZE == "256"
+            and .services."data-worker".environment.PBS_MONITOR_HISTORY_WINDOW_SECONDS == "86400"
             and .services."data-worker".command == ["hoddmimir:worker:data"]
             and .services."data-worker".healthcheck.test == ["CMD", "php", "bin/console", "hoddmimir:worker:health", "collector"]
             and .services."data-worker".stop_grace_period == "1m15s"

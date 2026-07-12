@@ -11,6 +11,38 @@
       - hoddmimir_web_port | int <= 65535
       - hoddmimir_collector_grid_width_seconds | int > 0
       - hoddmimir_collector_grid_width_seconds | int <= 31536000
+      - hoddmimir_pve_storage_max_node_fanout | int >= 1
+      - hoddmimir_pve_storage_max_node_fanout | int <= 1024
+      - hoddmimir_pbs_max_datastore_fanout | int >= 1
+      - hoddmimir_pbs_max_datastore_fanout | int <= 1024
+      - hoddmimir_monitor_history_overlap_seconds | int >= 0
+      - hoddmimir_monitor_history_overlap_seconds | int <= 3600
+      - hoddmimir_pve_monitor_page_size | int >= 1
+      - hoddmimir_pve_monitor_page_size | int <= 100
+      - hoddmimir_pve_monitor_max_nodes | int >= 1
+      - hoddmimir_pve_monitor_max_nodes | int <= 128
+      - hoddmimir_pve_monitor_active_page_cap | int >= 1
+      - hoddmimir_pve_monitor_active_page_cap | int <= 2
+      - hoddmimir_pve_monitor_archive_page_cap | int >= 1
+      - hoddmimir_pve_monitor_archive_page_cap | int <= 10
+      - hoddmimir_pve_monitor_request_limit | int >= 1
+      - hoddmimir_pve_monitor_request_limit | int <= 512
+      - hoddmimir_pve_monitor_raw_row_limit | int >= hoddmimir_pve_monitor_page_size | int
+      - hoddmimir_pve_monitor_raw_row_limit | int <= 25000
+      - hoddmimir_pve_monitor_distinct_task_limit | int >= 1
+      - hoddmimir_pve_monitor_distinct_task_limit | int <= hoddmimir_pve_monitor_raw_row_limit | int
+      - hoddmimir_pve_monitor_history_window_seconds | int >= 1
+      - hoddmimir_pve_monitor_history_window_seconds | int <= 86400
+      - hoddmimir_pbs_monitor_page_size | int >= 1
+      - hoddmimir_pbs_monitor_page_size | int <= 1000
+      - hoddmimir_pbs_monitor_max_pages_per_stream | int >= 1
+      - hoddmimir_pbs_monitor_max_pages_per_stream | int <= 64
+      - hoddmimir_pbs_monitor_max_rows_per_stream | int >= hoddmimir_pbs_monitor_page_size | int
+      - hoddmimir_pbs_monitor_max_rows_per_stream | int <= 65536
+      - hoddmimir_pbs_monitor_max_jobs_per_kind | int >= 1
+      - hoddmimir_pbs_monitor_max_jobs_per_kind | int <= 65536
+      - hoddmimir_pbs_monitor_history_window_seconds | int >= 1
+      - hoddmimir_pbs_monitor_history_window_seconds | int <= 86400
       - hoddmimir_backup_worker_poll_interval_seconds | int > 0
       - hoddmimir_compose_wait_timeout_seconds | int > 0
       - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack

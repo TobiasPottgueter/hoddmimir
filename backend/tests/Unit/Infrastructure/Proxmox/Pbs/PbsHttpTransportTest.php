@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Infrastructure\Proxmox\Pbs;
 
+use App\Application\Inventory\Connection\ConnectionReadCheckpoint;
 use App\Application\Proxmox\Pbs\PbsDatastoreBackendType;
 use App\Application\Proxmox\Pbs\PbsDatastoreId;
 use App\Application\Proxmox\Pbs\PbsReadFailure;
@@ -129,7 +130,7 @@ final class PbsHttpTransportTest extends TestCase
             /** @param array<string, mixed> $options */
             public function withOptions(array $options): static { return $this; }
         };
-        $headerTransport = new PbsHttpTransport($headerClient, new PbsApiUrlBuilder('pbs.test'), new PbsInlineAuthenticator(), new PbsRetryPolicy(), new PbsRecordingDelay(), new PbsJsonEnvelopeDecoder());
+        $headerTransport = new PbsHttpTransport($headerClient, new PbsApiUrlBuilder('pbs.test'), new PbsInlineAuthenticator(), new PbsRetryPolicy(), new PbsRecordingDelay(), new PbsJsonEnvelopeDecoder(), new PbsNoopCheckpoint());
         $this->assertFailure(PbsReadFailureCode::InvalidEnvelope, static fn () => $headerTransport->get(PbsRequest::ping()));
         $oversizedByBody = new MockResponse(str_repeat('x', 65_537), ['http_code' => 200]);
         $this->assertFailure(PbsReadFailureCode::InvalidEnvelope, fn () => $this->transport(new MockHttpClient($oversizedByBody), new PbsInlineAuthenticator(), new PbsRecordingDelay())->get(PbsRequest::ping()));
@@ -196,6 +197,96 @@ final class PbsHttpTransportTest extends TestCase
         self::assertSame([1, 2], $delay->attempts);
     }
 
+    public function testEveryPhysicalRetryAttemptHasPreAndPostCheckpointOutsideSecretScope(): void
+    {
+        $authenticator = new PbsInlineAuthenticator();
+        $checkpoint = new PbsRecordingCheckpoint($authenticator);
+        $delay = new PbsRecordingDelay();
+        $transport = new PbsHttpTransport(
+            new MockHttpClient([
+                new MockResponse('', ['http_code' => 503]),
+                new MockResponse('{"data":{"pong":true}}', ['http_code' => 200]),
+            ]),
+            new PbsApiUrlBuilder('pbs.test'),
+            $authenticator,
+            new PbsRetryPolicy(),
+            $delay,
+            new PbsJsonEnvelopeDecoder(),
+            $checkpoint,
+        );
+
+        $data = $transport->get(PbsRequest::ping())->data;
+        self::assertInstanceOf(\stdClass::class, $data);
+        self::assertTrue($data->pong);
+        self::assertSame(2, $authenticator->calls);
+        self::assertSame([false, false, false, false], $checkpoint->secretActiveAtCheckpoint);
+        self::assertSame([1], $delay->attempts);
+    }
+
+    public function testPreAttemptCheckpointSentinelPropagatesUnchangedWithoutRequestOrDelay(): void
+    {
+        $sentinel = new \RuntimeException('checkpoint sentinel');
+        $authenticator = new PbsInlineAuthenticator();
+        $checkpoint = new PbsThrowingCheckpoint($sentinel, 1, $authenticator);
+        $delay = new PbsRecordingDelay();
+        $requests = 0;
+        $transport = new PbsHttpTransport(
+            new MockHttpClient(static function () use (&$requests): MockResponse {
+                ++$requests;
+                return new MockResponse('{"data":true}');
+            }),
+            new PbsApiUrlBuilder('pbs.test'),
+            $authenticator,
+            new PbsRetryPolicy(),
+            $delay,
+            new PbsJsonEnvelopeDecoder(),
+            $checkpoint,
+        );
+
+        try {
+            $transport->get(PbsRequest::ping());
+            self::fail('The pre-attempt checkpoint sentinel was swallowed.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame($sentinel, $failure);
+        }
+        self::assertSame(0, $requests);
+        self::assertSame(0, $authenticator->calls);
+        self::assertSame([], $delay->attempts);
+    }
+
+    public function testPostAttemptCheckpointSentinelRunsAfterSecretCallbackAndPreventsRetryDelay(): void
+    {
+        $sentinel = new \RuntimeException('checkpoint sentinel');
+        $authenticator = new PbsInlineAuthenticator();
+        $checkpoint = new PbsThrowingCheckpoint($sentinel, 2, $authenticator);
+        $delay = new PbsRecordingDelay();
+        $requests = 0;
+        $transport = new PbsHttpTransport(
+            new MockHttpClient(static function () use (&$requests): MockResponse {
+                ++$requests;
+                return new MockResponse('', ['http_code' => 503]);
+            }),
+            new PbsApiUrlBuilder('pbs.test'),
+            $authenticator,
+            new PbsRetryPolicy(),
+            $delay,
+            new PbsJsonEnvelopeDecoder(),
+            $checkpoint,
+        );
+
+        try {
+            $transport->get(PbsRequest::ping());
+            self::fail('The post-attempt checkpoint sentinel was swallowed.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame($sentinel, $failure);
+        }
+        self::assertSame(1, $requests);
+        self::assertSame(1, $authenticator->calls);
+        self::assertFalse($authenticator->active);
+        self::assertSame([false, false], $checkpoint->secretActiveAtCheckpoint);
+        self::assertSame([], $delay->attempts);
+    }
+
     public function testCancellationFailureNeverReplacesStatusMapping(): void
     {
         $response = new class implements ResponseInterface {
@@ -225,6 +316,7 @@ final class PbsHttpTransportTest extends TestCase
                 new PbsRetryPolicy(),
                 new PbsRecordingDelay(),
                 new PbsJsonEnvelopeDecoder(),
+                new PbsNoopCheckpoint(),
             ))->get(PbsRequest::ping()),
         );
     }
@@ -258,7 +350,7 @@ final class PbsHttpTransportTest extends TestCase
 
     private function transport(MockHttpClient $http, PbsRequestAuthenticator $auth, PbsRetryDelay $delay): PbsHttpTransport
     {
-        return new PbsHttpTransport($http, new PbsApiUrlBuilder('pbs.test'), $auth, new PbsRetryPolicy(), $delay, new PbsJsonEnvelopeDecoder());
+        return new PbsHttpTransport($http, new PbsApiUrlBuilder('pbs.test'), $auth, new PbsRetryPolicy(), $delay, new PbsJsonEnvelopeDecoder(), new PbsNoopCheckpoint());
     }
 
     private function assertFailure(PbsReadFailureCode $code, callable $operation): void
@@ -284,6 +376,35 @@ final class PbsRecordingDelay implements PbsRetryDelay
 {
     /** @var list<int> */ public array $attempts = [];
     public function pause(int $attempt): void { $this->attempts[] = $attempt; }
+}
+/** @internal */
+final class PbsNoopCheckpoint implements ConnectionReadCheckpoint
+{
+    public function checkpoint(): void {}
+}
+/** @internal */
+final class PbsRecordingCheckpoint implements ConnectionReadCheckpoint
+{
+    /** @var list<bool> */ public array $secretActiveAtCheckpoint = [];
+    public function __construct(private readonly PbsInlineAuthenticator $authenticator) {}
+    public function checkpoint(): void { $this->secretActiveAtCheckpoint[] = $this->authenticator->active; }
+}
+/** @internal */
+final class PbsThrowingCheckpoint implements ConnectionReadCheckpoint
+{
+    public int $calls = 0;
+    /** @var list<bool> */ public array $secretActiveAtCheckpoint = [];
+    public function __construct(
+        private readonly \RuntimeException $sentinel,
+        private readonly int $throwOnCall,
+        private readonly PbsInlineAuthenticator $authenticator,
+    ) {}
+    public function checkpoint(): void
+    {
+        ++$this->calls;
+        $this->secretActiveAtCheckpoint[] = $this->authenticator->active;
+        if ($this->calls === $this->throwOnCall) { throw $this->sentinel; }
+    }
 }
 /** @internal */
 final class PbsRecordingTransport implements PbsApiTransport

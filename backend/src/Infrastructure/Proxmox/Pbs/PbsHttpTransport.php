@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Proxmox\Pbs;
 
+use App\Application\Inventory\Connection\ConnectionReadCheckpoint;
 use App\Application\Proxmox\Pbs\PbsReadFailure;
 use App\Application\Proxmox\Pbs\PbsReadFailureCode;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
@@ -20,6 +21,7 @@ final readonly class PbsHttpTransport implements PbsApiTransport
         private PbsRetryPolicy $retryPolicy,
         private PbsRetryDelay $retryDelay,
         private PbsJsonEnvelopeDecoder $envelopeDecoder,
+        private ConnectionReadCheckpoint $checkpoint,
     ) {}
 
     public function get(PbsRequest $request): PbsApiEnvelope
@@ -29,7 +31,14 @@ final readonly class PbsHttpTransport implements PbsApiTransport
 
     private function requestWithRetry(PbsRequest $request, int $attempt): PbsApiEnvelope
     {
-        $result = $this->attempt($request);
+        $this->checkpoint->checkpoint();
+        try {
+            $result = $this->attempt($request);
+        } finally {
+            // attempt() crosses this boundary only after the plaintext-secret
+            // callback has closed. Checkpoint failures propagate unchanged.
+            $this->checkpoint->checkpoint();
+        }
         if ('transport' === $result['kind']) {
             if ($this->retryPolicy->shouldRetry($attempt, true, null)) {
                 $this->retryDelay->pause($attempt);

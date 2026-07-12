@@ -28,6 +28,10 @@ final readonly class PbsJsonEnvelopeDecoder
         if (null !== $digest && !is_string($digest)) {
             throw PbsReadFailure::for(PbsReadFailureCode::InvalidEnvelope);
         }
-        return new PbsApiEnvelope($decoded->data, $digest);
+        $total = ObjectPropertyInspector::exists($decoded, 'total') ? $decoded->total : null;
+        if (null !== $total && (!is_int($total) || $total < 0)) {
+            throw PbsReadFailure::for(PbsReadFailureCode::InvalidEnvelope);
+        }
+        return new PbsApiEnvelope($decoded->data, $digest, $total);
     }
 }

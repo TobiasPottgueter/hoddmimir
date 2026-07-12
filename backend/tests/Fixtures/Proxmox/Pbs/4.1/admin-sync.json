@@ -1,0 +1,1 @@
+{"data":[{"id":"sync_push","store":"store_a","ns":"source","remote":"remote_a","remote-store":"archive_a","remote-ns":"target","sync-direction":"push","schedule":"hourly","next-run":1736445456}],"digest":"8888888888888888888888888888888888888888888888888888888888888888"}

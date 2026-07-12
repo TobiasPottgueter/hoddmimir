@@ -184,6 +184,15 @@ Verantwortung:
 
 Der Collector hat gegenüber PVE/PBS ausschließlich Leserechte. Er startet, stoppt und löscht nichts.
 
+Die externen Backupjobs und Tasklisten werden nach dem autoritativen
+Core-/Storage-Apply über zwei gefencete Childruns (`external_jobs` und
+`observed_tasks`) persistiert. Beide verwenden genau einen kombinierten Read
+des vom Parent ausgewählten Endpunkts ohne erneutes Failover. Projektionen sind
+positive-only; unvollständige oder ACL-unzureichende Reads treffen keine
+Abwesenheitsentscheidung. Der vollständige Persistenz-, Cursor- und
+Shutdown-Vertrag steht in
+[`proxmox-external-monitoring-persistence.md`](proxmox-external-monitoring-persistence.md).
+
 ### 3.3 Backup Worker
 
 Verantwortung:
@@ -309,7 +318,7 @@ Separate technische Identitäten:
 
 1. PVE Collector Token: `Sys.Audit`, `VM.Audit`, `Datastore.Audit` auf den benötigten Pfaden.
 2. PVE Backup Token: `VM.Backup` auf den Zielgästen/-Pools und `Datastore.AllocateSpace` auf Zielstorages; optional `Datastore.Audit`.
-3. PBS Collector Token: System-Audit und `DatastoreAudit` auf den ausgewählten Datastores/Namespaces.
+3. PBS Collector Token: System-Audit und `DatastoreAudit` auf den ausgewählten Datastores/Namespaces reichen für positive Datastore-Sicht. Vollständige Prune-/Verify-/Sync-Job-Scope-Evidenz erfordert propagiertes `DatastoreAudit` am Root `/datastore`; vollständige Sync-Job-Evidenz zusätzlich propagiertes `RemoteAudit` am Root `/remote`. Fehlt diese breite Evidenz, werden sichtbare Beobachtungen weiterhin positive-only persistiert und nur die betroffenen Scopes bleiben `partial`.
 4. PVE-zu-PBS Storage Token: liegt ausschließlich in der PVE-Storage-Konfiguration und hat nur `DatastoreBackup` auf dem engsten PBS-Namespace.
 
 Produktionsverbindungen erlauben keine deaktivierte TLS-Prüfung. Unterstützt werden eine vertrauenswürdige CA oder explizites SHA-256-Fingerprint-Pinning. Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem Logeintrag redigiert.
@@ -336,8 +345,10 @@ Das folgende Modell ist ein Greenfield-Entwurf. Gegenüber dem Altschema werden 
 - `guests` mit Unique Key `(cluster_id, guest_type, vmid)`
 - `guest_placements` und optional `guest_placement_history`
 - `pve_storages`
-- `pbs_servers`
-- `pbs_datastores`
+- `pbs_servers` und der getrennte aktuelle Messzustand `pbs_server_status`
+- `pbs_datastores` und der getrennte aktuelle Messzustand
+  `pbs_datastore_capacity_state`; S3-Werte bedeuten ausschließlich lokalen
+  Cache
 - `pbs_namespaces`
 - `backup_targets`
 - `inventory_sync_runs`

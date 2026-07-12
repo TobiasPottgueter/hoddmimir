@@ -4,10 +4,14 @@ Stand: 11. Juli 2026
 
 ## Grenze
 
-Dieser Slice liefert einen typisierten, positiven Server-, Node-, Datastore-
-und Kapazitäts-Snapshot. Er enthält keine Persistenz, negativen Diffs,
-Namespaces, Backup-Gruppen, Snapshots, Tasks, Schreiboperationen oder
-Collector-/DI-Aktivierung.
+Dieser Vertrag definiert den typisierten, positiven Server-, Node-, Datastore-
+und Kapazitäts-Snapshot. Namespaces, Backup-Gruppen, Snapshots, Tasks und
+Schreiboperationen bleiben außerhalb. Die inzwischen aktivierte Collector-
+Verdrahtung, Identitätsbindung, Partial-/Diff-Regeln und Persistenz sind in
+[`pbs-runtime-inventory-persistence.md`](pbs-runtime-inventory-persistence.md)
+festgelegt. Der produktive Runtime-Scope ist ausschließlich installationsweit;
+der explizite Scope bleibt ein getesteter Adaptervertrag, ist aber nicht mit
+dem Collector verdrahtet.
 
 Die Reihenfolge ist fest: `/version` ist immer der erste Call, gefolgt von
 `/ping`. Erst nach beiden erfolgreichen Produktprüfungen darf der Client

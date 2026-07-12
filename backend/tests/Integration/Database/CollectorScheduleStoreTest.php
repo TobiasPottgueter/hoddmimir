@@ -171,6 +171,33 @@ final class CollectorScheduleStoreTest extends KernelTestCase
         $store->finalize($renewed, CollectorCycleStatus::Succeeded, 1234);
     }
 
+    public function testASecondDueCycleClearsThePreviousFinishTimestampBeforeAdvancingItsStart(): void
+    {
+        $worker = $this->worker('a');
+        $this->recordHeartbeat($worker);
+        $store = new DbalCollectorScheduleStore($this->connection);
+        $store->bootstrap(120);
+
+        $first = $store->claimDue($worker, $this->token('b'), 10);
+        self::assertNotNull($first->lease);
+        $store->finalize($first->lease, CollectorCycleStatus::Succeeded, 1);
+        self::assertNotNull($this->connection->fetchOne(
+            "SELECT last_cycle_finished_at FROM collector_schedule WHERE schedule_name = 'inventory'",
+        ));
+
+        $this->connection->executeStatement(
+            "UPDATE collector_schedule SET next_scan_at = UTC_TIMESTAMP(6) WHERE schedule_name = 'inventory'",
+        );
+        $second = $store->claimDue($worker, $this->token('c'), 10);
+
+        self::assertNotNull($second->lease);
+        self::assertSame(2, $second->lease->fencingToken);
+        self::assertNull($this->connection->fetchOne(
+            "SELECT last_cycle_finished_at FROM collector_schedule WHERE schedule_name = 'inventory'",
+        ));
+        $store->finalize($second->lease, CollectorCycleStatus::Succeeded, 1);
+    }
+
     public function testSeparateRuntimeAndExecutorCheckpointsCanRenewAndFinalizeOneRealLease(): void
     {
         $worker = $this->worker('a');
@@ -235,6 +262,26 @@ final class CollectorScheduleStoreTest extends KernelTestCase
         $store->bootstrap(120);
         $first = $store->claimDue($workerA, $this->token('a'), 1);
         self::assertNotNull($first->lease);
+        $monitoringRun = random_bytes(16);
+        $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        $this->connection->insert('proxmox_monitoring_runs', [
+            'id' => $monitoringRun,
+            'connection_id' => random_bytes(16),
+            'parent_sync_run_id' => random_bytes(16),
+            'product' => 'pve',
+            'binding_kind' => 'pve_standalone',
+            'binding_value' => 'pve-a',
+            'binding_legacy_endpoint_id' => null,
+            'monitoring_kind' => 'observed_tasks',
+            'expected_connection_revision' => 1,
+            'endpoint_id' => random_bytes(16),
+            'cycle_token' => $first->lease->token->binary(),
+            'collector_fencing_token' => $first->lease->fencingToken,
+            'status' => 'running',
+            'started_at' => self::NOW,
+            'heartbeat_at' => self::NOW,
+        ]);
+        $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
 
         $expiryDeadline = microtime(true) + 3;
         while ($this->databaseNow() < $first->lease->expiresAt && microtime(true) < $expiryDeadline) {
@@ -253,6 +300,13 @@ final class CollectorScheduleStoreTest extends KernelTestCase
             $this->connection->fetchOne(
                 'SELECT status FROM collector_cycles WHERE cycle_token = :token',
                 ['token' => $this->token('a')->binary()],
+            ),
+        );
+        self::assertSame(
+            ['status' => 'failed', 'error_code' => 'collector_lease_lost'],
+            $this->connection->fetchAssociative(
+                'SELECT status, error_code FROM proxmox_monitoring_runs WHERE id = :id',
+                ['id' => $monitoringRun],
             ),
         );
 
@@ -429,18 +483,80 @@ final class CollectorScheduleStoreTest extends KernelTestCase
         }
     }
 
-    /** @return iterable<string, array{CollectorCycleStatus, string, string}> */
+    /** @return iterable<string, array{CollectorCycleStatus}> */
+    public static function nonClosingOutcomes(): iterable
+    {
+        yield 'succeeded' => [CollectorCycleStatus::Succeeded];
+        yield 'partial' => [CollectorCycleStatus::Partial];
+    }
+
+    #[DataProvider('nonClosingOutcomes')]
+    public function testSuccessfulOrPartialFinalizeRejectsRunningChildrenAndPreservesLease(
+        CollectorCycleStatus $outcome,
+    ): void {
+        $worker = $this->worker('a');
+        $token = $this->token('b');
+        $this->recordHeartbeat($worker);
+        $store = new DbalCollectorScheduleStore($this->connection);
+        $store->bootstrap(120);
+        $claimed = $store->claimDue($worker, $token, 10);
+        self::assertNotNull($claimed->lease);
+        [$syncRun, $monitoringRun] = $this->insertRunningChildren($claimed->lease);
+
+        try {
+            $store->finalize($claimed->lease, $outcome, 1);
+            self::fail(sprintf('A %s cycle must not hide running children.', $outcome->value));
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('still running', $exception->getMessage());
+        }
+
+        self::assertSame('running', $this->connection->fetchOne(
+            'SELECT status FROM inventory_sync_runs WHERE id = :id',
+            ['id' => $syncRun],
+        ));
+        self::assertSame('running', $this->connection->fetchOne(
+            'SELECT status FROM proxmox_monitoring_runs WHERE id = :id',
+            ['id' => $monitoringRun],
+        ));
+        self::assertSame(
+            [
+                'lease_owner' => $claimed->lease->ownerId->bytes,
+                'lease_token' => $claimed->lease->token->binary(),
+                'lease_fencing_token' => $claimed->lease->fencingToken,
+            ],
+            $this->connection->fetchAssociative(
+                "SELECT lease_owner, lease_token, lease_fencing_token FROM collector_schedule WHERE schedule_name = 'inventory'",
+            ),
+        );
+        self::assertSame('running', $this->connection->fetchOne(
+            'SELECT status FROM collector_cycles WHERE cycle_token = :token',
+            ['token' => $token->binary()],
+        ));
+    }
+
+    /** @return iterable<string, array{CollectorCycleStatus, string, string, string}> */
     public static function closingOutcomes(): iterable
     {
-        yield 'failed' => [CollectorCycleStatus::Failed, 'failed', 'collector_cycle_failed'];
-        yield 'cancelled' => [CollectorCycleStatus::Cancelled, 'cancelled', 'collector_stopped'];
+        yield 'failed' => [
+            CollectorCycleStatus::Failed,
+            'failed',
+            'collector_cycle_failed',
+            'collector_cycle_failed',
+        ];
+        yield 'cancelled' => [
+            CollectorCycleStatus::Cancelled,
+            'cancelled',
+            'collector_stopped',
+            'collector_shutdown_requested',
+        ];
     }
 
     #[DataProvider('closingOutcomes')]
-    public function testNormalFinalizeRejectsRunningSyncButFailureOrCancellationClosesItAtomically(
+    public function testFailureOrCancellationTerminalizesAllRunningChildrenAtomically(
         CollectorCycleStatus $outcome,
         string $expectedStatus,
         string $expectedCode,
+        string $expectedMonitoringCode,
     ): void
     {
         $worker = $this->worker('a');
@@ -450,47 +566,30 @@ final class CollectorScheduleStoreTest extends KernelTestCase
         $store->bootstrap(120);
         $claimed = $store->claimDue($worker, $token, 10);
         self::assertNotNull($claimed->lease);
-        $connectionId = random_bytes(16);
-        $this->connection->insert('proxmox_connections', [
-            'id' => $connectionId,
-            'display_name' => 'Running sync finalization guard '.bin2hex($connectionId),
-            'product' => 'pve',
-            'enabled' => 1,
-            'revision' => 1,
-            'created_at' => self::NOW,
-            'updated_at' => self::NOW,
-        ]);
-        $this->connection->insert('inventory_sync_runs', [
-            'id' => random_bytes(16),
-            'cycle_token' => $token->binary(),
-            'collector_fencing_token' => $claimed->lease->fencingToken,
-            'connection_id' => $connectionId,
-            'expected_connection_revision' => 1,
-            'status' => 'running',
-            'authoritative' => 0,
-            'started_at' => self::NOW,
-            'heartbeat_at' => self::NOW,
-        ]);
-
-        try {
-            $store->finalize($claimed->lease, CollectorCycleStatus::Succeeded, 1);
-            self::fail('A successful cycle must not hide a running sync.');
-        } catch (\RuntimeException $exception) {
-            self::assertStringContainsString('still running', $exception->getMessage());
-        }
-        self::assertSame('running', $this->connection->fetchOne(
-            'SELECT status FROM inventory_sync_runs WHERE cycle_token = :token',
-            ['token' => $token->binary()],
-        ));
+        [$syncRun, $monitoringRun] = $this->insertRunningChildren($claimed->lease);
 
         $store->finalize($claimed->lease, $outcome, 2);
         self::assertSame(
             ['status' => $expectedStatus, 'error_code' => $expectedCode],
             $this->connection->fetchAssociative(
-                'SELECT status, error_code FROM inventory_sync_runs WHERE cycle_token = :token',
-                ['token' => $token->binary()],
+                'SELECT status, error_code FROM inventory_sync_runs WHERE id = :id',
+                ['id' => $syncRun],
             ),
         );
+        self::assertSame(
+            ['status' => 'failed', 'error_code' => $expectedMonitoringCode, 'applied_at' => null],
+            $this->connection->fetchAssociative(
+                'SELECT status, error_code, applied_at FROM proxmox_monitoring_runs WHERE id = :id',
+                ['id' => $monitoringRun],
+            ),
+        );
+        self::assertSame($outcome->value, $this->connection->fetchOne(
+            'SELECT status FROM collector_cycles WHERE cycle_token = :token',
+            ['token' => $token->binary()],
+        ));
+        self::assertNull($this->connection->fetchOne(
+            "SELECT lease_token FROM collector_schedule WHERE schedule_name = 'inventory'",
+        ));
     }
 
     public function testHeartbeatFreshnessAndStoppingStateUseDatabaseUtc(): void
@@ -705,6 +804,62 @@ final class CollectorScheduleStoreTest extends KernelTestCase
         );
     }
 
+    /** @return array{string, string} */
+    private function insertRunningChildren(CollectorLease $lease): array
+    {
+        $connectionId = random_bytes(16);
+        $syncRun = random_bytes(16);
+        $monitoringRun = random_bytes(16);
+        $this->connection->insert('proxmox_connections', [
+            'id' => $connectionId,
+            'display_name' => 'Running child finalization guard '.bin2hex($connectionId),
+            'product' => 'pve',
+            'enabled' => 1,
+            'revision' => 1,
+            'created_at' => self::NOW,
+            'updated_at' => self::NOW,
+        ]);
+        $this->connection->insert('inventory_sync_runs', [
+            'id' => $syncRun,
+            'cycle_token' => $lease->token->binary(),
+            'collector_fencing_token' => $lease->fencingToken,
+            'connection_id' => $connectionId,
+            'expected_connection_revision' => 1,
+            'status' => 'running',
+            'authoritative' => 0,
+            'started_at' => self::NOW,
+            'heartbeat_at' => self::NOW,
+        ]);
+
+        // This fixture deliberately exercises cycle cleanup independent of a
+        // selected endpoint. MonitoringRunStore integration tests cover the
+        // full monitoring FK graph with foreign keys enabled.
+        $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->connection->insert('proxmox_monitoring_runs', [
+                'id' => $monitoringRun,
+                'connection_id' => $connectionId,
+                'parent_sync_run_id' => $syncRun,
+                'product' => 'pve',
+                'binding_kind' => 'pve_standalone',
+                'binding_value' => 'pve-a',
+                'binding_legacy_endpoint_id' => null,
+                'monitoring_kind' => 'observed_tasks',
+                'expected_connection_revision' => 1,
+                'endpoint_id' => random_bytes(16),
+                'cycle_token' => $lease->token->binary(),
+                'collector_fencing_token' => $lease->fencingToken,
+                'status' => 'running',
+                'started_at' => self::NOW,
+                'heartbeat_at' => self::NOW,
+            ]);
+        } finally {
+            $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+
+        return [$syncRun, $monitoringRun];
+    }
+
     private function worker(string $byte): CollectorWorkerId
     {
         return new CollectorWorkerId(str_repeat($byte, 16));
@@ -750,7 +905,7 @@ final class CollectorScheduleStoreTest extends KernelTestCase
     private function clean(): void
     {
         $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
-        foreach (['inventory_sync_failures', 'inventory_sync_runs', 'collector_cycles', 'worker_heartbeats', 'collector_schedule', 'proxmox_connections'] as $table) {
+        foreach (['proxmox_monitoring_runs', 'inventory_sync_failures', 'inventory_sync_runs', 'collector_cycles', 'worker_heartbeats', 'collector_schedule', 'proxmox_connections'] as $table) {
             $this->connection->executeStatement(sprintf('DELETE FROM %s', $table));
         }
         $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');

@@ -8,7 +8,7 @@ use InvalidArgumentException;
 
 final readonly class PveUpid
 {
-    private const MAXIMUM_LENGTH = 1024;
+    public const MAXIMUM_LENGTH = 1024;
     private const PATTERN = '/\AUPID:([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?):([0-9A-Fa-f]{8}):([0-9A-Fa-f]{8,9}):([0-9A-Fa-f]{8}):([^\s:\/\x00-\x1F\x7F]{1,64}):([^\s:\/\x00-\x1F\x7F]{0,255}):([^\s:\/\x00-\x1F\x7F]{1,255}):\z/D';
 
     private function __construct(

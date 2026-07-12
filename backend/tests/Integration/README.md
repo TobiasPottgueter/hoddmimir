@@ -60,10 +60,32 @@ from one consistent statement; revision drift, a foreign/disabled endpoint,
 and a missing collector credential fail closed before a remote client can be
 created.
 
+The PVE-storage enrichment extends that same aggregate transaction. Its real
+MariaDB gate covers stable storage identities, disabled backup definitions,
+PBS mapping replacement, node-specific measured/unavailable/invalid capacity,
+partial positive updates without absence diffs, authoritative archive and
+reactivation, storage-specific mid-write rollback, exact constraints, the real
+collector grants, and the additive migration's up/down/up path.
+
+The PBS gate exercises the product-specific configuration source and the full
+fenced aggregate writer against MariaDB 11.4. It covers legacy and instance
+bindings, selected-endpoint and revision drift, lease/fence loss, apply-once
+and concurrent double apply, lock-wait expiry rollback, diagnostic first
+partials, safe positive partials, authoritative archive/reactivation, backend-
+bound capacity replacement, S3 local-cache semantics, exact collector grants,
+and schema constraints. The same migration test proves the additive PBS schema
+up, down to the unchanged foundation, and up again.
+
+The monitoring persistence gate now exercises the real MariaDB adapter for PVE
+and PBS jobs/tasks. Its PBS cases cover stable create/update identities,
+monotone last-run and terminal-task state, explicit running/history provenance,
+reported-node preference, the all-four-filter history cursor rule, persisted
+worker allowlists, UPID hash/raw collision rollback, collector monitoring-table
+grants with DELETE denial, and lease-takeover terminalization of running child
+runs.
+
 SQL-only stand-ins, fake repositories, skipped placeholders, and tests that
-merely restate fixtures do not satisfy these gates. Runtime collector wiring,
-PVE storage, PBS and task persistence remain outside this PVE-core slice and
-require their own production-adapter integration gates when implemented.
+merely restate fixtures do not satisfy these gates.
 
 `make backend-coverage` produces `backend/coverage/clover.xml` with Xdebug path
 coverage and enforces 100% line and branch coverage for Domain plus Application,

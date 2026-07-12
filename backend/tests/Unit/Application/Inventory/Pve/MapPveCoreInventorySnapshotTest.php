@@ -209,7 +209,7 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
             [],
         );
         yield 'PBS snapshot and binding' => [
-            self::read(InstallationBinding::pbs3Node('pbs-a'), $pbs),
+            self::read(InstallationBinding::pbsLegacyNode('pbs-a', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))), $pbs),
             PveCoreInventoryMappingFailureCode::NonPveRead,
             'The installation read is not a PVE snapshot.',
         ];
@@ -220,7 +220,7 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
             [],
         );
         yield 'PVE snapshot with PBS binding' => [
-            self::read(InstallationBinding::pbs3Node('pbs-a'), $pve),
+            self::read(InstallationBinding::pbsLegacyNode('pbs-a', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))), $pve),
             PveCoreInventoryMappingFailureCode::NonPveRead,
             'The installation read is not a PVE snapshot.',
         ];

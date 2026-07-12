@@ -144,6 +144,7 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
                 'lease_acquired_at' => $formattedNow,
                 'lease_expires_at' => $this->format($expiresAt),
                 'last_cycle_started_at' => $formattedNow,
+                'last_cycle_finished_at' => null,
                 'updated_at' => $formattedNow,
             ], ['schedule_name' => self::SCHEDULE_NAME]);
 
@@ -219,9 +220,24 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
             if (CollectorCycleStatus::Cancelled === $status || CollectorCycleStatus::Failed === $status) {
                 $syncStatus = CollectorCycleStatus::Cancelled === $status ? 'cancelled' : 'failed';
                 $errorCode = CollectorCycleStatus::Cancelled === $status ? 'collector_stopped' : 'collector_cycle_failed';
+                $monitoringErrorCode = CollectorCycleStatus::Cancelled === $status
+                    ? 'collector_shutdown_requested' : 'collector_cycle_failed';
                 $errorSummary = CollectorCycleStatus::Cancelled === $status
                     ? 'Collector stopped at a safe boundary.'
                     : 'Collector cycle failed before the sync run completed.';
+                $connection->executeStatement(
+                    <<<'SQL'
+                        UPDATE proxmox_monitoring_runs
+                        SET status = 'failed', heartbeat_at = :now, finished_at = :now,
+                            error_code = :error_code
+                        WHERE cycle_token = :cycle_token AND status = 'running' AND applied_at IS NULL
+                        SQL,
+                    [
+                        'now' => $formattedNow,
+                        'error_code' => $monitoringErrorCode,
+                        'cycle_token' => $lease->token->binary(),
+                    ],
+                );
                 $connection->executeStatement(
                     <<<'SQL'
                         UPDATE inventory_sync_runs
@@ -252,6 +268,21 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
             }
             if (0 !== (int) $runningSyncRuns) {
                 throw new RuntimeException('A collector cycle cannot finish while inventory sync runs are still running.');
+            }
+            $runningMonitoringRuns = $connection->fetchOne(
+                <<<'SQL'
+                    SELECT COUNT(*)
+                    FROM proxmox_monitoring_runs
+                    WHERE cycle_token = :cycle_token AND status = 'running'
+                    SQL,
+                ['cycle_token' => $lease->token->binary()],
+            );
+            if (!is_int($runningMonitoringRuns)
+                && !(is_string($runningMonitoringRuns) && ctype_digit($runningMonitoringRuns))) {
+                throw new RuntimeException('MariaDB returned an invalid running monitoring count.');
+            }
+            if (0 !== (int) $runningMonitoringRuns) {
+                throw new RuntimeException('A collector cycle cannot finish while monitoring runs are still running.');
             }
 
             $updated = $connection->update('collector_cycles', [
@@ -288,6 +319,15 @@ final readonly class DbalCollectorScheduleStore implements CollectorScheduleStor
         DateTimeImmutable $databaseNow,
     ): void {
         $formattedNow = $this->format($databaseNow);
+        $connection->executeStatement(
+            <<<'SQL'
+                UPDATE proxmox_monitoring_runs
+                SET status = 'failed', heartbeat_at = :now, finished_at = :now,
+                    error_code = 'collector_lease_lost'
+                WHERE cycle_token = :cycle_token AND status = 'running' AND applied_at IS NULL
+                SQL,
+            ['now' => $formattedNow, 'cycle_token' => $cycleToken],
+        );
         $connection->executeStatement(
             <<<'SQL'
                 UPDATE inventory_sync_runs

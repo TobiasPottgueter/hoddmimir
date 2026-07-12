@@ -225,6 +225,44 @@ class PreflightTest(unittest.TestCase):
                 variables["hoddmimir_collector_grid_width_seconds"] = width
                 self.assertNotEqual(0, self.run_preflight(variables).returncode)
 
+    def test_rejects_pve_storage_node_fanout_outside_application_bounds(self) -> None:
+        for fanout in (0, 1025):
+            with self.subTest(fanout=fanout):
+                variables = valid_variables()
+                variables["hoddmimir_pve_storage_max_node_fanout"] = fanout
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_pbs_datastore_fanout_outside_application_bounds(self) -> None:
+        for fanout in (0, 1025):
+            with self.subTest(fanout=fanout):
+                variables = valid_variables()
+                variables["hoddmimir_pbs_max_datastore_fanout"] = fanout
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_monitoring_limits_outside_application_bounds(self) -> None:
+        invalid_values = {
+            "hoddmimir_monitor_history_overlap_seconds": (-1, 3601),
+            "hoddmimir_pve_monitor_page_size": (0, 101),
+            "hoddmimir_pve_monitor_max_nodes": (0, 129),
+            "hoddmimir_pve_monitor_active_page_cap": (0, 3),
+            "hoddmimir_pve_monitor_archive_page_cap": (0, 11),
+            "hoddmimir_pve_monitor_request_limit": (0, 513),
+            "hoddmimir_pve_monitor_raw_row_limit": (99, 25001),
+            "hoddmimir_pve_monitor_distinct_task_limit": (0, 25001),
+            "hoddmimir_pve_monitor_history_window_seconds": (0, 86401),
+            "hoddmimir_pbs_monitor_page_size": (0, 1001),
+            "hoddmimir_pbs_monitor_max_pages_per_stream": (0, 65),
+            "hoddmimir_pbs_monitor_max_rows_per_stream": (255, 65537),
+            "hoddmimir_pbs_monitor_max_jobs_per_kind": (0, 65537),
+            "hoddmimir_pbs_monitor_history_window_seconds": (0, 86401),
+        }
+        for variable, values in invalid_values.items():
+            for value in values:
+                with self.subTest(variable=variable, value=value):
+                    variables = valid_variables()
+                    variables[variable] = value
+                    self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
     def test_secret_validation_does_not_echo_rejected_value(self) -> None:
         variables = valid_variables()
         rejected_secret = "NOT_A_VALID_SECRET"
@@ -432,6 +470,26 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
             self.assertEqual("hoddmimir_collector", services["data-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_GRID_WIDTH_SECONDS"])
+            self.assertEqual("128", services["data-worker"]["environment"]["PVE_STORAGE_MAX_NODE_FANOUT"])
+            self.assertEqual("128", services["data-worker"]["environment"]["PBS_MAX_DATASTORE_FANOUT"])
+            expected_monitoring_environment = {
+                "MONITOR_HISTORY_OVERLAP_SECONDS": "300",
+                "PVE_MONITOR_PAGE_SIZE": "100",
+                "PVE_MONITOR_MAX_NODES": "128",
+                "PVE_MONITOR_ACTIVE_PAGE_CAP": "2",
+                "PVE_MONITOR_ARCHIVE_PAGE_CAP": "10",
+                "PVE_MONITOR_REQUEST_LIMIT": "512",
+                "PVE_MONITOR_RAW_ROW_LIMIT": "25000",
+                "PVE_MONITOR_DISTINCT_TASK_LIMIT": "25000",
+                "PVE_MONITOR_HISTORY_WINDOW_SECONDS": "86400",
+                "PBS_MONITOR_PAGE_SIZE": "256",
+                "PBS_MONITOR_MAX_PAGES_PER_STREAM": "16",
+                "PBS_MONITOR_MAX_ROWS_PER_STREAM": "4096",
+                "PBS_MONITOR_MAX_JOBS_PER_KIND": "4096",
+                "PBS_MONITOR_HISTORY_WINDOW_SECONDS": "86400",
+            }
+            for name, expected in expected_monitoring_environment.items():
+                self.assertEqual(expected, services["data-worker"]["environment"][name])
             self.assertEqual("a" * 64, services["data-worker"]["environment"]["APP_BUILD_VERSION"])
             for application_service in ("data-worker", "backup-worker", "webapp"):
                 self.assertEqual(

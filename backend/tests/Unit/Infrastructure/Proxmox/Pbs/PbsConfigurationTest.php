@@ -7,6 +7,10 @@ namespace App\Tests\Unit\Infrastructure\Proxmox\Pbs;
 use App\Application\Proxmox\Pbs\PbsDatastoreId;
 use App\Application\Proxmox\Pbs\PbsReadFailure;
 use App\Application\Proxmox\Pbs\PbsReadFailureCode;
+use App\Application\Proxmox\Pbs\PbsTaskFilterFamily;
+use App\Application\Proxmox\Pbs\PbsTaskListQuery;
+use App\Application\Proxmox\Pbs\PbsTaskPass;
+use App\Application\Proxmox\Pbs\PbsTaskWindow;
 use App\Application\Security\EncryptedSecret;
 use App\Application\Security\PlaintextSecret;
 use App\Application\Security\SecretCipher;
@@ -46,9 +50,40 @@ final class PbsConfigurationTest extends TestCase
         self::assertSame('https://pbs.example.test:8007/api2/json/config/datastore', $builder->build(PbsRequest::datastoreConfigurations()));
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/datastore', $builder->build(PbsRequest::datastores()));
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/datastore/store_a/status?verbose=0', $builder->build(PbsRequest::datastoreStatus(new PbsDatastoreId('store_a'))));
+        self::assertSame('https://pbs.example.test:8007/api2/json/admin/prune', $builder->build(PbsRequest::pruneJobs()));
+        self::assertSame('https://pbs.example.test:8007/api2/json/admin/sync?sync-direction=all', $builder->build(PbsRequest::syncJobs()));
+        self::assertSame('https://pbs.example.test:8007/api2/json/admin/verify', $builder->build(PbsRequest::verifyJobs()));
+        self::assertSame(
+            'https://pbs.example.test:8007/api2/json/nodes/pbs-1/tasks?start=0&limit=256&typefilter=backup&running=1',
+            $builder->build(PbsRequest::tasks('pbs-1', new PbsTaskListQuery(
+                PbsTaskFilterFamily::Backup,
+                PbsTaskPass::Running,
+                0,
+                256,
+                null,
+            ))),
+        );
+        self::assertSame(
+            'https://pbs.example.test:8007/api2/json/nodes/pbs-1/tasks?start=256&limit=256&typefilter=verif&since=100&until=200',
+            $builder->build(PbsRequest::tasks('pbs-1', new PbsTaskListQuery(
+                PbsTaskFilterFamily::Verify,
+                PbsTaskPass::History,
+                256,
+                256,
+                new PbsTaskWindow(100, 200),
+            ))),
+        );
         self::assertSame(65_536, PbsRequest::version()->maximumBodyBytes);
         self::assertSame(262_144, PbsRequest::nodeStatus('pbs')->maximumBodyBytes);
         self::assertSame(8_388_608, PbsRequest::datastores()->maximumBodyBytes);
+        self::assertSame(4_194_304, PbsRequest::pruneJobs()->maximumBodyBytes);
+        self::assertSame(2_097_152, PbsRequest::tasks('pbs', new PbsTaskListQuery(
+            PbsTaskFilterFamily::Sync,
+            PbsTaskPass::Running,
+            0,
+            1,
+            null,
+        ))->maximumBodyBytes);
         self::assertSame('https://[2001:db8::1]:8443/api2/json/ping', (new PbsApiUrlBuilder('2001:db8::1', 8443))->build(PbsRequest::ping()));
     }
 
@@ -60,10 +95,12 @@ final class PbsConfigurationTest extends TestCase
         foreach (["bad\n", '-bad', str_repeat('a', 64)] as $node) {
             try { PbsRequest::nodeStatus($node); self::fail('invalid node'); } catch (InvalidArgumentException) {}
         }
-        foreach (['/', '/system/tasks', '/datastore/ab', '/datastore/bad/child'] as $path) {
+        foreach (['/', '/datastore/ab', '/datastore/bad/child'] as $path) {
             try { PbsRequest::permission($path); self::fail('invalid permission path'); } catch (InvalidArgumentException) {}
         }
         self::assertSame('/datastore', PbsRequest::permission('/datastore')->query['path']);
+        self::assertSame('/system/tasks', PbsRequest::permission('/system/tasks')->query['path']);
+        self::assertSame('/remote', PbsRequest::permission('/remote')->query['path']);
         self::assertSame('/datastore/store_a', PbsRequest::permission('/datastore/store_a')->query['path']);
     }
 

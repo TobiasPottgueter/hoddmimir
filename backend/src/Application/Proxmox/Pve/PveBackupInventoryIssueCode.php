@@ -15,6 +15,10 @@ enum PveBackupInventoryIssueCode: string
     case TaskStreamReadFailed = 'task_stream_read_failed';
     case BackupJobReadFailed = 'backup_job_read_failed';
     case PageCapReached = 'page_cap_reached';
+    case NodeLimitReached = 'node_limit_reached';
+    case RequestLimitReached = 'request_limit_reached';
+    case RawRowLimitReached = 'raw_row_limit_reached';
+    case DistinctTaskLimitReached = 'distinct_task_limit_reached';
     case InvalidNode = 'invalid_node';
     case InconsistentTaskStatus = 'inconsistent_task_status';
 }

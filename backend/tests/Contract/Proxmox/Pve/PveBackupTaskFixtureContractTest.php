@@ -37,14 +37,16 @@ final class PveBackupTaskFixtureContractTest extends TestCase
             PveTaskQuery::active(limit: 2),
             $decoder->decode($this->fixture($major, 'node-tasks-active')),
         );
+        $archiveSince = max(0, $active->tasks[0]->upid->startTime - 1_000);
+        $archiveUntil = $active->tasks[0]->upid->startTime + 1_000;
         $archive0 = $pageReader->read(
             $node,
-            PveTaskQuery::archive(0, PHP_INT_MAX, limit: 2),
+            PveTaskQuery::archive($archiveSince, $archiveUntil, limit: 2),
             $decoder->decode($this->fixture($major, 'node-tasks-archive-page-0')),
         );
         $archiveNext = $pageReader->read(
             $node,
-            PveTaskQuery::archive(0, PHP_INT_MAX, start: 2, limit: 2),
+            PveTaskQuery::archive($archiveSince, $archiveUntil, start: 2, limit: 2),
             $decoder->decode($this->fixture($major, 'node-tasks-archive-page-next')),
         );
 

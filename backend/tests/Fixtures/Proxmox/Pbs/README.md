@@ -18,3 +18,9 @@ The complete hashes and extraction procedure are recorded in
 `docs/pbs-first-read-contract.md`. Additive `future-*` properties verify that
 readers remain tolerant without enabling capabilities from unknown fields.
 All digest and instance-ID values are synthetic.
+
+The GET-only tasks/jobs contract and its complete source pins are recorded in
+`docs/pbs-tasks-jobs-read-contract.md`. Its fixtures are split into `3`,
+`4.0`, `4.1`, and `4.2` directories and cover the three fixed job lists plus
+bounded running/history task pages. Normal tests consume only these local
+fixtures and never contact a PBS installation.

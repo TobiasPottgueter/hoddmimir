@@ -21,10 +21,29 @@ use App\Application\Proxmox\Pbs\PbsReadFailure;
 use App\Application\Proxmox\Pbs\PbsReadFailureCode;
 use App\Application\Proxmox\Pbs\PbsVersion;
 use App\Application\Proxmox\Pbs\ReadPbsInstallation;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ReadPbsInstallationTest extends TestCase
 {
+    #[DataProvider('invalidMaximumDatastoreFanoutProvider')]
+    public function testMaximumDatastoreFanoutMustRemainWithinOperationalBounds(int $maximum): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new ReadPbsInstallation(
+            new FixturePbsConnector(FixturePbsClient::pbs3()),
+            PbsDatastoreScanScope::installationWide(),
+            $maximum,
+        );
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function invalidMaximumDatastoreFanoutProvider(): iterable
+    {
+        yield 'below minimum' => [0];
+        yield 'above maximum' => [1025];
+    }
+
     public function testInstallationWidePbs3ReadHasExactBoundedOrder(): void
     {
         $client = FixturePbsClient::pbs3();
@@ -85,7 +104,7 @@ final class ReadPbsInstallationTest extends TestCase
         self::assertContains(PbsInventoryIssueCode::NodeStatusReadFailed, $codes);
         self::assertContains(PbsInventoryIssueCode::IdentityReadFailed, $codes);
         self::assertContains(PbsInventoryIssueCode::MissingDatastorePropagation, $codes);
-        self::assertContains(PbsInventoryIssueCode::UnavailableDatastore, $codes);
+        self::assertNotContains(PbsInventoryIssueCode::UnavailableDatastore, $codes);
         self::assertContains(PbsInventoryIssueCode::ConfigurationChanged, $codes);
     }
 
@@ -160,6 +179,60 @@ final class ReadPbsInstallationTest extends TestCase
         );
         self::assertFalse($snapshot->isComplete());
         self::assertFalse($snapshot->permitsDeletionDecisions());
+    }
+
+    #[DataProvider('fanoutBoundaryProvider')]
+    public function testFanoutBoundaryIsAllOrNothingAndNeverTruncatesStatusReads(
+        int $datastoreCount,
+        int $expectedStatusReads,
+    ): void {
+        $client = FixturePbsClient::pbs42();
+        $ids = [];
+        $definitions = [];
+        for ($index = 0; $index < $datastoreCount; ++$index) {
+            $id = new PbsDatastoreId(sprintf('store_%03d', $index));
+            $ids[] = $id;
+            $definitions[] = new PbsDatastoreDefinition(
+                $id,
+                PbsDatastoreBackendType::Filesystem,
+                PbsMountStatus::Mounted,
+                null,
+            );
+        }
+        $configuration = new PbsDatastoreConfigurationSnapshot(str_repeat('d', 64), $ids);
+        $client->startConfig = $configuration;
+        $client->endConfig = $configuration;
+        $client->definitions = $definitions;
+
+        $snapshot = (new ReadPbsInstallation(
+            new FixturePbsConnector($client),
+            PbsDatastoreScanScope::installationWide(),
+            128,
+        ))->read();
+
+        $statusCalls = array_values(array_filter(
+            $client->calls,
+            static fn (string $call): bool => str_starts_with($call, 'status:'),
+        ));
+        self::assertCount($expectedStatusReads, $statusCalls);
+        self::assertCount($expectedStatusReads, $snapshot->capacities);
+        self::assertCount($datastoreCount, $snapshot->datastores);
+        self::assertSame(
+            129 === $datastoreCount,
+            in_array(
+                PbsInventoryIssueCode::DatastoreFanoutExceeded,
+                array_map(static fn ($issue) => $issue->code, $snapshot->issues),
+                true,
+            ),
+        );
+    }
+
+    /** @return iterable<string, array{int, int}> */
+    public static function fanoutBoundaryProvider(): iterable
+    {
+        yield 'below limit' => [127, 127];
+        yield 'at limit' => [128, 128];
+        yield 'above limit is not truncated' => [129, 0];
     }
 }
 

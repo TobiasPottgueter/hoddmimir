@@ -80,7 +80,9 @@ final class DbalCollectorPersistenceTest extends TestCase
         );
         $connection->expects(self::once())->method('update')->with(
             'collector_schedule',
-            self::callback(static fn (array $values): bool => 1 === $values['lease_fencing_token']),
+            self::callback(static fn (array $values): bool => 1 === $values['lease_fencing_token']
+                && array_key_exists('last_cycle_finished_at', $values)
+                && null === $values['last_cycle_finished_at']),
             ['schedule_name' => 'inventory'],
         )->willReturn(1);
         $claimed = (new DbalCollectorScheduleStore($connection))->claimDue($this->worker('a'), $this->token('b'), 10);
@@ -95,7 +97,13 @@ final class DbalCollectorPersistenceTest extends TestCase
             'lease_fencing_token' => 8,
         ]);
         $takeover = $this->connection($expired);
-        $takeover->expects(self::exactly(2))->method('executeStatement');
+        $abandonedStatements = [];
+        $takeover->expects(self::exactly(3))->method('executeStatement')->willReturnCallback(
+            static function (string $sql) use (&$abandonedStatements): int {
+                $abandonedStatements[] = $sql;
+                return 1;
+            },
+        );
         $takeover->expects(self::never())->method('insert');
         $takeover->expects(self::once())->method('update')->with(
             'collector_schedule',
@@ -107,6 +115,10 @@ final class DbalCollectorPersistenceTest extends TestCase
         $decision = (new DbalCollectorScheduleStore($takeover))->claimDue($this->worker('a'), $this->token('b'), 10);
         self::assertFalse($decision->isClaimed());
         self::assertSame('10:02:00', $decision->retryAt->format('H:i:s'));
+        self::assertStringContainsString('UPDATE proxmox_monitoring_runs', $abandonedStatements[0]);
+        self::assertStringContainsString("error_code = 'collector_lease_lost'", $abandonedStatements[0]);
+        self::assertStringContainsString('UPDATE inventory_sync_runs', $abandonedStatements[1]);
+        self::assertStringContainsString('UPDATE collector_cycles', $abandonedStatements[2]);
     }
 
     public function testRenewAndFinalizeCancellationCheckEveryLeasePart(): void
@@ -121,17 +133,40 @@ final class DbalCollectorPersistenceTest extends TestCase
 
         $finalConnection = $this->connection($this->activeScheduleRow());
         $finalConnection->method('update')->willReturn(1);
-        $finalConnection->expects(self::once())->method('executeStatement')->with(
-            self::stringContains('UPDATE inventory_sync_runs'),
-            self::callback(static fn (array $values): bool => 'cancelled' === $values['status']),
-        )->willReturn(1);
+        $finalStatements = [];
+        $finalConnection->expects(self::exactly(2))->method('executeStatement')->willReturnCallback(
+            static function (string $sql, array $values) use (&$finalStatements): int {
+                $finalStatements[] = [$sql, $values];
+                return 1;
+            },
+        );
         $next = (new DbalCollectorScheduleStore($finalConnection))->finalize(
             $lease,
             CollectorCycleStatus::Cancelled,
             500,
         );
         self::assertSame('10:02:00', $next->format('H:i:s'));
+        self::assertStringContainsString('UPDATE proxmox_monitoring_runs', $finalStatements[0][0]);
+        self::assertSame('collector_shutdown_requested', $finalStatements[0][1]['error_code']);
+        self::assertStringContainsString('UPDATE inventory_sync_runs', $finalStatements[1][0]);
+        self::assertSame('cancelled', $finalStatements[1][1]['status']);
 
+    }
+
+    public function testSuccessfulOrPartialFinalizeRejectsRunningMonitoringChildren(): void
+    {
+        foreach ([CollectorCycleStatus::Succeeded, CollectorCycleStatus::Partial] as $status) {
+            try {
+                (new DbalCollectorScheduleStore($this->connection(
+                    $this->activeScheduleRow(),
+                    0,
+                    1,
+                )))->finalize($this->lease(), $status, 1);
+                self::fail('A collector cycle with a running monitoring child was finalized.');
+            } catch (RuntimeException $failure) {
+                self::assertStringContainsString('monitoring runs', $failure->getMessage());
+            }
+        }
     }
 
     public function testScheduleStoreRejectsInvalidTtlDurationMissingScheduleAndExhaustedFence(): void
@@ -282,7 +317,11 @@ final class DbalCollectorPersistenceTest extends TestCase
     }
 
     /** @param array<string, mixed>|false $row */
-    private function connection(array|false $row, string|int $fetchOne = 0): Connection&MockObject
+    private function connection(
+        array|false $row,
+        string|int $fetchOne = 0,
+        string|int|null $monitoringCount = null,
+    ): Connection&MockObject
     {
         $connection = $this->createMock(Connection::class);
         $connection->method('transactional')->willReturnCallback(
@@ -290,7 +329,11 @@ final class DbalCollectorPersistenceTest extends TestCase
         );
         $connection->method('fetchAssociative')->willReturn($row);
         $connection->method('fetchOne')->willReturnCallback(
-            static fn (string $sql): string|int => 'SELECT UTC_TIMESTAMP(6)' === $sql ? self::NOW : $fetchOne,
+            static fn (string $sql): string|int => match (true) {
+                'SELECT UTC_TIMESTAMP(6)' === $sql => self::NOW,
+                str_contains($sql, 'proxmox_monitoring_runs') && null !== $monitoringCount => $monitoringCount,
+                default => $fetchOne,
+            },
         );
 
         return $connection;

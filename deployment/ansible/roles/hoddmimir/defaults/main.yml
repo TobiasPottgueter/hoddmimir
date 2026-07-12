@@ -18,6 +18,22 @@ hoddmimir_mariadb_image: ""
 
 hoddmimir_database_name: hoddmimir
 hoddmimir_collector_grid_width_seconds: 120
+hoddmimir_pve_storage_max_node_fanout: 128
+hoddmimir_pbs_max_datastore_fanout: 128
+hoddmimir_monitor_history_overlap_seconds: 300
+hoddmimir_pve_monitor_page_size: 100
+hoddmimir_pve_monitor_max_nodes: 128
+hoddmimir_pve_monitor_active_page_cap: 2
+hoddmimir_pve_monitor_archive_page_cap: 10
+hoddmimir_pve_monitor_request_limit: 512
+hoddmimir_pve_monitor_raw_row_limit: 25000
+hoddmimir_pve_monitor_distinct_task_limit: 25000
+hoddmimir_pve_monitor_history_window_seconds: 86400
+hoddmimir_pbs_monitor_page_size: 256
+hoddmimir_pbs_monitor_max_pages_per_stream: 16
+hoddmimir_pbs_monitor_max_rows_per_stream: 4096
+hoddmimir_pbs_monitor_max_jobs_per_kind: 4096
+hoddmimir_pbs_monitor_history_window_seconds: 86400
 hoddmimir_backup_worker_poll_interval_seconds: 5
 hoddmimir_backup_execution_enabled: false
 hoddmimir_backup_execution_activation_ack: ""

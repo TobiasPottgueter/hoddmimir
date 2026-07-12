@@ -17,7 +17,11 @@ use App\Application\Inventory\Pve\PveCoreInventoryConflict;
 use App\Application\Inventory\Pve\PveCoreInventoryStore;
 use App\Application\Inventory\Pve\PveCoreScopeResult;
 use App\Application\Inventory\Pve\PveEndpointAttempt;
+use App\Application\Inventory\Pve\PveInventoryCommit;
+use App\Application\Inventory\Pve\PveNodeStorageScopeResult;
 use App\Application\Inventory\Pve\PveNodeObservation;
+use App\Application\Inventory\Pve\PveNodeStorageStateObservation;
+use App\Application\Inventory\Pve\PveStorageObservation;
 use App\Application\Inventory\Pve\PveSyncRunStart;
 use App\Application\Inventory\Pve\PveSyncRunFailure;
 use DateTimeImmutable;
@@ -146,9 +150,10 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
         });
     }
 
-    public function apply(CollectorLease $lease, PveCoreInventoryCommit $commit): PveCoreApplyResult
+    public function apply(CollectorLease $lease, PveInventoryCommit $inventory): PveCoreApplyResult
     {
-        return $this->connection->transactional(function (Connection $connection) use ($lease, $commit): PveCoreApplyResult {
+        return $this->connection->transactional(function (Connection $connection) use ($lease, $inventory): PveCoreApplyResult {
+            $commit = $inventory->core;
             $this->lockAndAssertFence($connection, $lease);
             $run = $this->lockAndAssertRun($connection, $lease, $commit->runId, $commit->connectionId);
             if (null !== ($run['applied_at'] ?? null)) {
@@ -164,7 +169,7 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             $binding = $this->bindingForUpdate($connection, $commit->connectionId);
             $diagnosticOnly = false;
             if (false === $binding) {
-                if (!$commit->isFullyAuthoritative()) {
+                if (!$inventory->isFullyAuthoritative()) {
                     $diagnosticOnly = true;
                 } else {
                     $this->insertBinding($connection, $commit);
@@ -180,7 +185,21 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             $updated = 0;
             $archived = 0;
             if (!$diagnosticOnly) {
-                [$created, $updated, $archived] = $this->applyCore($connection, $commit, false !== $binding);
+                [$created, $updated, $archived, $clusterId, $nodeIds] = $this->applyCore(
+                    $connection,
+                    $commit,
+                    false !== $binding,
+                    $inventory->isFullyAuthoritative(),
+                );
+                [$storageCreated, $storageUpdated, $storageArchived] = $this->applyStorage(
+                    $connection,
+                    $inventory,
+                    $clusterId,
+                    $nodeIds,
+                );
+                $created += $storageCreated;
+                $updated += $storageUpdated;
+                $archived += $storageArchived;
                 $connection->update('proxmox_installation_bindings', [
                     'last_verified_run_id' => $commit->runId->binary(),
                     'last_verified_at' => $this->format($commit->observedAt),
@@ -189,7 +208,11 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
 
             $this->insertScopeResult($connection, $commit, $commit->topologyScope);
             $this->insertScopeResult($connection, $commit, $commit->guestScope);
-            $status = $commit->overallStatus();
+            $this->insertScopeResult($connection, $commit, $inventory->storageScope);
+            foreach ($inventory->nodeStorageScopes as $nodeScope) {
+                $this->insertNodeStorageScopeResult($connection, $commit, $nodeScope);
+            }
+            $status = $inventory->overallStatus();
             $finishedAt = $this->format($commit->observedAt);
             $connection->update('inventory_sync_runs', [
                 'endpoint_id' => $commit->endpointId->binary(),
@@ -200,6 +223,7 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                 'applied_at' => $finishedAt,
                 'nodes_seen' => count($commit->nodes),
                 'guests_seen' => count($commit->guests),
+                'storages_seen' => count($inventory->storages),
                 'objects_created' => $created,
                 'objects_updated' => $updated,
                 'objects_archived' => $archived,
@@ -216,8 +240,13 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
         });
     }
 
-    /** @return array{int, int, int} */
-    private function applyCore(Connection $connection, PveCoreInventoryCommit $commit, bool $bindingExisted): array
+    /** @return array{int, int, int, InventoryIdentifier, array<string, InventoryIdentifier>} */
+    private function applyCore(
+        Connection $connection,
+        PveCoreInventoryCommit $commit,
+        bool $bindingExisted,
+        bool $authoritative,
+    ): array
     {
         $created = 0;
         $updated = 0;
@@ -326,7 +355,7 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             );
         }
 
-        if ($commit->isFullyAuthoritative()) {
+        if ($authoritative) {
             $unseenGuests = $connection->fetchAllAssociative(
                 <<<'SQL'
                     SELECT id FROM guests
@@ -364,7 +393,208 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             }
         }
 
+        return [$created, $updated, $archived, $clusterId, $nodeIds];
+    }
+
+    /**
+     * @param array<string, InventoryIdentifier> $nodeIds
+     *
+     * @return array{int, int, int}
+     */
+    private function applyStorage(
+        Connection $connection,
+        PveInventoryCommit $inventory,
+        InventoryIdentifier $clusterId,
+        array $nodeIds,
+    ): array {
+        $created = 0;
+        $updated = 0;
+        $archived = 0;
+        $storageIds = [];
+        foreach ($inventory->storages as $storage) {
+            [$storageId, $wasCreated] = $this->upsertStorage($connection, $inventory, $clusterId, $storage);
+            $storageIds[$storage->storageId] = $storageId;
+            $wasCreated ? ++$created : ++$updated;
+            $this->replacePbsMapping($connection, $inventory, $clusterId, $storageId, $storage);
+            if ($storage->disabled) {
+                $connection->delete('pve_node_storage_state', ['storage_id' => $storageId->binary()]);
+            }
+        }
+
+        foreach ($inventory->nodeStorageStates as $state) {
+            // PveInventoryCommit has already proved that every state belongs
+            // to one of its observed topology nodes and backup storages.
+            $this->upsertNodeStorageState(
+                $connection,
+                $inventory,
+                $clusterId,
+                $nodeIds[$state->node],
+                $storageIds[$state->storageId],
+                $state,
+            );
+        }
+
+        if ($inventory->isFullyAuthoritative()) {
+            $connection->executeStatement(
+                <<<'SQL'
+                    DELETE FROM pve_node_storage_state
+                    WHERE connection_id = :connection_id AND cluster_id = :cluster_id
+                      AND sync_run_id <> :run_id
+                    SQL,
+                [
+                    'connection_id' => $inventory->core->connectionId->binary(),
+                    'cluster_id' => $clusterId->binary(),
+                    'run_id' => $inventory->core->runId->binary(),
+                ],
+            );
+            $unseen = $connection->fetchAllAssociative(
+                <<<'SQL'
+                    SELECT id FROM pve_storages
+                    WHERE cluster_id = :cluster_id AND inventory_state = 'active' AND last_seen_run_id <> :run_id
+                    ORDER BY storage_name
+                    FOR UPDATE
+                    SQL,
+                ['cluster_id' => $clusterId->binary(), 'run_id' => $inventory->core->runId->binary()],
+            );
+            foreach ($unseen as $row) {
+                $storageId = $this->binary($row, 'id');
+                $connection->delete('pve_storage_pbs_mappings', ['storage_id' => $storageId]);
+                $connection->delete('pve_node_storage_state', ['storage_id' => $storageId]);
+                $connection->update('pve_storages', [
+                    'inventory_state' => 'archived',
+                    'archived_at' => $this->format($inventory->core->observedAt),
+                ], ['id' => $storageId, 'inventory_state' => 'active']);
+                ++$archived;
+            }
+        }
+
         return [$created, $updated, $archived];
+    }
+
+    /** @return array{InventoryIdentifier, bool} */
+    private function upsertStorage(
+        Connection $connection,
+        PveInventoryCommit $inventory,
+        InventoryIdentifier $clusterId,
+        PveStorageObservation $storage,
+    ): array {
+        $row = $connection->fetchAssociative(
+            'SELECT * FROM pve_storages WHERE cluster_id = :cluster_id AND storage_name = :name FOR UPDATE',
+            ['cluster_id' => $clusterId->binary(), 'name' => $storage->storageId],
+        );
+        $values = [
+            'storage_type' => $storage->storageType,
+            'supports_backup' => 1,
+            'disabled' => (int) $storage->disabled,
+            'content_json' => $this->json($storage->content),
+            'node_allowlist_json' => null === $storage->nodeAllowlist ? null : $this->json($storage->nodeAllowlist),
+            'shared' => (int) $storage->shared,
+            'inventory_state' => 'active',
+            'last_seen_run_id' => $inventory->core->runId->binary(),
+            'last_seen_at' => $this->format($storage->observedAt),
+            'archived_at' => null,
+        ];
+        if (false === $row) {
+            $storageId = $this->identifierGenerator->generate();
+            $connection->insert('pve_storages', [
+                'id' => $storageId->binary(),
+                'connection_id' => $inventory->core->connectionId->binary(),
+                'cluster_id' => $clusterId->binary(),
+                'storage_name' => $storage->storageId,
+                'first_seen_run_id' => $inventory->core->runId->binary(),
+                'first_seen_at' => $this->format($storage->observedAt),
+                ...$values,
+            ]);
+
+            return [$storageId, true];
+        }
+
+        $storageId = new InventoryIdentifier($this->binary($row, 'id'));
+        $connection->update('pve_storages', $values, ['id' => $storageId->binary()]);
+
+        return [$storageId, false];
+    }
+
+    private function replacePbsMapping(
+        Connection $connection,
+        PveInventoryCommit $inventory,
+        InventoryIdentifier $clusterId,
+        InventoryIdentifier $storageId,
+        PveStorageObservation $storage,
+    ): void {
+        if (null === $storage->pbsMapping) {
+            $connection->delete('pve_storage_pbs_mappings', ['storage_id' => $storageId->binary()]);
+
+            return;
+        }
+        $mapping = $storage->pbsMapping;
+        $connection->executeStatement(
+            <<<'SQL'
+                INSERT INTO pve_storage_pbs_mappings (
+                    storage_id, connection_id, cluster_id, server, port, datastore, namespace,
+                    observed_at, sync_run_id
+                ) VALUES (
+                    :storage_id, :connection_id, :cluster_id, :server, :port, :datastore, :namespace,
+                    :observed_at, :sync_run_id
+                )
+                ON DUPLICATE KEY UPDATE
+                    server = VALUES(server), port = VALUES(port), datastore = VALUES(datastore),
+                    namespace = VALUES(namespace), observed_at = VALUES(observed_at),
+                    sync_run_id = VALUES(sync_run_id)
+                SQL,
+            [
+                'storage_id' => $storageId->binary(),
+                'connection_id' => $inventory->core->connectionId->binary(),
+                'cluster_id' => $clusterId->binary(),
+                'server' => $mapping->server,
+                'port' => $mapping->port,
+                'datastore' => $mapping->datastore,
+                'namespace' => $mapping->namespace,
+                'observed_at' => $this->format($storage->observedAt),
+                'sync_run_id' => $inventory->core->runId->binary(),
+            ],
+        );
+    }
+
+    private function upsertNodeStorageState(
+        Connection $connection,
+        PveInventoryCommit $inventory,
+        InventoryIdentifier $clusterId,
+        InventoryIdentifier $nodeId,
+        InventoryIdentifier $storageId,
+        PveNodeStorageStateObservation $state,
+    ): void {
+        $connection->executeStatement(
+            <<<'SQL'
+                INSERT INTO pve_node_storage_state (
+                    connection_id, cluster_id, node_id, storage_id, enabled, active, shared,
+                    capacity_status, total_bytes, used_bytes, available_bytes, observed_at, sync_run_id
+                ) VALUES (
+                    :connection_id, :cluster_id, :node_id, :storage_id, :enabled, :active, :shared,
+                    :capacity_status, :total_bytes, :used_bytes, :available_bytes, :observed_at, :sync_run_id
+                )
+                ON DUPLICATE KEY UPDATE
+                    enabled = VALUES(enabled), active = VALUES(active), shared = VALUES(shared),
+                    capacity_status = VALUES(capacity_status), total_bytes = VALUES(total_bytes),
+                    used_bytes = VALUES(used_bytes), available_bytes = VALUES(available_bytes),
+                    observed_at = VALUES(observed_at), sync_run_id = VALUES(sync_run_id)
+                SQL,
+            [
+                'connection_id' => $inventory->core->connectionId->binary(),
+                'cluster_id' => $clusterId->binary(),
+                'node_id' => $nodeId->binary(),
+                'storage_id' => $storageId->binary(),
+                'enabled' => (int) $state->enabled,
+                'active' => (int) $state->active,
+                'shared' => (int) $state->shared,
+                'capacity_status' => $state->capacityStatus->value,
+                'total_bytes' => $state->totalBytes,
+                'used_bytes' => $state->usedBytes,
+                'available_bytes' => $state->availableBytes,
+                'observed_at' => $this->format($state->observedAt),
+                'sync_run_id' => $inventory->core->runId->binary(),
+            ],
+        );
     }
 
     /** @return array{InventoryIdentifier, bool} */
@@ -467,6 +697,21 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             'sync_run_id' => $commit->runId->binary(),
             'scope_type' => $scope->scope->value,
             'scope_key' => self::SCOPE_KEY,
+            'status' => $scope->status->value,
+            'observed_at' => $this->format($commit->observedAt),
+        ]);
+    }
+
+    private function insertNodeStorageScopeResult(
+        Connection $connection,
+        PveCoreInventoryCommit $commit,
+        PveNodeStorageScopeResult $scope,
+    ): void {
+        $connection->insert('inventory_sync_scope_results', [
+            'connection_id' => $commit->connectionId->binary(),
+            'sync_run_id' => $commit->runId->binary(),
+            'scope_type' => \App\Application\Inventory\Pve\PveCoreScope::NodeStorages->value,
+            'scope_key' => $scope->node,
             'status' => $scope->status->value,
             'observed_at' => $this->format($commit->observedAt),
         ]);
@@ -632,6 +877,12 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
     private function format(DateTimeImmutable $value): string
     {
         return $value->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.u');
+    }
+
+    /** @param list<string> $value */
+    private function json(array $value): string
+    {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 
     /** @param array<string, mixed> $row */

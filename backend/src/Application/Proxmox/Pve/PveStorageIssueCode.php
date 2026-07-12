@@ -16,6 +16,7 @@ enum PveStorageIssueCode: string
     case VisibleConfigurationChanged = 'visible_configuration_changed';
     case MissingPermissionCoverage = 'missing_permission_coverage';
     case IncompleteTopology = 'incomplete_topology';
+    case NodeFanoutExceeded = 'node_fanout_exceeded';
     case NodeReadFailed = 'node_read_failed';
     case MissingExpectedObservation = 'missing_expected_observation';
     case UnexpectedObservation = 'unexpected_observation';

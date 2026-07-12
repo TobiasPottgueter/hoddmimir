@@ -73,7 +73,7 @@ final readonly class PveTaskPageReader
             $endTime = null;
             if (array_key_exists('endtime', $row)) {
                 $endTime = $this->nonNegativeInt($row['endtime']);
-                if (null === $endTime) {
+                if (null === $endTime || $endTime < $upid->startTime) {
                     $issues[] = $this->issue(
                         $routeNode,
                         $index,
@@ -81,13 +81,14 @@ final readonly class PveTaskPageReader
                         PveBackupInventoryIssueCode::InvalidField,
                         $upid->raw,
                     );
+                    $endTime = null;
                 }
             }
 
             $status = null;
             if (array_key_exists('status', $row)) {
                 $status = $this->visibleString($row['status'], false);
-                if (null === $status) {
+                if (null === $status || strlen($status) > PveBackupTask::MAXIMUM_LIST_STATUS_LENGTH) {
                     $issues[] = $this->issue(
                         $routeNode,
                         $index,
@@ -95,6 +96,7 @@ final readonly class PveTaskPageReader
                         PveBackupInventoryIssueCode::InvalidField,
                         $upid->raw,
                     );
+                    $status = null;
                 }
             }
 

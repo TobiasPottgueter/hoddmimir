@@ -20,4 +20,5 @@ enum PbsInventoryIssueCode: string
     case UnexpectedDatastore = 'unexpected_datastore';
     case BackendMismatch = 'backend_mismatch';
     case UnavailableDatastore = 'unavailable_datastore';
+    case DatastoreFanoutExceeded = 'datastore_fanout_exceeded';
 }

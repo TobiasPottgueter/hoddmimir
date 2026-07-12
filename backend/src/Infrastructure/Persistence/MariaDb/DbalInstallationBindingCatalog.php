@@ -20,7 +20,7 @@ final readonly class DbalInstallationBindingCatalog implements InstallationBindi
     {
         $row = $this->connection->fetchAssociative(
             <<<'SQL'
-                SELECT product, identity_kind, identity_value
+                SELECT product, identity_kind, identity_value, legacy_endpoint_id
                 FROM proxmox_installation_bindings
                 WHERE connection_id = :connection_id
                 SQL,
@@ -57,10 +57,17 @@ final readonly class DbalInstallationBindingCatalog implements InstallationBindi
             return InstallationBinding::pveStandalone($identity);
         }
         if ('pbs' === $product && 'pbs_instance' === $kind) {
-            return InstallationBinding::pbs4Instance($identity);
+            if (null !== ($row['legacy_endpoint_id'] ?? null)) {
+                throw new RuntimeException('A PBS instance binding unexpectedly carries a legacy endpoint.');
+            }
+            return InstallationBinding::pbsInstance($identity);
         }
-        if ('pbs' === $product && 'pbs_node' === $kind) {
-            return InstallationBinding::pbs3Node($identity);
+        if ('pbs' === $product && 'pbs_legacy_node' === $kind) {
+            $endpoint = $row['legacy_endpoint_id'] ?? null;
+            if (!is_string($endpoint) || 16 !== strlen($endpoint)) {
+                throw new RuntimeException('A legacy PBS binding has no valid endpoint.');
+            }
+            return InstallationBinding::pbsLegacyNode($identity, new \App\Application\Inventory\Connection\EndpointId($endpoint));
         }
 
         throw new RuntimeException('MariaDB returned an unsupported installation binding.');
