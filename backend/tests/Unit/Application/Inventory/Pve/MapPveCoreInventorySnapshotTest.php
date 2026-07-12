@@ -47,7 +47,7 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
                 new PveNodeResource('node-a', 'offline'),
             ],
             [
-                new PveGuestResource(PveGuestType::Qemu, 100, 'node-a', 'vm-a', true, 'running'),
+                new PveGuestResource(PveGuestType::Qemu, 100, 'node-a', 'vm-a', true, 'running', 123),
                 new PveGuestResource(PveGuestType::Lxc, 200, 'node-b', null, null, 'stopped'),
             ],
         );
@@ -80,6 +80,7 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
         self::assertNull($commit->guests[0]->isTemplate);
         self::assertSame('vm-a', $commit->guests[1]->name);
         self::assertTrue($commit->guests[1]->isTemplate);
+        self::assertSame(123, $commit->guests[1]->diskWriteBytes);
         self::assertSame('2026-07-11T13:00:00+00:00', $commit->observedAt->format('c'));
     }
 

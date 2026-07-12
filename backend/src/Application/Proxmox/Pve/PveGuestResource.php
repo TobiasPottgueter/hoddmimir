@@ -13,6 +13,7 @@ final readonly class PveGuestResource
         public ?string $name,
         public ?bool $template,
         public ?string $status,
+        public ?int $diskWriteBytes = null,
     ) {
     }
 

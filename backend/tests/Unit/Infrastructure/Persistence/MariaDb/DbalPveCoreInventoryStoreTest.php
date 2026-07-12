@@ -91,6 +91,41 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
         self::assertSame(['heartbeat_at' => self::NOW], $recording->updates[0][1]);
     }
 
+    public function testRawDiskWriteStateRequiresAnAuthoritativeGuestScope(): void
+    {
+        $authoritative = new PveStoreRecording();
+        $this->store($this->database(recording: $authoritative))->apply(
+            $this->lease(),
+            $this->commit(authoritative: true, diskWriteBytes: 123),
+        );
+        $guestWriteStatements = array_values(array_filter(
+            $authoritative->statements,
+            static fn (array $statement): bool => str_contains($statement[0], 'guest_write_states'),
+        ));
+        self::assertCount(1, $guestWriteStatements);
+        self::assertSame(123, $guestWriteStatements[0][1]['diskwrite_bytes']);
+        self::assertSame($this->id('r')->binary(), $guestWriteStatements[0][1]['authoritative_sync_run_id']);
+
+        $partial = new PveStoreRecording();
+        $this->store($this->database([
+            'binding' => $this->clusterBindingRow(),
+            'cluster' => ['id' => $this->id('k')->binary()],
+            'node' => ['id' => $this->id('n')->binary()],
+            'guest' => ['id' => $this->id('g')->binary()],
+            'known_nodes' => [1, 'node-a'],
+        ], $partial))->apply(
+            $this->lease(),
+            $this->commit(authoritative: false, diskWriteBytes: 123),
+        );
+        self::assertNotContains(
+            true,
+            array_map(
+                static fn (array $statement): bool => str_contains($statement[0], 'guest_write_states'),
+                $partial->statements,
+            ),
+        );
+    }
+
     public function testExistingInventoryUpdatesAllAggregatesAndArchivesAuthoritativeAbsence(): void
     {
         $recording = new PveStoreRecording();
@@ -114,7 +149,6 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
         self::assertSame(3, $result->archived);
         self::assertSame(
             [
-                'guest_placements',
                 'pve_storage_pbs_mappings',
                 'pve_node_storage_state',
                 'pve_storage_pbs_mappings',
@@ -386,13 +420,21 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
         bool $empty = false,
         bool $failed = false,
         ?bool $template = false,
+        ?int $diskWriteBytes = null,
     ): PveInventoryCommit {
         $status = $failed
             ? InventoryScopeStatus::Failed
             : ($authoritative ? InventoryScopeStatus::Complete : InventoryScopeStatus::Partial);
         $nodeName = $standalone ? 'standalone' : 'node-a';
         $nodes = $empty ? [] : [new PveNodeObservation($nodeName, 'online')];
-        $guests = $empty ? [] : [new PveGuestObservation(PveGuestType::Qemu, 100, $nodeName, 'guest', $template)];
+        $guests = $empty ? [] : [new PveGuestObservation(
+            PveGuestType::Qemu,
+            100,
+            $nodeName,
+            'guest',
+            $template,
+            $diskWriteBytes,
+        )];
         $binding = new PveCoreInstallationBinding(
             $standalone ? PveCoreBindingKind::Standalone : PveCoreBindingKind::Cluster,
             $standalone ? 'standalone' : 'cluster-a',

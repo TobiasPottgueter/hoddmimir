@@ -54,6 +54,8 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'SELECT capability_snapshot_id FROM inventory_sync_runs',
                 'SELECT error_summary FROM inventory_sync_runs',
                 'SELECT * FROM pve_node_storage_state',
+                'SELECT * FROM guest_write_states',
+                'SELECT placement_revision FROM guest_placements',
                 'SELECT owner_auth_id FROM pbs_backup_groups',
                 'SELECT comment FROM pbs_snapshots',
                 'SELECT encryption_fingerprint FROM pbs_snapshots',

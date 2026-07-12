@@ -24,6 +24,16 @@ describe("InventoryResourceTable", () => {
             nodeName: "pve-a",
           }),
           resource("pve_guest"),
+          {
+            ...resource("pve_guest", {
+              guestType: "lxc",
+              vmid: 102,
+              nodeName: "stale-node-must-not-render",
+            }),
+            id: "archived-guest",
+            inventoryState: "archived",
+            archivedAt: "2026-07-12T10:01:00.000000Z",
+          },
           resource("pve_storage", {
             storageType: "pbs",
             content: ["backup"],
@@ -93,6 +103,8 @@ describe("InventoryResourceTable", () => {
     expect(text).toContain("PVE-Node");
     expect(text).toContain("QEMU 101 · pve-a");
     expect(text).toContain("Gast – · ohne Placement");
+    expect(text).toContain("LXC 102 · ohne Placement");
+    expect(text).not.toContain("stale-node-must-not-render");
     expect(text).toContain("pbs · backup");
     expect(text).toContain("Deaktiviert");
     expect(text).toContain("Kein Backup-Content");

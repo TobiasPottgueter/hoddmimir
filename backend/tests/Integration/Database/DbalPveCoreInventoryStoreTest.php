@@ -168,8 +168,89 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
                 ['connection_id' => $this->connectionId->binary()],
             ),
         );
+        self::assertSame(2, $this->databaseInteger(
+            <<<'SQL'
+                SELECT p.placement_revision
+                FROM guest_placements AS p
+                JOIN guests AS g ON g.id = p.guest_id
+                WHERE g.connection_id = :connection_id AND g.guest_type = 'qemu' AND g.vmid = 100
+                SQL,
+            ['connection_id' => $this->connectionId->binary()],
+        ));
         self::assertSame($secondRun->binary(), $this->binaryColumn(
             "SELECT last_verified_run_id FROM proxmox_installation_bindings WHERE connection_id = :connection_id",
+        ));
+    }
+
+    public function testPlacementRevisionAndRawDiskWriteStateFollowOnlyObservedFacts(): void
+    {
+        [$firstLease, $firstRun] = $this->startSelectedRun('guest-state-first');
+        $this->store->apply($firstLease, $this->commit(
+            $firstRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest', 100)],
+            observedAt: self::at(1),
+        ));
+
+        [$sameLease, $sameRun] = $this->startSelectedRun('guest-state-same');
+        $this->store->apply($sameLease, $this->commit(
+            $sameRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest', 90)],
+            observedAt: self::at(2),
+            storageScope: InventoryScopeStatus::Partial,
+        ));
+
+        $guestId = $this->binaryColumn(
+            "SELECT id FROM guests WHERE connection_id = :connection_id AND guest_type = 'qemu' AND vmid = 100",
+        );
+        $placement = $this->rowByNaturalKey('guest_placements', 'guest_id = :guest_id', ['guest_id' => $guestId]);
+        self::assertDatabaseNumericValue(1, $placement['placement_revision']);
+        self::assertSame('2026-07-11 00:00:02.000000', $placement['observed_at']);
+        $writeState = $this->rowByNaturalKey('guest_write_states', 'guest_id = :guest_id', ['guest_id' => $guestId]);
+        self::assertDatabaseNumericValue(90, $writeState['diskwrite_bytes']);
+        self::assertSame('2026-07-11 00:00:02.000000', $writeState['observed_at']);
+        self::assertSame($sameRun->binary(), $writeState['authoritative_sync_run_id']);
+
+        [$partialLease, $partialRun] = $this->startSelectedRun('guest-state-partial');
+        $this->store->apply($partialLease, $this->commit(
+            $partialRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest', 200)],
+            guests: InventoryScopeStatus::Partial,
+            observedAt: self::at(3),
+        ));
+        $writeState = $this->rowByNaturalKey('guest_write_states', 'guest_id = :guest_id', ['guest_id' => $guestId]);
+        self::assertDatabaseNumericValue(90, $writeState['diskwrite_bytes']);
+        self::assertSame($sameRun->binary(), $writeState['authoritative_sync_run_id']);
+
+        [$moveLease, $moveRun] = $this->startSelectedRun('guest-state-move');
+        $this->store->apply($moveLease, $this->commit(
+            $moveRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-b', 'guest')],
+            observedAt: self::at(4),
+        ));
+        $placement = $this->rowByNaturalKey('guest_placements', 'guest_id = :guest_id', ['guest_id' => $guestId]);
+        self::assertDatabaseNumericValue(2, $placement['placement_revision']);
+        $writeState = $this->rowByNaturalKey('guest_write_states', 'guest_id = :guest_id', ['guest_id' => $guestId]);
+        self::assertDatabaseNumericValue(90, $writeState['diskwrite_bytes']);
+        self::assertSame('2026-07-11 00:00:02.000000', $writeState['observed_at']);
+
+        [$repeatLease, $repeatRun] = $this->startSelectedRun('guest-state-repeat');
+        $this->store->apply($repeatLease, $this->commit(
+            $repeatRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-b', 'guest', 300)],
+            observedAt: self::at(5),
+        ));
+        self::assertSame(2, $this->databaseInteger(
+            'SELECT placement_revision FROM guest_placements WHERE guest_id = :guest_id',
+            ['guest_id' => $guestId],
+        ));
+        self::assertSame(300, $this->databaseInteger(
+            'SELECT diskwrite_bytes FROM guest_write_states WHERE guest_id = :guest_id',
+            ['guest_id' => $guestId],
         ));
     }
 
@@ -714,7 +795,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         ));
 
         self::assertSame(2, $archiveResult->archived);
-        self::assertSame(0, $this->databaseInteger(
+        self::assertSame(1, $this->databaseInteger(
             'SELECT COUNT(*) FROM guest_placements WHERE guest_id = :guest_id',
             ['guest_id' => $guestBefore['id']],
         ));
@@ -759,6 +840,10 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertSame($guestBefore['first_seen_at'], $guestAfter['first_seen_at']);
         self::assertSame(1, $this->databaseInteger(
             'SELECT COUNT(*) FROM guest_placements WHERE guest_id = :guest_id',
+            ['guest_id' => $guestBefore['id']],
+        ));
+        self::assertSame(1, $this->databaseInteger(
+            'SELECT placement_revision FROM guest_placements WHERE guest_id = :guest_id',
             ['guest_id' => $guestBefore['id']],
         ));
     }
@@ -1051,6 +1136,42 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         ));
     }
 
+    public function testRacingPlacementMoveIncrementsRevisionExactlyOnce(): void
+    {
+        [$seedLease, $seedRun] = $this->startSelectedRun('placement-race-seed');
+        $this->store->apply($seedLease, $this->commit(
+            $seedRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest')],
+        ));
+
+        [$moveLease, $moveRun] = $this->startSelectedRun('placement-race-move');
+        $move = $this->commit(
+            $moveRun,
+            ['node-a', 'node-b'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-b', 'guest')],
+            observedAt: self::at(2),
+        );
+
+        $results = $this->runApplyChildren($moveLease, $move, 2);
+        self::assertSame(1, count(array_filter($results, static fn (string $result): bool => 'ok' === $result)));
+        self::assertCount(1, array_filter(
+            $results,
+            static fn (string $result): bool => str_contains($result, 'CollectorLeaseOwnershipLost')
+                || str_contains($result, 'PveCoreInventoryConflict'),
+        ));
+        self::assertSame(2, $this->databaseInteger(
+            <<<'SQL'
+                SELECT placement.placement_revision
+                FROM guest_placements AS placement
+                JOIN guests AS guest ON guest.id = placement.guest_id
+                WHERE guest.connection_id = :connection_id
+                  AND guest.guest_type = 'qemu'
+                  AND guest.vmid = 100
+                SQL,
+        ));
+    }
+
     public function testLeaseExpiryDuringScheduleLockWaitRollsBackAndSkipsTheAbandonedTick(): void
     {
         [$lease, $run] = $this->startSelectedRun('expiry-lock-wait');
@@ -1259,9 +1380,15 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         );
     }
 
-    private function guest(PveGuestType $type, int $vmid, string $node, string $name): PveGuestObservation
+    private function guest(
+        PveGuestType $type,
+        int $vmid,
+        string $node,
+        string $name,
+        ?int $diskWriteBytes = null,
+    ): PveGuestObservation
     {
-        return new PveGuestObservation($type, $vmid, $node, $name, false);
+        return new PveGuestObservation($type, $vmid, $node, $name, false, $diskWriteBytes);
     }
 
     /** Directly seeds an owned lease for writer-only tests; takeover tests must call the production scheduler store. */
@@ -1496,6 +1623,12 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertTrue(is_int($value) || (is_string($value) && ctype_digit($value)));
 
         return (int) $value;
+    }
+
+    private static function assertDatabaseNumericValue(int $expected, mixed $value): void
+    {
+        self::assertTrue(is_int($value) || (is_string($value) && ctype_digit($value)));
+        self::assertSame($expected, (int) $value);
     }
 
     /** @param array<string, mixed> $parameters */

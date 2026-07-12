@@ -363,7 +363,9 @@ final readonly class DbalInventoryReadModel implements InventoryReadModel, Colle
                    resource.first_seen_at, resource.last_seen_at, resource.archived_at,
                    connection.display_name AS connection_name,
                    COALESCE(resource.name, CONCAT(resource.guest_type, '-', resource.vmid)) AS display_name,
-                   placement.node_id, placement.observed_at AS state_observed_at, node.node_name
+                   CASE WHEN resource.inventory_state = 'active' THEN placement.node_id ELSE NULL END AS node_id,
+                   CASE WHEN resource.inventory_state = 'active' THEN placement.observed_at ELSE NULL END AS state_observed_at,
+                   CASE WHEN resource.inventory_state = 'active' THEN node.node_name ELSE NULL END AS node_name
             FROM guests AS resource
             JOIN proxmox_connections AS connection ON connection.id = resource.connection_id
             LEFT JOIN guest_placements AS placement ON placement.guest_id = resource.id

@@ -15,6 +15,53 @@ final class CollectorDatabasePrivilegeTest extends DatabaseTestCase
 {
     private const string NOW = '2026-07-11 10:00:00.000000';
 
+    public function testCollectorHasOnlyCurrentGuestWriteStateMutationGrants(): void
+    {
+        $collector = $this->collectorConnection();
+        try {
+            $collector->beginTransaction();
+            $collector->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+            $guestId = random_bytes(16);
+            $connectionId = random_bytes(16);
+            $clusterId = random_bytes(16);
+            $runId = random_bytes(16);
+            $collector->insert('guest_write_states', [
+                'guest_id' => $guestId,
+                'connection_id' => $connectionId,
+                'cluster_id' => $clusterId,
+                'diskwrite_bytes' => 123,
+                'observed_at' => self::NOW,
+                'authoritative_sync_run_id' => $runId,
+            ]);
+            $storedBytes = $collector->fetchOne(
+                'SELECT diskwrite_bytes FROM guest_write_states WHERE guest_id = :guest_id',
+                ['guest_id' => $guestId],
+            );
+            self::assertTrue(is_int($storedBytes) || is_string($storedBytes));
+            self::assertSame('123', (string) $storedBytes);
+            self::assertSame(1, $collector->update(
+                'guest_write_states',
+                ['diskwrite_bytes' => 100],
+                ['guest_id' => $guestId],
+            ));
+            $this->assertDenied(static fn () => $collector->delete(
+                'guest_write_states',
+                ['guest_id' => $guestId],
+            ));
+            $this->assertDenied(static fn () => $collector->executeStatement(
+                'DELETE FROM guest_placements WHERE 1 = 0',
+            ));
+            $collector->rollBack();
+            $collector->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+        } finally {
+            if ($collector->isTransactionActive()) {
+                $collector->rollBack();
+            }
+            $collector->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+            $collector->close();
+        }
+    }
+
     public function testCollectorCanReadOnlyItsCredentialViewAndCannotMutateConfiguration(): void
     {
         $connectionId = random_bytes(16);

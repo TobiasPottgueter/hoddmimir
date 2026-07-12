@@ -37,7 +37,10 @@ function details(resource: InventoryResource): string {
       const guestType =
         stringAttribute(resource, "guestType")?.toUpperCase() ?? "Gast";
       const vmid = numberAttribute(resource, "vmid");
-      const node = stringAttribute(resource, "nodeName") ?? "ohne Placement";
+      const node =
+        resource.inventoryState === "active"
+          ? (stringAttribute(resource, "nodeName") ?? "ohne Placement")
+          : "ohne Placement";
       return `${guestType} ${vmid ?? "–"} · ${node}`;
     }
     case "pve_storage": {

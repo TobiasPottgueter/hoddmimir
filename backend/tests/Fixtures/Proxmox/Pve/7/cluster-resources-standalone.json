@@ -16,6 +16,7 @@
       "uptime": 700077
     },
     {
+      "diskwrite": 21474836480,
       "id": "qemu/711",
       "name": "app-711.test",
       "node": "pve7-standalone.test",
@@ -24,6 +25,7 @@
       "vmid": 711
     },
     {
+      "diskwrite": 3221225472,
       "id": "lxc/712",
       "name": "ct-712.test",
       "node": "pve7-standalone.test",

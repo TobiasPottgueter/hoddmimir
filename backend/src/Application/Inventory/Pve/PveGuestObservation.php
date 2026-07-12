@@ -15,6 +15,7 @@ final readonly class PveGuestObservation
         public string $node,
         public ?string $name,
         public ?bool $isTemplate,
+        public ?int $diskWriteBytes = null,
     ) {
         if ($this->vmid < 1) {
             throw new InvalidArgumentException('The PVE guest VMID must be positive.');
@@ -24,6 +25,9 @@ final readonly class PveGuestObservation
         }
         if (null !== $this->name && ('' === $this->name || strlen($this->name) > 255)) {
             throw new InvalidArgumentException('The PVE guest name is invalid.');
+        }
+        if (null !== $this->diskWriteBytes && $this->diskWriteBytes < 0) {
+            throw new InvalidArgumentException('The PVE guest disk-write counter must be non-negative.');
         }
     }
 

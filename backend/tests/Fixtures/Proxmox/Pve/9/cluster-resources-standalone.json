@@ -17,6 +17,7 @@
       "uptime": 900099
     },
     {
+      "diskwrite": 115964116992,
       "id": "qemu/911",
       "name": "app-911.test",
       "node": "pve9-standalone.test",
@@ -26,6 +27,7 @@
       "vmid": 911
     },
     {
+      "diskwrite": 15032385536,
       "id": "lxc/912",
       "name": "ct-912.test",
       "node": "pve9-standalone.test",

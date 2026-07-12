@@ -337,11 +337,12 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             $connection->executeStatement(
                 <<<'SQL'
                     INSERT INTO guest_placements (
-                        guest_id, connection_id, cluster_id, node_id, observed_at, sync_run_id
+                        guest_id, connection_id, cluster_id, node_id, placement_revision, observed_at, sync_run_id
                     ) VALUES (
-                        :guest_id, :connection_id, :cluster_id, :node_id, :observed_at, :sync_run_id
+                        :guest_id, :connection_id, :cluster_id, :node_id, 1, :observed_at, :sync_run_id
                     )
                     ON DUPLICATE KEY UPDATE
+                        placement_revision = IF(node_id <> VALUES(node_id), placement_revision + 1, placement_revision),
                         node_id = VALUES(node_id), observed_at = VALUES(observed_at), sync_run_id = VALUES(sync_run_id)
                     SQL,
                 [
@@ -353,6 +354,32 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                     'sync_run_id' => $commit->runId->binary(),
                 ],
             );
+
+            if ($commit->guestScope->isComplete() && null !== $guest->diskWriteBytes) {
+                $connection->executeStatement(
+                    <<<'SQL'
+                        INSERT INTO guest_write_states (
+                            guest_id, connection_id, cluster_id, diskwrite_bytes, observed_at,
+                            authoritative_sync_run_id
+                        ) VALUES (
+                            :guest_id, :connection_id, :cluster_id, :diskwrite_bytes, :observed_at,
+                            :authoritative_sync_run_id
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            diskwrite_bytes = VALUES(diskwrite_bytes),
+                            observed_at = VALUES(observed_at),
+                            authoritative_sync_run_id = VALUES(authoritative_sync_run_id)
+                        SQL,
+                    [
+                        'guest_id' => $guestId->binary(),
+                        'connection_id' => $commit->connectionId->binary(),
+                        'cluster_id' => $clusterId->binary(),
+                        'diskwrite_bytes' => $guest->diskWriteBytes,
+                        'observed_at' => $this->format($commit->observedAt),
+                        'authoritative_sync_run_id' => $commit->runId->binary(),
+                    ],
+                );
+            }
         }
 
         if ($authoritative) {
@@ -367,7 +394,6 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             );
             foreach ($unseenGuests as $row) {
                 $guestId = $this->binary($row, 'id');
-                $connection->delete('guest_placements', ['guest_id' => $guestId]);
                 $connection->update('guests', [
                     'inventory_state' => 'archived',
                     'archived_at' => $this->format($commit->observedAt),

@@ -161,6 +161,10 @@ WebApp geliefert.
    Aktivierung, Node-Verfügbarkeit, Kapazität und Freshness serverseitig
    validierbar sind.
 
+Der genaue Revisions-, Staleness-, Rohdaten- und Berechtigungsvertrag für die
+ersten beiden Voraussetzungen steht in
+[`pve-guest-state-persistence.md`](pve-guest-state-persistence.md).
+
 ### Phase-4-Tabellen
 
 - `backup_targets` und `backup_target_allowed_nodes`;

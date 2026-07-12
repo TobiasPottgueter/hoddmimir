@@ -94,6 +94,7 @@ services:
       - mariadb_migration_password
       - mariadb_collector_password
       - mariadb_web_password
+      - mariadb_backup_worker_password
     depends_on:
       mariadb-integration:
         condition: service_healthy

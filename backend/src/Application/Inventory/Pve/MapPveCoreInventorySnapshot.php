@@ -172,6 +172,7 @@ final readonly class MapPveCoreInventorySnapshot implements PveCoreInventoryMapp
                 $guest->node,
                 $guest->name,
                 $guest->template,
+                $guest->diskWriteBytes,
             );
         } catch (InvalidArgumentException) {
             return null;

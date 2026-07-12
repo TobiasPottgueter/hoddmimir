@@ -438,6 +438,29 @@ final class SchemaConstraintTest extends DatabaseTestCase
             ]),
         );
         $this->assertConstraintRejects(
+            'chk_guest_placements_revision',
+            fn () => $this->connection()->insert('guest_placements', [
+                'guest_id' => $guestA,
+                'connection_id' => $connectionA,
+                'cluster_id' => $clusterA,
+                'node_id' => $nodeA,
+                'placement_revision' => 0,
+                'observed_at' => self::NOW,
+                'sync_run_id' => $runA,
+            ]),
+        );
+        $this->assertConstraintRejects(
+            'fk_guest_write_states_run',
+            fn () => $this->connection()->insert('guest_write_states', [
+                'guest_id' => $guestA,
+                'connection_id' => $connectionA,
+                'cluster_id' => $clusterA,
+                'diskwrite_bytes' => 1,
+                'observed_at' => self::NOW,
+                'authoritative_sync_run_id' => $runB,
+            ]),
+        );
+        $this->assertConstraintRejects(
             'fk_pve_node_storage_run',
             fn () => $this->connection()->insert('pve_node_storage_state', [
                 'connection_id' => $connectionA,

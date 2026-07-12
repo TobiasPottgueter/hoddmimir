@@ -64,6 +64,10 @@ final class PveFixtureContractTest extends TestCase
         self::assertCount(1, $clusteredResources->storages);
         self::assertSame(PveGuestType::Qemu, $clusteredResources->guests[0]->type);
         self::assertSame(PveGuestType::Lxc, $clusteredResources->guests[1]->type);
+        self::assertGreaterThan(0, $clusteredResources->guests[0]->diskWriteBytes);
+        self::assertGreaterThan(0, $clusteredResources->guests[1]->diskWriteBytes);
+        self::assertGreaterThan(0, $standaloneResources->guests[0]->diskWriteBytes);
+        self::assertGreaterThan(0, $standaloneResources->guests[1]->diskWriteBytes);
         self::assertNull($clusteredResources->storages[0]->availableBytes);
         self::assertTrue($standaloneResources->isComplete());
         self::assertCount(1, $standaloneResources->nodes);

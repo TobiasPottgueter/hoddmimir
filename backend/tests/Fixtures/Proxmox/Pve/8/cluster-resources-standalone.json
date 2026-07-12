@@ -16,6 +16,7 @@
       "uptime": 800088
     },
     {
+      "diskwrite": 38654705664,
       "id": "qemu/811",
       "name": "template-811.test",
       "node": "pve8-standalone.test",
@@ -25,6 +26,7 @@
       "vmid": 811
     },
     {
+      "diskwrite": 5368709120,
       "id": "lxc/812",
       "name": "ct-812.test",
       "node": "pve8-standalone.test",

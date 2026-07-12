@@ -262,7 +262,7 @@ final class PveReadersTest extends TestCase
         $reader = new PveClusterResourcesReader();
         $inventory = $reader->read([
             ['id' => 'node/a', 'type' => 'node', 'node' => 'a.test', 'name' => 'different', 'status' => 'online'],
-            ['id' => 'qemu/42', 'type' => 'qemu', 'vmid' => 42, 'node' => 'a.test', 'name' => 'vm', 'template' => 1, 'status' => 'running', 'future' => 'ignored'],
+            ['id' => 'qemu/42', 'type' => 'qemu', 'vmid' => 42, 'node' => 'a.test', 'name' => 'vm', 'template' => 1, 'status' => 'running', 'diskwrite' => 123, 'future' => 'ignored'],
             ['id' => 'lxc/42', 'type' => 'lxc', 'vmid' => 42, 'node' => 'a.test', 'name' => null, 'template' => false],
             ['id' => 'storage/a/backup', 'type' => 'storage', 'storage' => 'backup', 'node' => 'a.test', 'content' => 'backup', 'disk' => 20, 'maxdisk' => 100, 'avail' => 80],
             ['id' => 'network/x', 'type' => 'network', 'future' => true],
@@ -272,22 +272,25 @@ final class PveReadersTest extends TestCase
         self::assertSame('a.test', $inventory->nodes[0]->name);
         self::assertSame(PveGuestType::Qemu, $inventory->guests[0]->type);
         self::assertTrue($inventory->guests[0]->template);
+        self::assertSame(123, $inventory->guests[0]->diskWriteBytes);
         self::assertSame(PveGuestType::Lxc, $inventory->guests[1]->type);
         self::assertNull($inventory->guests[1]->name);
         self::assertFalse($inventory->guests[1]->template);
+        self::assertNull($inventory->guests[1]->diskWriteBytes);
         self::assertSame(100, $inventory->storages[0]->totalBytes);
         self::assertSame(20, $inventory->storages[0]->usedBytes);
         self::assertNull($inventory->storages[0]->availableBytes);
 
         $nullable = $reader->read([
             ['id' => 'node/a', 'type' => 'node', 'node' => 'a', 'status' => 1],
-            ['id' => 'qemu/1', 'type' => 'qemu', 'vmid' => 1, 'node' => 'a', 'name' => 1, 'template' => '1', 'status' => 1],
+            ['id' => 'qemu/1', 'type' => 'qemu', 'vmid' => 1, 'node' => 'a', 'name' => 1, 'template' => '1', 'status' => 1, 'diskwrite' => -1],
             ['id' => 'storage/a/s', 'type' => 'storage', 'storage' => 's', 'node' => 'a', 'content' => 'backup', 'disk' => -1, 'maxdisk' => '1', 'avail' => -1],
         ]);
         self::assertNull($nullable->nodes[0]->status);
         self::assertNull($nullable->guests[0]->name);
         self::assertNull($nullable->guests[0]->template);
         self::assertNull($nullable->guests[0]->status);
+        self::assertNull($nullable->guests[0]->diskWriteBytes);
         self::assertNull($nullable->storages[0]->totalBytes);
         self::assertNull($nullable->storages[0]->usedBytes);
         self::assertNull($nullable->storages[0]->availableBytes);

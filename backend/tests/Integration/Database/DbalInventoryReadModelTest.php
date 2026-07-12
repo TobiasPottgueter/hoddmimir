@@ -98,6 +98,21 @@ final class DbalInventoryReadModelTest extends DatabaseTestCase
             new PageRequest(),
             inventoryState: InventoryState::Archived,
         ))->items);
+        $archivedGuests = $model->resources(new InventoryResourceQuery(
+            InventoryResourceKind::PveGuest,
+            new PageRequest(),
+            new ReadModelIdentifier($ids['pveConnection']),
+            new ReadModelIdentifier($ids['cluster']),
+            InventoryState::Archived,
+            'qemu',
+        ))->toArray();
+        self::assertCount(1, $archivedGuests['items']);
+        self::assertSame('archived', $archivedGuests['items'][0]['inventoryState']);
+        self::assertNull($archivedGuests['items'][0]['stateObservedAt']);
+        $archivedGuestAttributes = $archivedGuests['items'][0]['attributes'];
+        self::assertIsArray($archivedGuestAttributes);
+        self::assertNull($archivedGuestAttributes['nodeId']);
+        self::assertNull($archivedGuestAttributes['nodeName']);
 
         $namespaces = $model->resources(new InventoryResourceQuery(
             InventoryResourceKind::PbsNamespace,
@@ -166,6 +181,7 @@ final class DbalInventoryReadModelTest extends DatabaseTestCase
         $nodeA = random_bytes(16);
         $nodeB = random_bytes(16);
         $guest = random_bytes(16);
+        $archivedGuest = random_bytes(16);
         $storage = random_bytes(16);
         $server = random_bytes(16);
         $datastore = random_bytes(16);
@@ -231,6 +247,17 @@ final class DbalInventoryReadModelTest extends DatabaseTestCase
             $this->connection()->insert('guest_placements', [
                 'guest_id' => $guest, 'connection_id' => $pveConnection, 'cluster_id' => $cluster,
                 'node_id' => $nodeA, 'observed_at' => self::LATER, 'sync_run_id' => $pveRun,
+            ]);
+            $this->connection()->insert('guests', [
+                'id' => $archivedGuest, 'connection_id' => $pveConnection, 'cluster_id' => $cluster,
+                'guest_type' => 'qemu', 'vmid' => 102, 'name' => 'archived-vm-102', 'is_template' => 0,
+                'inventory_state' => 'archived', 'first_seen_run_id' => $pveRun, 'last_seen_run_id' => $pveRun,
+                'first_seen_at' => self::NOW, 'last_seen_at' => self::NOW, 'archived_at' => self::LATER,
+            ]);
+            $this->connection()->insert('guest_placements', [
+                'guest_id' => $archivedGuest, 'connection_id' => $pveConnection, 'cluster_id' => $cluster,
+                'node_id' => $nodeB, 'placement_revision' => 4,
+                'observed_at' => self::NOW, 'sync_run_id' => $pveRun,
             ]);
             $this->connection()->insert('pve_storages', [
                 'id' => $storage, 'connection_id' => $pveConnection, 'cluster_id' => $cluster,
