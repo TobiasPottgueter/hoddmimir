@@ -164,6 +164,8 @@ WebApp geliefert.
 Der genaue Revisions-, Staleness-, Rohdaten- und Berechtigungsvertrag für die
 ersten beiden Voraussetzungen steht in
 [`pve-guest-state-persistence.md`](pve-guest-state-persistence.md).
+Der fail-closed Vertrag der serverseitigen Storage-/Node-/PBS-Evidenz steht in
+[`backup-target-candidate-read-model.md`](backup-target-candidate-read-model.md).
 
 ### Phase-4-Tabellen
 

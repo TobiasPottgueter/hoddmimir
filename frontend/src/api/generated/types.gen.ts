@@ -9,6 +9,8 @@ export type CanonicalUuid = string;
 
 export type UtcTimestamp = string;
 
+export type DecimalBytes = string;
+
 export type PageCursor = string;
 
 export type InventoryResourceKind =
@@ -198,6 +200,96 @@ export type InventoryResourcePage = {
   page: PageMetadata;
 };
 
+export type BackupTargetBlockerCode =
+  | "freshness_policy_unconfigured"
+  | "connection_disabled"
+  | "connection_not_pve"
+  | "cluster_archived"
+  | "storage_archived"
+  | "storage_disabled"
+  | "backup_content_unsupported"
+  | "no_active_node"
+  | "no_usable_node"
+  | "storage_not_configured_on_node"
+  | "node_state_missing"
+  | "node_offline"
+  | "node_storage_disabled"
+  | "node_storage_inactive"
+  | "capacity_unavailable"
+  | "capacity_invalid"
+  | "pbs_mapping_missing"
+  | "pbs_endpoint_unresolved"
+  | "pbs_endpoint_ambiguous"
+  | "pbs_connection_disabled"
+  | "pbs_server_missing"
+  | "pbs_datastore_missing"
+  | "pbs_datastore_archived"
+  | "pbs_datastore_read_only"
+  | "pbs_namespace_missing"
+  | "pbs_namespace_archived"
+  | "pbs_capacity_missing"
+  | "pbs_remote_capacity_unproven";
+
+export type BackupTargetCapacityStatus =
+  "missing" | "measured" | "unavailable" | "invalid";
+
+export type PbsEndpointMatchStatus = "matched" | "unresolved" | "ambiguous";
+
+export type BackupTargetNodeEvidence = {
+  nodeId: CanonicalUuid;
+  nodeName: string;
+  configuredForStorage: boolean;
+  enabled: boolean | null;
+  active: boolean | null;
+  capacityStatus: BackupTargetCapacityStatus;
+  totalBytes: DecimalBytes | null;
+  usedBytes: DecimalBytes | null;
+  availableBytes: DecimalBytes | null;
+  observedAt: UtcTimestamp | null;
+  blockers: Array<BackupTargetBlockerCode>;
+};
+
+export type PbsBackupTargetEvidence = {
+  server: string;
+  port: number;
+  datastore: string;
+  namespace: string | null;
+  mappingObservedAt: UtcTimestamp;
+  endpointMatch: PbsEndpointMatchStatus;
+  pbsConnectionId: CanonicalUuid | null;
+  pbsServerId: CanonicalUuid | null;
+  pbsDatastoreId: CanonicalUuid | null;
+  pbsNamespaceId: CanonicalUuid | null;
+  capacitySemantics: string | null;
+  totalBytes: DecimalBytes | null;
+  usedBytes: DecimalBytes | null;
+  availableBytes: DecimalBytes | null;
+  capacityObservedAt: UtcTimestamp | null;
+  blockers: Array<BackupTargetBlockerCode>;
+};
+
+export type BackupTargetCandidate = {
+  id: CanonicalUuid;
+  connectionId: CanonicalUuid;
+  connectionName: string;
+  clusterId: CanonicalUuid;
+  clusterName: string;
+  storageName: string;
+  storageType: string;
+  shared: boolean;
+  inventoryState: InventoryState;
+  observedAt: UtcTimestamp;
+  canEnable: boolean;
+  nodes: Array<BackupTargetNodeEvidence>;
+  pbs: PbsBackupTargetEvidence | null;
+  blockers: Array<BackupTargetBlockerCode>;
+};
+
+export type BackupTargetCandidatePage = {
+  items: Array<BackupTargetCandidate>;
+  page: PageMetadata;
+};
+
 export type CollectorScheduleUnconfigured = {
   configured: false;
 };
@@ -289,6 +381,13 @@ export type ApiError = {
   };
 };
 
+export type ReadModelUnavailableError = {
+  error: {
+    code: "read_model_unavailable";
+    message: "The read model is temporarily unavailable.";
+  };
+};
+
 export type Kind = InventoryResourceKind;
 
 export type Limit = number;
@@ -296,6 +395,8 @@ export type Limit = number;
 export type Cursor = PageCursor;
 
 export type ConnectionId = CanonicalUuid;
+
+export type ClusterId = CanonicalUuid;
 
 /**
  * Cluster, PBS server, datastore/parent namespace, namespace, or backup-group ID as required by the selected kind.
@@ -362,6 +463,42 @@ export type ListInventoryResourcesResponses = {
 
 export type ListInventoryResourcesResponse =
   ListInventoryResourcesResponses[keyof ListInventoryResourcesResponses];
+
+export type ListBackupTargetCandidatesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    connectionId?: CanonicalUuid;
+    clusterId?: CanonicalUuid;
+  };
+  url: "/api/v1/backup-target-candidates";
+};
+
+export type ListBackupTargetCandidatesErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupTargetCandidatesError =
+  ListBackupTargetCandidatesErrors[keyof ListBackupTargetCandidatesErrors];
+
+export type ListBackupTargetCandidatesResponses = {
+  /**
+   * A bounded keyset page of fail-closed backup-target candidates and their raw evidence.
+   */
+  200: BackupTargetCandidatePage;
+};
+
+export type ListBackupTargetCandidatesResponse =
+  ListBackupTargetCandidatesResponses[keyof ListBackupTargetCandidatesResponses];
 
 export type GetCollectorStatusData = {
   body?: never;

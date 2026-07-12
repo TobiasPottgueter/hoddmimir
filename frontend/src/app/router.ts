@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import DashboardView from "@/views/DashboardView.vue";
 
 const InventoryView = () => import("@/views/InventoryView.vue");
+const BackupTargetsView = () => import("@/views/BackupTargetsView.vue");
 const OperationsView = () => import("@/views/OperationsView.vue");
 const SectionPlaceholderView = () =>
   import("@/views/SectionPlaceholderView.vue");
@@ -38,12 +39,8 @@ const router = createRouter({
     {
       path: "/backup-targets",
       name: "backup-targets",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Backup-Ziele",
-        description:
-          "Storages, Datastores und Namespaces werden hier zugeordnet.",
-      },
+      component: BackupTargetsView,
+      meta: { title: "Backup-Ziele" },
     },
     {
       path: "/policies",

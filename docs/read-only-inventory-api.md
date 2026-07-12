@@ -30,6 +30,11 @@ It must not be exposed through a reverse proxy or on an external interface.
 - `GET /api/v1/collector/scopes?runId=...` returns bounded scope outcomes for
   exactly one run, including child PBS-content and monitoring outcomes, using
   a stable `(scopeType,scopeKey)` cursor.
+- `GET /api/v1/backup-target-candidates` is the additive Phase-4.1 projection
+  documented in
+  [`backup-target-candidate-read-model.md`](backup-target-candidate-read-model.md).
+  It remains GET-only, uses only `connectionId`/`clusterId` filters and exposes
+  capacity bytes as canonical UInt64 decimal strings.
 
 Every timestamp is serialized in UTC with a trailing `Z`. Every inventory
 resource carries `inventoryState`, `firstSeenAt`, `lastSeenAt`, `archivedAt`,
@@ -48,6 +53,6 @@ positive reads and denial of credentials, lease/cycle/fencing fields, raw PBS
 content metadata, and all mutations.
 
 `php tools/check-openapi.php ../docs/openapi-v1.json` is part of
-`composer verify`. It compares the five `/api/v1` operations with Symfony's
+`composer verify`. It compares the six `/api/v1` operations with Symfony's
 actual router, rejects unversioned or write operations, and requires exact,
 closed successful response schemas.

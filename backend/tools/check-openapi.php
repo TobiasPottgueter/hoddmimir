@@ -6,6 +6,10 @@ use App\Application\Inventory\Pbs\PbsInventoryScope;
 use App\Application\Inventory\PbsContent\PbsContentScopeType;
 use App\Application\Inventory\Pve\PveCoreScope;
 use App\Application\Monitoring\MonitoringScopeType;
+use App\Application\Target\ReadModel\BackupTargetBlockerCode;
+use App\Application\Target\ReadModel\BackupTargetCapacityStatus;
+use App\Application\Target\ReadModel\PbsEndpointMatchStatus;
+use App\Domain\Shared\UInt64Decimal;
 use App\Kernel;
 use Symfony\Component\Routing\RouterInterface;
 
@@ -56,6 +60,23 @@ function responseReference(array $operation, string $status): ?string
     return is_string($reference) ? $reference : null;
 }
 
+/**
+ * @param array<string, mixed> $source
+ * @param list<string>         $keys
+ */
+function nestedValue(array $source, array $keys): mixed
+{
+    $value = $source;
+    foreach ($keys as $key) {
+        if (!is_array($value) || !array_key_exists($key, $value)) {
+            return null;
+        }
+        $value = $value[$key];
+    }
+
+    return $value;
+}
+
 $path = $argv[1] ?? null;
 if (!is_string($path) || !is_file($path)) {
     failContract('OpenAPI contract file is missing.');
@@ -82,6 +103,7 @@ if (!is_array($components) || !is_array($components['schemas'] ?? null)) {
 $expectedResponses = [
     '/api/v1/inventory/overview' => '#/components/schemas/InventoryOverview',
     '/api/v1/inventory/resources' => '#/components/schemas/InventoryResourcePage',
+    '/api/v1/backup-target-candidates' => '#/components/schemas/BackupTargetCandidatePage',
     '/api/v1/collector/status' => '#/components/schemas/CollectorStatus',
     '/api/v1/collector/runs' => '#/components/schemas/CollectorRunPage',
     '/api/v1/collector/scopes' => '#/components/schemas/CollectorScopePage',
@@ -106,9 +128,34 @@ foreach ($contract['paths'] as $route => $pathItem) {
         && '#/components/responses/InvalidQuery' !== responseReference($operation, '400')) {
         failContract('OpenAPI query operation is missing its stable 400 response.');
     }
+    if ('/api/v1/backup-target-candidates' === $route
+        && '#/components/responses/ReadModelUnavailable' !== responseReference($operation, '503')) {
+        failContract('OpenAPI target-candidate operation is missing its safe 503 response.');
+    }
 }
 if (array_keys($contract['paths']) !== array_keys($expectedResponses)) {
     failContract('OpenAPI path order or compatibility baseline changed.');
+}
+$targetParameters = nestedValue(
+    $contract,
+    ['paths', '/api/v1/backup-target-candidates', 'get', 'parameters'],
+);
+$publishedTargetParameters = [];
+if (is_array($targetParameters)) {
+    foreach ($targetParameters as $parameter) {
+        if (!is_array($parameter) || !is_string($parameter['$ref'] ?? null)) {
+            failContract('OpenAPI target-candidate query parameters are not exact references.');
+        }
+        $publishedTargetParameters[] = $parameter['$ref'];
+    }
+}
+if ([
+    '#/components/parameters/Limit',
+    '#/components/parameters/Cursor',
+    '#/components/parameters/ConnectionId',
+    '#/components/parameters/ClusterId',
+] !== $publishedTargetParameters) {
+    failContract('OpenAPI target-candidate query surface drifted.');
 }
 
 $kernel = new Kernel('test', false);
@@ -178,9 +225,24 @@ $requiredObjects = [
     ],
     'CollectorScope' => ['runId', 'scopeType', 'scopeKey', 'status', 'observedAt', 'errorCode'],
     'InventoryResourcePage' => ['items', 'page'],
+    'BackupTargetNodeEvidence' => [
+        'nodeId', 'nodeName', 'configuredForStorage', 'enabled', 'active', 'capacityStatus',
+        'totalBytes', 'usedBytes', 'availableBytes', 'observedAt', 'blockers',
+    ],
+    'PbsBackupTargetEvidence' => [
+        'server', 'port', 'datastore', 'namespace', 'mappingObservedAt', 'endpointMatch',
+        'pbsConnectionId', 'pbsServerId', 'pbsDatastoreId', 'pbsNamespaceId', 'capacitySemantics',
+        'totalBytes', 'usedBytes', 'availableBytes', 'capacityObservedAt', 'blockers',
+    ],
+    'BackupTargetCandidate' => [
+        'id', 'connectionId', 'connectionName', 'clusterId', 'clusterName', 'storageName',
+        'storageType', 'shared', 'inventoryState', 'observedAt', 'canEnable', 'nodes', 'pbs', 'blockers',
+    ],
+    'BackupTargetCandidatePage' => ['items', 'page'],
     'CollectorRunPage' => ['items', 'page'],
     'CollectorScopePage' => ['items', 'page'],
     'ApiError' => ['error'],
+    'ReadModelUnavailableError' => ['error'],
 ];
 foreach ($requiredObjects as $name => $required) {
     $schema = $schemas[$name] ?? null;
@@ -225,9 +287,58 @@ if ($expectedScopeTypes !== $publishedScopeTypes) {
     failContract('OpenAPI collector scope types drifted from the persisted application scope types.');
 }
 
-foreach (['owner_auth_id', 'encryption_fingerprint', 'verification_upid', 'files_json', 'comment'] as $forbidden) {
+$expectedTargetEnums = [
+    'BackupTargetBlockerCode' => array_column(BackupTargetBlockerCode::cases(), 'value'),
+    'BackupTargetCapacityStatus' => array_column(BackupTargetCapacityStatus::cases(), 'value'),
+    'PbsEndpointMatchStatus' => array_column(PbsEndpointMatchStatus::cases(), 'value'),
+];
+foreach ($expectedTargetEnums as $name => $expected) {
+    if ($expected !== ($schemas[$name]['enum'] ?? null)) {
+        failContract('OpenAPI target-candidate enum '.$name.' drifted from its application enum.');
+    }
+}
+$decimalBytes = $schemas['DecimalBytes'] ?? null;
+$uint64Pattern = '^(?:0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]|1844674407370955161[0-5])$';
+if (!is_array($decimalBytes)
+    || 'string' !== ($decimalBytes['type'] ?? null)
+    || 1 !== ($decimalBytes['minLength'] ?? null)
+    || 20 !== ($decimalBytes['maxLength'] ?? null)
+    || $uint64Pattern !== ($decimalBytes['pattern'] ?? null)
+    || UInt64Decimal::MAXIMUM !== ($decimalBytes['x-maximum'] ?? null)) {
+    failContract('OpenAPI decimal byte values are not lossless unsigned strings.');
+}
+$targetPageItems = nestedValue(
+    $schemas,
+    ['BackupTargetCandidatePage', 'properties', 'items', 'items', '$ref'],
+);
+$targetNodeItems = nestedValue(
+    $schemas,
+    ['BackupTargetCandidate', 'properties', 'nodes', 'items', '$ref'],
+);
+if ('#/components/schemas/BackupTargetCandidate' !== $targetPageItems
+    || '#/components/schemas/BackupTargetNodeEvidence' !== $targetNodeItems) {
+    failContract('OpenAPI target-candidate page or node evidence reference drifted.');
+}
+$unavailableCode = nestedValue(
+    $schemas,
+    ['ReadModelUnavailableError', 'properties', 'error', 'properties', 'code', 'const'],
+);
+$unavailableMessage = nestedValue(
+    $schemas,
+    ['ReadModelUnavailableError', 'properties', 'error', 'properties', 'message', 'const'],
+);
+if ('read_model_unavailable' !== $unavailableCode
+    || 'The read model is temporarily unavailable.' !== $unavailableMessage) {
+    failContract('OpenAPI target-candidate safe error payload drifted.');
+}
+
+foreach ([
+    'owner_auth_id', 'encryption_fingerprint', 'verification_upid', 'files_json', 'comment',
+    '"endpointId"', '"endpointHost"', '"tlsMode"', '"certificateFingerprint"', '"customCa"',
+    '"syncRunId"', '"secret"', '"credentialId"', '"credentialIdentity"',
+] as $forbidden) {
     if (str_contains($contents, $forbidden)) {
-        failContract('OpenAPI exposes a forbidden PBS content field.');
+        failContract('OpenAPI exposes a forbidden internal, endpoint, TLS, or secret field.');
     }
 }
 

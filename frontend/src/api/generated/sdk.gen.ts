@@ -14,6 +14,9 @@ import type {
   GetCollectorStatusResponses,
   GetInventoryOverviewData,
   GetInventoryOverviewResponses,
+  ListBackupTargetCandidatesData,
+  ListBackupTargetCandidatesErrors,
+  ListBackupTargetCandidatesResponses,
   ListCollectorRunsData,
   ListCollectorRunsErrors,
   ListCollectorRunsResponses,
@@ -64,6 +67,21 @@ export const listInventoryResources = <ThrowOnError extends boolean = false>(
     ListInventoryResourcesErrors,
     ThrowOnError
   >({ url: "/api/v1/inventory/resources", ...options });
+
+export const listBackupTargetCandidates = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<ListBackupTargetCandidatesData, ThrowOnError>,
+): RequestResult<
+  ListBackupTargetCandidatesResponses,
+  ListBackupTargetCandidatesErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListBackupTargetCandidatesResponses,
+    ListBackupTargetCandidatesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backup-target-candidates", ...options });
 
 export const getCollectorStatus = <ThrowOnError extends boolean = false>(
   options?: Options<GetCollectorStatusData, ThrowOnError>,

@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Hoddmímir read-only inventory API",
+    "title": "Hoddmímir read-only API",
     "version": "1.0.0",
-    "description": "Phase 3 is unauthenticated and may only be published on host loopback until Phase 6 adds authentication and RBAC."
+    "description": "The Phase 3 inventory and Phase 4 backup-target candidate reads are unauthenticated and may only be published on host loopback until authentication and RBAC are available."
   },
   "servers": [{"url": "/"}],
   "paths": {
@@ -30,6 +30,22 @@
         "responses": {
           "200": {"description": "A bounded keyset page of inventory resources.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InventoryResourcePage"}}}},
           "400": {"$ref": "#/components/responses/InvalidQuery"}
+        }
+      }
+    },
+    "/api/v1/backup-target-candidates": {
+      "get": {
+        "operationId": "listBackupTargetCandidates",
+        "parameters": [
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/ConnectionId"},
+          {"$ref": "#/components/parameters/ClusterId"}
+        ],
+        "responses": {
+          "200": {"description": "A bounded keyset page of fail-closed backup-target candidates and their raw evidence.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BackupTargetCandidatePage"}}}},
+          "400": {"$ref": "#/components/responses/InvalidQuery"},
+          "503": {"$ref": "#/components/responses/ReadModelUnavailable"}
         }
       }
     },
@@ -68,17 +84,20 @@
       "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
       "Cursor": {"name": "cursor", "in": "query", "schema": {"$ref": "#/components/schemas/PageCursor"}},
       "ConnectionId": {"name": "connectionId", "in": "query", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+      "ClusterId": {"name": "clusterId", "in": "query", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
       "ParentId": {"name": "parentId", "in": "query", "description": "Cluster, PBS server, datastore/parent namespace, namespace, or backup-group ID as required by the selected kind.", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
       "InventoryState": {"name": "inventoryState", "in": "query", "schema": {"$ref": "#/components/schemas/InventoryState"}},
       "GuestType": {"name": "guestType", "in": "query", "schema": {"type": "string", "enum": ["qemu", "lxc"]}},
       "RunId": {"name": "runId", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/CanonicalUuid"}}
     },
     "responses": {
-      "InvalidQuery": {"description": "Unknown, malformed, incompatible, or out-of-bounds query.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}}
+      "InvalidQuery": {"description": "Unknown, malformed, incompatible, or out-of-bounds query.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}},
+      "ReadModelUnavailable": {"description": "The read-only projection is temporarily unavailable without exposing database or runtime details.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadModelUnavailableError"}}}}
     },
     "schemas": {
       "CanonicalUuid": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
       "UtcTimestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$"},
+      "DecimalBytes": {"type": "string", "minLength": 1, "maxLength": 20, "pattern": "^(?:0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]|1844674407370955161[0-5])$", "x-maximum": "18446744073709551615"},
       "PageCursor": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^[A-Za-z0-9_-]+$"},
       "InventoryResourceKind": {"type": "string", "enum": ["pve_cluster", "pve_node", "pve_guest", "pve_storage", "pbs_server", "pbs_datastore", "pbs_namespace", "pbs_backup_group", "pbs_snapshot"]},
       "InventoryState": {"type": "string", "enum": ["active", "archived"], "default": "active"},
@@ -140,6 +159,69 @@
       "PbsSnapshotResource": {"allOf": [{"$ref": "#/components/schemas/InventoryResourceBase"}, {"type": "object", "required": ["kind", "attributes"], "properties": {"kind": {"const": "pbs_snapshot"}, "attributes": {"$ref": "#/components/schemas/PbsSnapshotAttributes"}}}], "unevaluatedProperties": false},
       "InventoryResource": {"oneOf": [{"$ref": "#/components/schemas/PveClusterResource"}, {"$ref": "#/components/schemas/PveNodeResource"}, {"$ref": "#/components/schemas/PveGuestResource"}, {"$ref": "#/components/schemas/PveStorageResource"}, {"$ref": "#/components/schemas/PbsServerResource"}, {"$ref": "#/components/schemas/PbsDatastoreResource"}, {"$ref": "#/components/schemas/PbsNamespaceResource"}, {"$ref": "#/components/schemas/PbsBackupGroupResource"}, {"$ref": "#/components/schemas/PbsSnapshotResource"}], "discriminator": {"propertyName": "kind"}},
       "InventoryResourcePage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/InventoryResource"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
+      "BackupTargetBlockerCode": {"type": "string", "enum": ["freshness_policy_unconfigured", "connection_disabled", "connection_not_pve", "cluster_archived", "storage_archived", "storage_disabled", "backup_content_unsupported", "no_active_node", "no_usable_node", "storage_not_configured_on_node", "node_state_missing", "node_offline", "node_storage_disabled", "node_storage_inactive", "capacity_unavailable", "capacity_invalid", "pbs_mapping_missing", "pbs_endpoint_unresolved", "pbs_endpoint_ambiguous", "pbs_connection_disabled", "pbs_server_missing", "pbs_datastore_missing", "pbs_datastore_archived", "pbs_datastore_read_only", "pbs_namespace_missing", "pbs_namespace_archived", "pbs_capacity_missing", "pbs_remote_capacity_unproven"]},
+      "BackupTargetCapacityStatus": {"type": "string", "enum": ["missing", "measured", "unavailable", "invalid"]},
+      "PbsEndpointMatchStatus": {"type": "string", "enum": ["matched", "unresolved", "ambiguous"]},
+      "BackupTargetNodeEvidence": {
+        "type": "object", "additionalProperties": false,
+        "required": ["nodeId", "nodeName", "configuredForStorage", "enabled", "active", "capacityStatus", "totalBytes", "usedBytes", "availableBytes", "observedAt", "blockers"],
+        "properties": {
+          "nodeId": {"$ref": "#/components/schemas/CanonicalUuid"},
+          "nodeName": {"type": "string", "minLength": 1},
+          "configuredForStorage": {"type": "boolean"},
+          "enabled": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+          "active": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+          "capacityStatus": {"$ref": "#/components/schemas/BackupTargetCapacityStatus"},
+          "totalBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "usedBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "availableBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "observedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]},
+          "blockers": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/components/schemas/BackupTargetBlockerCode"}}
+        }
+      },
+      "PbsBackupTargetEvidence": {
+        "type": "object", "additionalProperties": false,
+        "required": ["server", "port", "datastore", "namespace", "mappingObservedAt", "endpointMatch", "pbsConnectionId", "pbsServerId", "pbsDatastoreId", "pbsNamespaceId", "capacitySemantics", "totalBytes", "usedBytes", "availableBytes", "capacityObservedAt", "blockers"],
+        "properties": {
+          "server": {"type": "string", "minLength": 1, "maxLength": 255},
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "datastore": {"type": "string", "minLength": 1, "maxLength": 190},
+          "namespace": {"oneOf": [{"type": "string", "minLength": 1, "maxLength": 255}, {"type": "null"}]},
+          "mappingObservedAt": {"$ref": "#/components/schemas/UtcTimestamp"},
+          "endpointMatch": {"$ref": "#/components/schemas/PbsEndpointMatchStatus"},
+          "pbsConnectionId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]},
+          "pbsServerId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]},
+          "pbsDatastoreId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]},
+          "pbsNamespaceId": {"oneOf": [{"$ref": "#/components/schemas/CanonicalUuid"}, {"type": "null"}]},
+          "capacitySemantics": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+          "totalBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "usedBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "availableBytes": {"oneOf": [{"$ref": "#/components/schemas/DecimalBytes"}, {"type": "null"}]},
+          "capacityObservedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]},
+          "blockers": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/components/schemas/BackupTargetBlockerCode"}}
+        }
+      },
+      "BackupTargetCandidate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "connectionId", "connectionName", "clusterId", "clusterName", "storageName", "storageType", "shared", "inventoryState", "observedAt", "canEnable", "nodes", "pbs", "blockers"],
+        "properties": {
+          "id": {"$ref": "#/components/schemas/CanonicalUuid"},
+          "connectionId": {"$ref": "#/components/schemas/CanonicalUuid"},
+          "connectionName": {"type": "string", "minLength": 1},
+          "clusterId": {"$ref": "#/components/schemas/CanonicalUuid"},
+          "clusterName": {"type": "string", "minLength": 1},
+          "storageName": {"type": "string", "minLength": 1, "maxLength": 190},
+          "storageType": {"type": "string", "minLength": 1, "maxLength": 64},
+          "shared": {"type": "boolean"},
+          "inventoryState": {"$ref": "#/components/schemas/InventoryState"},
+          "observedAt": {"$ref": "#/components/schemas/UtcTimestamp"},
+          "canEnable": {"type": "boolean"},
+          "nodes": {"type": "array", "maxItems": 128, "items": {"$ref": "#/components/schemas/BackupTargetNodeEvidence"}},
+          "pbs": {"oneOf": [{"$ref": "#/components/schemas/PbsBackupTargetEvidence"}, {"type": "null"}]},
+          "blockers": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/components/schemas/BackupTargetBlockerCode"}}
+        }
+      },
+      "BackupTargetCandidatePage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/BackupTargetCandidate"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
       "CollectorScheduleUnconfigured": {"type": "object", "additionalProperties": false, "required": ["configured"], "properties": {"configured": {"const": false}}},
       "CollectorScheduleConfigured": {"type": "object", "additionalProperties": false, "required": ["configured", "intervalSeconds", "nextScanAt", "lastCycleStartedAt", "lastCycleFinishedAt", "leaseActive", "leaseExpiresAt"], "properties": {"configured": {"const": true}, "intervalSeconds": {"type": "integer", "minimum": 1}, "nextScanAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "lastCycleStartedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "lastCycleFinishedAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "leaseActive": {"type": "boolean"}, "leaseExpiresAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}}},
       "CollectorHeartbeat": {"type": "object", "additionalProperties": false, "required": ["status", "startedAt", "heartbeatAt", "expiresAt", "fresh", "currentActivity", "nextActionAt", "buildVersion"], "properties": {"status": {"type": "string", "enum": ["starting", "ready", "busy", "degraded", "stopping"]}, "startedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "heartbeatAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "expiresAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "fresh": {"type": "boolean"}, "currentActivity": {"oneOf": [{"type": "string"}, {"type": "null"}]}, "nextActionAt": {"oneOf": [{"$ref": "#/components/schemas/UtcTimestamp"}, {"type": "null"}]}, "buildVersion": {"type": "string"}}},
@@ -148,7 +230,8 @@
       "CollectorScope": {"type": "object", "additionalProperties": false, "required": ["runId", "scopeType", "scopeKey", "status", "observedAt", "errorCode"], "properties": {"runId": {"$ref": "#/components/schemas/CanonicalUuid"}, "scopeType": {"type": "string", "enum": ["pve_topology", "pve_guests", "pve_storages", "pve_node_storages", "pbs_system", "pbs_datastores", "pbs_datastore_status", "pbs_namespaces", "pbs_snapshots", "pve_backup_jobs", "pve_tasks_active", "pve_tasks_archive", "pbs_prune_jobs", "pbs_sync_jobs", "pbs_verify_jobs", "pbs_tasks_running", "pbs_tasks_window"]}, "scopeKey": {"type": "string", "maxLength": 512}, "status": {"type": "string", "enum": ["complete", "partial", "failed"]}, "observedAt": {"$ref": "#/components/schemas/UtcTimestamp"}, "errorCode": {"oneOf": [{"type": "string", "pattern": "^[a-z0-9_]{1,64}$"}, {"type": "null"}]}}},
       "CollectorRunPage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/CollectorRun"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
       "CollectorScopePage": {"type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/CollectorScope"}}, "page": {"$ref": "#/components/schemas/PageMetadata"}}},
-      "ApiError": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": {"code": {"const": "invalid_query"}, "message": {"const": "The query is invalid."}}}}}
+      "ApiError": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": {"code": {"const": "invalid_query"}, "message": {"const": "The query is invalid."}}}}},
+      "ReadModelUnavailableError": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": {"code": {"const": "read_model_unavailable"}, "message": {"const": "The read model is temporarily unavailable."}}}}}
     }
   }
 }

@@ -93,7 +93,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(8, $versions);
+        self::assertCount(9, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -110,6 +110,8 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260712000300', $versions[6]);
         self::assertIsString($versions[7]);
         self::assertStringEndsWith('Version20260712000400', $versions[7]);
+        self::assertIsString($versions[8]);
+        self::assertStringEndsWith('Version20260712000500', $versions[8]);
     }
 
     public function testDomainTimestampsUseMicrosecondUtcSafeStorage(): void
