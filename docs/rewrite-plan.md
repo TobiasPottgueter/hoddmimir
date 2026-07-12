@@ -620,6 +620,10 @@ erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
 
+Status: **begonnen.** Der detaillierte, schrittweise Vertrag einschließlich
+Sicherheitsgrenzen und noch offener Fachentscheidungen steht in
+[`phase-4-policy-shadow-plan.md`](phase-4-policy-shadow-plan.md).
+
 - reine Domain-Services für Eligibility, Gründe, Priorität, Vererbung und Limits.
 - atomare Queue mit Unique Keys und Leases.
 - WebApp-Auswahl für Nodes, QEMU, LXC und Backuplocations sowie Administration für Ziele und Policies.
