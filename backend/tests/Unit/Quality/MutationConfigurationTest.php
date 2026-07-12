@@ -25,6 +25,7 @@ final class MutationConfigurationTest extends TestCase
             'src/Application/Inventory/Pbs',
             'src/Application/Inventory/Capability',
             'src/Application/Inventory/PbsContent',
+            'src/Application/Scheduler',
         ], $criticalSource['directories']);
         self::assertArrayNotHasKey('excludes', $criticalSource);
 

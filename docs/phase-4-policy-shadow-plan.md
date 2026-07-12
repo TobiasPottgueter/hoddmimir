@@ -246,6 +246,17 @@ Permission fehlt.
 - keinerlei claimbare Queue-Daten oder Backup-Worker-Grants;
 - MariaDB-Concurrency- und Least-Privilege-Tests.
 
+Stand 12. Juli 2026: Die append-only Persistenzgrundlage ist umgesetzt. Ein
+kanonischer Payload-Hash macht exakte Wiederholungen idempotent; abweichende
+Wiederholungen sowie verlorene Collector-Fences schlagen geschlossen fehl.
+Collector-Zugriffe sind auf `SELECT, INSERT` begrenzt, WebApp und Backup-Worker
+haben keine Rechte auf die drei Shadow-Tabellen. Policy- und Target-Identitäten
+werden bis Welle 4.4 nur als unveränderliche Snapshot-Evidenz gespeichert, weil
+die referenzierten Aggregate noch nicht existieren. Vor der automatischen
+Aktivierung in Welle 4.6 werden dort die echten Fremdschlüssel und
+Revisionsprüfungen ergänzt. Es gibt weiterhin weder Collector-Wiring noch API,
+WebApp oder ausführbare Queue-Daten für Shadow-Auswertungen.
+
 ### 4.4 – Ziele und Policies
 
 - Aggregate, Revisionen, FKs und serverseitige Aktivierungsvalidierung;
@@ -305,5 +316,8 @@ ersetzt:
     vor Phase-5-Start erneut blockieren.
 16. Zulässigkeit von Templates und weiteren Guest-States.
 17. Trennung gewünschter Retention von freigegebener Ausführungswirkung.
+18. Ob eine Auswertung exakt eine Entscheidung je Gast oder mehrere
+    Ziel-/Policy-Kandidaten je Gast persistiert; bis dahin erzwingt nur die
+    Decision-ID Eindeutigkeit und es gibt keinen versteckten Gast-Unique-Key.
 
 Bis zur Klärung werden keine vermeintlichen Defaults im Code versteckt.

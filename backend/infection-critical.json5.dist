@@ -9,7 +9,8 @@
       "src/Application/Inventory/Pve",
       "src/Application/Inventory/Pbs",
       "src/Application/Inventory/Capability",
-      "src/Application/Inventory/PbsContent"
+      "src/Application/Inventory/PbsContent",
+      "src/Application/Scheduler"
     ]
   },
   "timeout": 60,
