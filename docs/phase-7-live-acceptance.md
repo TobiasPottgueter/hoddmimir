@@ -43,6 +43,7 @@ Kandidaten und die Wiederholung der jeweils betroffenen Gates.
 | Deployment-Host-Bootstrap   | Alpine, Python, Docker, Compose und OpenRC auf dem Zielhost                      | belegt, Details unten |
 | Release-Images              | Worker und Web als Multiarch-Registry-Manifeste mit unveränderlichen Digests     | offen                 |
 | Produktionsnaher Deploy     | leere V2-Datenbank, vier gesunde Services und API-Health auf dem Zielhost        | offen                 |
+| Öffentliche HTTPS-Grenze    | Host-Caddy, DNS-01-Zertifikat, strikte TLS-Prüfung und öffentlicher Health-Pfad  | lokal vorbereitet, live offen |
 | Neue V2-Konfiguration       | Administrator/Rollen, PVE-/PBS-Verbindungen, Ziele, Auswahl und Policies         | offen                 |
 | PVE-/PBS-Live-Matrix        | PVE 7/8/9 und PBS 3/4 inklusive TLS, ACL, Pagination und Fehlerfällen            | offen                 |
 | Automatischer Inventar-Sync | vollständiger autoritativer Scan im regulären Raster                             | offen                 |
@@ -52,9 +53,11 @@ Kandidaten und die Wiederholung der jeweils betroffenen Gates.
 
 ## Belegter Bootstrap des Deployment-Hosts
 
-Der für Hoddmímir vorgesehene Alpine-Host
-`hoddmimir.automation.hosting.wc1.dc.netzkultur.cloud` wurde am 13. Juli 2026
-erfolgreich mit der vorbereiteten Ansible-Automation gebootstrapped.
+Der für Hoddmímir vorgesehene Alpine-Host wird in getrackter Evidenz nur als
+`deployment-host.example.invalid` bezeichnet und wurde am 13. Juli 2026
+erfolgreich mit der vorbereiteten Ansible-Automation gebootstrapped. Der reale
+Host/FQDN bleibt ausschließlich in der ignorierten lokalen
+Produktionskonfiguration.
 
 Belegte Laufzeitstände:
 
@@ -103,6 +106,16 @@ und Veröffentlichungsfreigabe benötigt.
 - [ ] `/api/health`, Schema-/Keyring-Readiness, Worker-Heartbeats sowie die
       root-only Datei- und Secretrechte prüfen.
 - [ ] `BACKUP_EXECUTION_ENABLED=false` im ausgerollten Stack nachweisen.
+- [ ] Den öffentlichen Namen aus der ignorierten Produktionskonfiguration per
+      Host-Caddy auf den ausschließlich an `127.0.0.1:8080` gebundenen
+      WebApp-Port führen; Caddy bleibt ein OpenRC-Hostdienst und kein fünfter
+      Container.
+- [ ] Das Let's-Encrypt-Zertifikat per Hetzner-DNS-01 aus dem separaten
+      root-/ACME-lesbaren Tokenfile ausstellen, Caddy als non-root verifizieren
+      und den öffentlichen `/api/health`-Pfad mit System-CA-Prüfung abnehmen.
+- [ ] Den täglichen gesperrten Renewal-Pfad, laufendes OpenRC-`crond`, einen
+      idempotenten Nicht-Erneuerungslauf und den getesteten Rollback bei
+      Zertifikats-, Reload- oder HTTPS-Health-Fehler live belegen.
 
 Externe Mutation: Dateien, Docker-Images, Container, Volume und leere
 V2-Datenbank auf der bereits freigegebenen Deployment-VM. Der Deploy darf

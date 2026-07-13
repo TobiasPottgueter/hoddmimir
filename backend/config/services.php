@@ -247,6 +247,7 @@ return static function (ContainerConfigurator $container): void {
         ->set('env(PBS_MONITOR_MAX_JOBS_PER_KIND)', '4096')
         ->set('env(PBS_MONITOR_HISTORY_WINDOW_SECONDS)', '86400')
         ->set('env(APP_BUILD_VERSION)', 'development')
+        ->set('env(HODDMIMIR_TRUSTED_PROXY)', '')
         ->set('env(MATRIX_NOTIFICATION_ENABLED)', '0')
         ->set('env(MATRIX_WEBHOOK_URL_FILE)', '/run/secrets/matrix_webhook_url')
         ->set('env(MATRIX_WEBHOOK_CHANNEL)', 'proxmox-backup')

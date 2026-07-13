@@ -27,6 +27,7 @@ secrets/
 deployment/ansible/.cache/
 deployment/ansible/.vault-password
 deployment/ansible/inventories/*/hosts.yml
+deployment/ansible/inventories/*/group_vars/*/main.yml
 deployment/ansible/inventories/*/group_vars/*/vault.yml
 *.retry
 

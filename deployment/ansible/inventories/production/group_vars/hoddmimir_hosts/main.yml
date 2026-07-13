@@ -1,9 +1,0 @@
----
-# Replace all application references with release images pinned by digest.
-hoddmimir_data_worker_image: ghcr.io/tobiaspottgueter/hoddmimir/worker:2.0.0-dev
-hoddmimir_backup_worker_image: ghcr.io/tobiaspottgueter/hoddmimir/worker:2.0.0-dev
-hoddmimir_webapp_image: ghcr.io/tobiaspottgueter/hoddmimir/web:2.0.0-dev
-hoddmimir_mariadb_image: mariadb:11.4.12@sha256:a794d9eb009e20de605858a11f32f63b4075cbd197c650436f0e3b457e4caed7
-
-hoddmimir_web_port: 8080
-hoddmimir_backup_execution_enabled: false

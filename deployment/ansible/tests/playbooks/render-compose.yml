@@ -36,3 +36,15 @@
         dest: "{{ hoddmimir_test_encryption_key_output }}"
         mode: "0600"
       no_log: true
+
+    - name: Render host Caddy configuration candidate
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/Caddyfile.j2"
+        dest: "{{ hoddmimir_test_caddy_output }}"
+        mode: "0640"
+
+    - name: Render host certificate renewal command
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/hoddmimir/templates/hoddmimir-certificate-renew.sh.j2"
+        dest: "{{ hoddmimir_test_renewal_output }}"
+        mode: "0550"

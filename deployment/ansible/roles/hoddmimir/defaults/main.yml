@@ -11,6 +11,42 @@ hoddmimir_staging_prefix: .deployment-staging-
 hoddmimir_docker_executable: docker
 hoddmimir_python_executable: /usr/bin/python3
 
+# The real production values belong in the ignored production group vars.
+hoddmimir_public_domain: ""
+hoddmimir_acme_email: ""
+hoddmimir_acme_dns_provider: hetzner
+hoddmimir_acme_renew_before_days: 30
+hoddmimir_https_packages:
+  - caddy
+  - caddy-openrc
+  - iproute2
+  - lego
+  - openssl
+hoddmimir_caddy_executable: /usr/sbin/caddy
+hoddmimir_lego_executable: /usr/bin/lego
+hoddmimir_openssl_executable: /usr/bin/openssl
+hoddmimir_rc_service_executable: /sbin/rc-service
+hoddmimir_caddy_service: caddy
+hoddmimir_caddy_group: caddy
+hoddmimir_caddyfile: /etc/caddy/Caddyfile
+hoddmimir_caddy_candidate_directory: /etc/hoddmimir/caddy
+hoddmimir_caddy_candidate_file: "{{ hoddmimir_caddy_candidate_directory }}/Caddyfile.candidate"
+hoddmimir_certificate_directory: /etc/caddy/certificates
+hoddmimir_certificate_file: "{{ hoddmimir_certificate_directory }}/{{ hoddmimir_public_domain }}.crt"
+hoddmimir_certificate_key_file: "{{ hoddmimir_certificate_directory }}/{{ hoddmimir_public_domain }}.key"
+hoddmimir_acme_user: hoddmimir-acme
+hoddmimir_acme_group: hoddmimir-acme
+hoddmimir_acme_home: /var/lib/hoddmimir-acme
+hoddmimir_lego_state_directory: "{{ hoddmimir_acme_home }}/lego"
+hoddmimir_acme_secret_directory: /etc/hoddmimir/acme
+hoddmimir_hetzner_dns_api_token_file: "{{ hoddmimir_acme_secret_directory }}/hetzner_dns_api_token"
+hoddmimir_https_transaction_executable: /usr/local/sbin/hoddmimir-https-transaction
+hoddmimir_https_transaction_lock_file: /run/lock/hoddmimir-https-transaction.lock
+hoddmimir_certificate_renewal_executable: /etc/periodic/daily/hoddmimir-certificate-renew
+hoddmimir_https_healthcheck_url: "https://{{ hoddmimir_public_domain }}/api/health"
+hoddmimir_docker_subnet: ""
+hoddmimir_docker_gateway: ""
+
 hoddmimir_data_worker_image: ""
 hoddmimir_backup_worker_image: ""
 hoddmimir_webapp_image: ""

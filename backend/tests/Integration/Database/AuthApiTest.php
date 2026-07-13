@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Database;
 
 use App\Application\Security\Auth\CreateFirstAdmin;
 use Doctrine\DBAL\Connection;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -14,6 +15,9 @@ use App\Tests\Fakes\TestHttpRequestAuthenticator;
 
 final class AuthApiTest extends WebTestCase
 {
+    private const string TRUSTED_PROXY = '192.0.2.1';
+    private const int TRUSTED_HEADERS = Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_PROTO;
+
     private KernelBrowser $client;
     private Connection $database;
 
@@ -21,6 +25,7 @@ final class AuthApiTest extends WebTestCase
     {
         $this->client = self::createClient();
         $this->client->disableReboot();
+        Request::setTrustedProxies([self::TRUSTED_PROXY], self::TRUSTED_HEADERS);
         $realAuthenticator = self::getContainer()->get(RequestAuthenticator::class);
         self::assertInstanceOf(RequestAuthenticator::class, $realAuthenticator);
         $testAuthenticator = self::getContainer()->get(TestHttpRequestAuthenticator::class);
@@ -39,6 +44,7 @@ final class AuthApiTest extends WebTestCase
     {
         $this->cleanup();
         $this->database->close();
+        Request::setTrustedProxies([], 0);
         parent::tearDown();
     }
 
@@ -119,6 +125,81 @@ final class AuthApiTest extends WebTestCase
         ], content: str_repeat('x', 4097));
         self::assertResponseStatusCodeSame(401);
         self::assertSame(0, $this->database->fetchOne("SELECT COUNT(*) FROM audit_events WHERE event_type = 'login_failed'"));
+    }
+
+    public function testLoginThrottleIgnoresSpoofedForwardingFromUntrustedPeers(): void
+    {
+        $this->client->jsonRequest('POST', '/api/v1/auth/login', [
+            'username' => 'auth-smoke',
+            'password' => 'wrong',
+        ], [
+            'REMOTE_ADDR' => '198.51.100.10',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.11',
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ]);
+
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame(1, $this->ipFailureCount('198.51.100.10'));
+        self::assertSame(0, $this->ipFailureCount('203.0.113.11'));
+
+        $this->client->jsonRequest('POST', '/api/v1/auth/login', [
+            'username' => 'auth-smoke',
+            'password' => 'wrong',
+        ], [
+            'REMOTE_ADDR' => '192.0.2.2',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.12',
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ]);
+
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame(1, $this->ipFailureCount('192.0.2.2'));
+        self::assertSame(0, $this->ipFailureCount('203.0.113.12'));
+    }
+
+    public function testTrustedImmediateProxyKeepsClientLoginBudgetsSeparate(): void
+    {
+        for ($attempt = 1; $attempt <= 5; ++$attempt) {
+            $this->loginThroughTrustedProxy('203.0.113.20', 'wrong');
+            self::assertResponseStatusCodeSame(401);
+        }
+
+        self::assertSame(5, $this->ipFailureCount('203.0.113.20'));
+        self::assertSame(0, $this->ipFailureCount(self::TRUSTED_PROXY));
+
+        $this->loginThroughTrustedProxy('203.0.113.21', 'smoke-password');
+
+        self::assertResponseIsSuccessful();
+        self::assertSame(0, $this->ipFailureCount('203.0.113.21'));
+        self::assertSame(5, $this->ipFailureCount('203.0.113.20'));
+    }
+
+    private function loginThroughTrustedProxy(string $clientIp, string $password): void
+    {
+        $this->client->jsonRequest('POST', '/api/v1/auth/login', [
+            'username' => 'auth-smoke',
+            'password' => $password,
+        ], [
+            'REMOTE_ADDR' => self::TRUSTED_PROXY,
+            'HTTP_X_FORWARDED_FOR' => $clientIp,
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ]);
+    }
+
+    private function ipFailureCount(string $ip): int
+    {
+        $packed = inet_pton($ip);
+        self::assertIsString($packed);
+
+        $count = $this->database->fetchOne(
+            'SELECT COALESCE(MAX(failure_count), 0) FROM login_ip_attempts WHERE HEX(ip_address) = ?',
+            [strtoupper(bin2hex($packed))],
+        );
+
+        if (!is_int($count) && !is_string($count)) {
+            self::fail('The login IP failure count is not numeric.');
+        }
+
+        return (int) $count;
     }
 
     private function cleanup(): void

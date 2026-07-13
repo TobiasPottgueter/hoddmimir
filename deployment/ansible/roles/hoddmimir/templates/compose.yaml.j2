@@ -108,6 +108,7 @@ services:
       <<: *app-environment
       DATABASE_USER: hoddmimir_web
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_web_password
+      HODDMIMIR_TRUSTED_PROXY: {{ hoddmimir_docker_gateway | to_json }}
     secrets: [app_secret, encryption_key, mariadb_web_password]
     depends_on:
       mariadb: { condition: service_healthy }
@@ -143,6 +144,10 @@ services:
 networks:
   internal:
     driver: bridge
+    ipam:
+      config:
+        - subnet: {{ hoddmimir_docker_subnet | to_json }}
+          gateway: {{ hoddmimir_docker_gateway | to_json }}
 
 volumes:
   mariadb_data:

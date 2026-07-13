@@ -176,6 +176,29 @@ if [ -e "$matrix_webhook_file" ]; then
     fi
 fi
 
+hetzner_token_file="$production_secrets_dir/hetzner_dns_api_token"
+assert_safe_file "$hetzner_token_file" 'The Hetzner DNS API token'
+if [ -e "$hetzner_token_file" ]; then
+    chmod 0600 "$hetzner_token_file"
+    if ! "$python_bin" - "$hetzner_token_file" >/dev/null <<'PY'
+import pathlib
+import re
+import sys
+
+value = pathlib.Path(sys.argv[1]).read_bytes()
+stripped = value.rstrip(b"\r\n")
+if value not in (stripped, stripped + b"\n", stripped + b"\r\n"):
+    raise SystemExit(1)
+if stripped == b"REPLACE_WITH_HETZNER_DNS_API_TOKEN":
+    raise SystemExit(0)
+if not 32 <= len(stripped) <= 256 or re.fullmatch(rb"[A-Za-z0-9_-]+", stripped) is None:
+    raise SystemExit(1)
+PY
+    then
+        fail 'The Hetzner DNS API token file is invalid; it was not replaced.'
+    fi
+fi
+
 if [ ! -e "$keyring_file" ]; then
     temporary_keyring=$(new_temporary_file encryption_keyring)
     key_material=$("$openssl_bin" rand -hex 32)
@@ -209,6 +232,15 @@ if [ "$(tr -d '\r\n' < "$matrix_webhook_file")" != 'https://matrix.invalid/disab
     fail 'The production initializer only accepts the disabled Matrix placeholder; configure a real webhook through a separate explicit maintenance step.'
 fi
 
+if [ ! -e "$hetzner_token_file" ]; then
+    temporary_hetzner_token=$(new_temporary_file hetzner_dns_api_token)
+    printf '%s\n' 'REPLACE_WITH_HETZNER_DNS_API_TOKEN' > "$temporary_hetzner_token"
+    if ! install_without_overwrite "$temporary_hetzner_token" "$hetzner_token_file"; then
+        rm -f -- "$temporary_hetzner_token"
+    fi
+fi
+chmod 0600 "$hetzner_token_file"
+
 if ! "$python_bin" - "$production_secrets_dir" "$secrets_root" >/dev/null <<'PY'
 import json
 import pathlib
@@ -230,6 +262,9 @@ hex_names = (
 values = [(production / name).read_text(encoding="utf-8").strip() for name in hex_names]
 keyring = json.loads((production / "encryption_keyring.json").read_text(encoding="utf-8"))
 values.append(keyring["keys"][0]["material"])
+hetzner_token = (production / "hetzner_dns_api_token").read_text(encoding="utf-8").strip()
+if hetzner_token != "REPLACE_WITH_HETZNER_DNS_API_TOKEN":
+    values.append(hetzner_token)
 if len(values) != len(set(values)):
     raise SystemExit(1)
 
@@ -298,6 +333,7 @@ expected_vault=$(new_temporary_file vault_plaintext)
     printf 'hoddmimir_mariadb_collector_password: %s\n' "$(tr -d '\r\n' < "$production_secrets_dir/mariadb_collector_password")"
     printf 'hoddmimir_mariadb_backup_worker_password: %s\n' "$(tr -d '\r\n' < "$production_secrets_dir/mariadb_backup_worker_password")"
     printf '%s\n' 'hoddmimir_matrix_webhook_url: https://matrix.invalid/disabled'
+    printf 'hoddmimir_hetzner_dns_api_token: %s\n' "$(tr -d '\r\n' < "$hetzner_token_file")"
 } > "$expected_vault"
 unset key_material
 
@@ -308,7 +344,21 @@ if [ -e "$vault_file" ]; then
         fail 'The existing production Vault cannot be decrypted with the generated Vault password; it was not changed.'
     fi
     if ! cmp -s "$expected_vault" "$decrypted_vault"; then
-        fail 'The existing production Vault does not match the production secret set; it was not changed.'
+        legacy_expected_vault=$(new_temporary_file vault_legacy_expected)
+        sed '/^hoddmimir_hetzner_dns_api_token:/d' "$expected_vault" > "$legacy_expected_vault"
+        previous_name_expected_vault=$(new_temporary_file vault_previous_name_expected)
+        sed 's/^hoddmimir_hetzner_dns_api_token:/hoddmimir_hetzner_api_token:/' \
+            "$expected_vault" > "$previous_name_expected_vault"
+        if ! cmp -s "$legacy_expected_vault" "$decrypted_vault" \
+            && ! cmp -s "$previous_name_expected_vault" "$decrypted_vault"; then
+            fail 'The existing production Vault does not match the production secret set; it was not changed.'
+        fi
+        migrated_vault=$(new_temporary_file vault_migrated)
+        if ! "$ansible_vault_bin" encrypt --vault-password-file "$vault_password_file" --output "$migrated_vault" "$expected_vault" >/dev/null 2>&1; then
+            fail 'The production Vault could not be migrated to include the Hetzner DNS API token.'
+        fi
+        chmod 0600 "$migrated_vault"
+        mv "$migrated_vault" "$vault_file"
     fi
     chmod 0600 "$vault_file"
 else

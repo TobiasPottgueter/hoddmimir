@@ -69,7 +69,8 @@ for name in \
     mariadb_backup_worker_password \
     local_admin_password \
     ansible_vault_password \
-    matrix_webhook_url
+    matrix_webhook_url \
+    hetzner_dns_api_token
 do
     path="$production_dir/$name"
     test -f "$path" || fail "$name was not created"
@@ -91,6 +92,8 @@ decrypted="$temporary_root/decrypted.yml"
 "$ansible_vault" view --vault-password-file "$production_dir/ansible_vault_password" "$vault_file" > "$decrypted"
 grep -q '^hoddmimir_matrix_webhook_url: https://matrix.invalid/disabled$' "$decrypted" \
     || fail 'the disabled Matrix placeholder is missing'
+grep -q '^hoddmimir_hetzner_dns_api_token: REPLACE_WITH_HETZNER_DNS_API_TOKEN$' "$decrypted" \
+    || fail 'the safe Hetzner DNS token placeholder is missing'
 grep -q '^  primaryKeyId: prod_1$' "$decrypted" || fail 'the structured keyring primary is missing'
 grep -q '^hoddmimir_app_secret: ' "$decrypted" || fail 'the application secret is missing from the Vault'
 
@@ -100,6 +103,43 @@ write_manifest "$before"
 run_initializer >/dev/null
 write_manifest "$after"
 cmp -s "$before" "$after" || fail 'the idempotent rerun changed generated material'
+
+legacy_plaintext="$temporary_root/legacy-vault.yml"
+sed '/^hoddmimir_hetzner_dns_api_token:/d' "$decrypted" > "$legacy_plaintext"
+legacy_encrypted="$temporary_root/legacy-vault-encrypted.yml"
+"$ansible_vault" encrypt \
+    --vault-password-file "$production_dir/ansible_vault_password" \
+    --output "$legacy_encrypted" \
+    "$legacy_plaintext" >/dev/null
+mv "$legacy_encrypted" "$vault_file"
+run_initializer >/dev/null
+"$ansible_vault" view --vault-password-file "$production_dir/ansible_vault_password" "$vault_file" > "$decrypted"
+grep -q '^hoddmimir_hetzner_dns_api_token: REPLACE_WITH_HETZNER_DNS_API_TOKEN$' "$decrypted" \
+    || fail 'the legacy Vault was not migrated safely to the Hetzner token field'
+
+previous_name_plaintext="$temporary_root/previous-name-vault.yml"
+sed 's/^hoddmimir_hetzner_dns_api_token:/hoddmimir_hetzner_api_token:/' \
+    "$decrypted" > "$previous_name_plaintext"
+previous_name_encrypted="$temporary_root/previous-name-vault-encrypted.yml"
+"$ansible_vault" encrypt \
+    --vault-password-file "$production_dir/ansible_vault_password" \
+    --output "$previous_name_encrypted" \
+    "$previous_name_plaintext" >/dev/null
+mv "$previous_name_encrypted" "$vault_file"
+run_initializer >/dev/null
+"$ansible_vault" view --vault-password-file "$production_dir/ansible_vault_password" "$vault_file" > "$decrypted"
+grep -q '^hoddmimir_hetzner_dns_api_token: REPLACE_WITH_HETZNER_DNS_API_TOKEN$' "$decrypted" \
+    || fail 'the previous token field name was not migrated'
+if grep -q '^hoddmimir_hetzner_api_token:' "$decrypted"; then
+    fail 'the previous token field name survived migration'
+fi
+
+printf '%s\n' 'invalid token value' > "$production_dir/hetzner_dns_api_token"
+if run_initializer >/dev/null 2>&1; then
+    fail 'an invalid existing Hetzner DNS API token was accepted'
+fi
+test "$(cat "$production_dir/hetzner_dns_api_token")" = 'invalid token value' \
+    || fail 'the invalid Hetzner DNS API token was overwritten'
 
 invalid_root="$temporary_root/invalid/.secrets"
 invalid_production="$invalid_root/production"

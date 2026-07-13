@@ -1,4 +1,43 @@
 ---
+- name: Parse the dedicated Docker bridge network
+  ansible.builtin.set_fact:
+    hoddmimir_docker_network_prefix: >-
+      {{ hoddmimir_docker_subnet.split('/')[1]
+         if hoddmimir_docker_subnet is string and '/' in hoddmimir_docker_subnet else '' }}
+    hoddmimir_docker_network_octets: >-
+      {{ (hoddmimir_docker_subnet.split('/')[0]).split('.')
+         if hoddmimir_docker_subnet is string and '/' in hoddmimir_docker_subnet else [] }}
+    hoddmimir_docker_gateway_octets: >-
+      {{ hoddmimir_docker_gateway.split('.')
+         if hoddmimir_docker_gateway is string else [] }}
+
+- name: Validate the dedicated private Docker bridge network
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_docker_network_prefix == '24'
+      - hoddmimir_docker_network_octets | length == 4
+      - hoddmimir_docker_gateway_octets | length == 4
+      - hoddmimir_docker_network_octets | select('match', '^(0|[1-9][0-9]{0,2})$') | list | length == 4
+      - hoddmimir_docker_gateway_octets | select('match', '^(0|[1-9][0-9]{0,2})$') | list | length == 4
+      - hoddmimir_docker_network_octets | map('int') | select('ge', 0) | select('le', 255) | list | length == 4
+      - hoddmimir_docker_gateway_octets | map('int') | select('ge', 0) | select('le', 255) | list | length == 4
+      - hoddmimir_docker_network_octets[3] | int == 0
+      - hoddmimir_docker_gateway_octets[0:3] == hoddmimir_docker_network_octets[0:3]
+      - hoddmimir_docker_gateway_octets[3] | int >= 1
+      - hoddmimir_docker_gateway_octets[3] | int <= 254
+      - >-
+        hoddmimir_docker_network_octets[0] | int == 10
+        or (
+          hoddmimir_docker_network_octets[0] | int == 172
+          and hoddmimir_docker_network_octets[1] | int >= 16
+          and hoddmimir_docker_network_octets[1] | int <= 31
+        )
+        or (
+          hoddmimir_docker_network_octets[0] | int == 192
+          and hoddmimir_docker_network_octets[1] | int == 168
+        )
+    fail_msg: Configure one canonical RFC1918 /24 Docker bridge and a non-network/non-broadcast gateway inside it.
+
 - name: Validate non-secret deployment settings
   ansible.builtin.assert:
     that:
@@ -7,6 +46,13 @@
       - hoddmimir_webapp_image | length > 0
       - hoddmimir_mariadb_image | length > 0
       - hoddmimir_database_name is match('^[A-Za-z0-9_]+$')
+      - hoddmimir_public_domain is match('^(?=.{1,253}$)(?!.*\.\.)(?!-)[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
+      - not hoddmimir_public_domain.endswith('.invalid')
+      - hoddmimir_acme_email is match('^[A-Za-z0-9.!#$%&''*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$')
+      - not hoddmimir_acme_email.endswith('@example.invalid')
+      - hoddmimir_acme_dns_provider == 'hetzner'
+      - hoddmimir_acme_renew_before_days | int >= 1
+      - hoddmimir_acme_renew_before_days | int <= 60
       - hoddmimir_web_port | int > 0
       - hoddmimir_web_port | int <= 65535
       - hoddmimir_collector_grid_width_seconds | int > 0
@@ -65,6 +111,16 @@
       - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack
       - not (hoddmimir_backup_execution_enabled | bool) or (hoddmimir_matrix_notifications_enabled | bool)
     fail_msg: Image references, runtime values, database name, or backup activation acknowledgement are invalid.
+
+- name: Validate secret Hetzner DNS API token
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_hetzner_dns_api_token is defined
+      - hoddmimir_hetzner_dns_api_token is string
+      - hoddmimir_hetzner_dns_api_token is match('^[A-Za-z0-9_-]{32,256}$')
+      - hoddmimir_hetzner_dns_api_token != 'REPLACE_WITH_HETZNER_DNS_API_TOKEN'
+    fail_msg: Supply the Hetzner DNS API token through the ignored encrypted production Vault.
+  no_log: true
 
 - name: Validate secret Matrix webhook configuration
   ansible.builtin.assert:

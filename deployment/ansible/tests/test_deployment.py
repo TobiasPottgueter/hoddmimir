@@ -64,6 +64,11 @@ def valid_variables() -> dict[str, object]:
         "hoddmimir_backup_execution_enabled": False,
         "hoddmimir_backup_execution_activation_ack": "",
         "hoddmimir_timezone": "UTC",
+        "hoddmimir_public_domain": "hoddmimir.example.test",
+        "hoddmimir_acme_email": "acme@example.test",
+        "hoddmimir_hetzner_dns_api_token": "test_token_" + "h" * 54,
+        "hoddmimir_docker_subnet": "172.31.253.0/24",
+        "hoddmimir_docker_gateway": "172.31.253.1",
         "hoddmimir_matrix_webhook_url": "https://matrix.example.test/hook/secret",
         "hoddmimir_encryption_keyring": {
             "format": 1,
@@ -120,16 +125,32 @@ def health_server(response_statuses: tuple[int, ...] = (200,)):
 
 
 class InventoryGeneratorTest(unittest.TestCase):
+    PRODUCTION_SETTINGS = (
+        "HODDMIMIR_PUBLIC_DOMAIN=hoddmimir.example.test\n"
+        "HODDMIMIR_ACME_EMAIL=acme@example.test\n"
+        "HODDMIMIR_DOCKER_SUBNET=172.31.253.0/24\n"
+        "HODDMIMIR_DOCKER_GATEWAY=172.31.253.1\n"
+    )
+
     def test_generates_parseable_private_inventory_with_quoted_ipv6(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             environment_file = root / "deployment.env"
             inventory_file = root / "hosts.yml"
-            environment_file.write_text("DEPLOYMENT_HOST=2001:db8::1\nDEPLOYMENT_USER=root\n", encoding="utf-8")
+            environment_file.write_text(
+                "DEPLOYMENT_HOST=2001:db8::1\nDEPLOYMENT_USER=root\n" + self.PRODUCTION_SETTINGS,
+                encoding="utf-8",
+            )
             result = self.run_generator(environment_file, inventory_file)
 
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual(0o600, stat.S_IMODE(inventory_file.stat().st_mode))
+            group_vars_file = inventory_file.with_name("main.yml")
+            self.assertEqual(0o600, stat.S_IMODE(group_vars_file.stat().st_mode))
+            self.assertIn(
+                'hoddmimir_public_domain: "hoddmimir.example.test"',
+                group_vars_file.read_text(encoding="utf-8"),
+            )
             host_result = run(["ansible-inventory", "--inventory", str(inventory_file), "--host", "hoddmimir-production"])
             self.assertEqual(0, host_result.returncode, host_result.stderr)
             host = json.loads(host_result.stdout)
@@ -158,7 +179,7 @@ class InventoryGeneratorTest(unittest.TestCase):
                 root = Path(temporary_directory)
                 environment_file = root / "deployment.env"
                 inventory_file = root / "hosts.yml"
-                environment_file.write_text(content, encoding="utf-8")
+                environment_file.write_text(content + self.PRODUCTION_SETTINGS, encoding="utf-8")
 
                 result = self.run_generator(environment_file, inventory_file)
 
@@ -179,7 +200,7 @@ class InventoryGeneratorTest(unittest.TestCase):
                 root = Path(temporary_directory)
                 environment_file = root / "deployment.env"
                 inventory_file = root / "hosts.yml"
-                environment_file.write_text(content, encoding="utf-8")
+                environment_file.write_text(content + self.PRODUCTION_SETTINGS, encoding="utf-8")
                 inventory_file.write_text("sentinel\n", encoding="utf-8")
                 result = self.run_generator(environment_file, inventory_file)
 
@@ -191,6 +212,7 @@ class InventoryGeneratorTest(unittest.TestCase):
         environment = os.environ.copy()
         environment["DEPLOYMENT_ENV_FILE"] = str(environment_file)
         environment["ANSIBLE_INVENTORY_FILE"] = str(inventory_file)
+        environment["ANSIBLE_GROUP_VARS_FILE"] = str(inventory_file.with_name("main.yml"))
 
         return run([str(INVENTORY_SCRIPT)], cwd=REPOSITORY_ROOT, env=environment)
 
@@ -228,6 +250,36 @@ class PreflightTest(unittest.TestCase):
         variables["hoddmimir_backup_execution_enabled"] = True
         result = self.run_preflight(variables)
         self.assertNotEqual(0, result.returncode)
+
+    def test_rejects_placeholder_https_identity_or_secret_without_leaking_token(self) -> None:
+        invalid = (
+            ("hoddmimir_public_domain", "hoddmimir.example.invalid"),
+            ("hoddmimir_acme_email", "acme@example.invalid"),
+            ("hoddmimir_hetzner_dns_api_token", "REPLACE_WITH_HETZNER_DNS_API_TOKEN"),
+        )
+        for variable, value in invalid:
+            with self.subTest(variable=variable):
+                variables = valid_variables()
+                variables[variable] = value
+                result = self.run_preflight(variables)
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn(value, result.stdout + result.stderr)
+
+    def test_requires_one_canonical_private_24_bridge_and_in_range_gateway(self) -> None:
+        invalid = (
+            ("172.31.253.0/16", "172.31.253.1"),
+            ("203.0.113.0/24", "203.0.113.1"),
+            ("172.31.253.0/24", "172.31.254.1"),
+            ("172.31.253.0/24", "172.31.253.0"),
+            ("172.31.253.0/24", "172.31.253.255"),
+            ("172.031.253.0/24", "172.31.253.1"),
+        )
+        for subnet, gateway in invalid:
+            with self.subTest(subnet=subnet, gateway=gateway):
+                variables = valid_variables()
+                variables["hoddmimir_docker_subnet"] = subnet
+                variables["hoddmimir_docker_gateway"] = gateway
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
 
     def test_rejects_backup_execution_without_problem_delivery(self) -> None:
         variables = valid_variables()
@@ -481,12 +533,16 @@ class ComposeContractTest(unittest.TestCase):
                 (secrets_directory / secret_name).write_text("test\n", encoding="utf-8")
             encryption_key_file = secrets_directory / "encryption_key"
             init_script = root / "10-create-app-users.sh"
+            caddy_file = root / "Caddyfile.candidate"
+            renewal_file = root / "hoddmimir-certificate-renew"
             variables = valid_variables() | {
                 "hoddmimir_test_compose_output": str(compose_file),
                 "hoddmimir_test_migration_compose_output": str(migration_compose_file),
                 "hoddmimir_test_mariadb_init_output": str(init_script),
                 "hoddmimir_test_runtime_output": str(runtime_file),
                 "hoddmimir_test_encryption_key_output": str(encryption_key_file),
+                "hoddmimir_test_caddy_output": str(caddy_file),
+                "hoddmimir_test_renewal_output": str(renewal_file),
                 "hoddmimir_secrets_directory": str(secrets_directory),
                 "hoddmimir_mariadb_init_script": str(init_script),
             }
@@ -506,6 +562,23 @@ class ComposeContractTest(unittest.TestCase):
                 encryption_key_file.read_text(encoding="utf-8"),
             )
             self.assertEqual(0o600, stat.S_IMODE(encryption_key_file.stat().st_mode))
+            caddy = caddy_file.read_text(encoding="utf-8")
+            self.assertIn("http://hoddmimir.example.test", caddy)
+            self.assertIn("https://hoddmimir.example.test", caddy)
+            self.assertIn("reverse_proxy 127.0.0.1:8080", caddy)
+            self.assertIn("header_up -X-Forwarded-For", caddy)
+            self.assertIn("header_up X-Forwarded-For {remote_host}", caddy)
+            self.assertIn("header_up X-Forwarded-Proto https", caddy)
+            self.assertIn('Strict-Transport-Security "max-age=31536000"', caddy)
+            self.assertNotIn("includeSubDomains", caddy)
+            self.assertNotIn("tls internal", caddy)
+            renewal = renewal_file.read_text(encoding="utf-8")
+            self.assertIn("--candidate-caddyfile=/etc/hoddmimir/caddy/Caddyfile.candidate", renewal)
+            self.assertIn("--caddyfile=/etc/caddy/Caddyfile", renewal)
+            self.assertIn("--health-url=https://hoddmimir.example.test/api/health", renewal)
+            self.assertIn("--acme-user=hoddmimir-acme", renewal)
+            self.assertIn("--token-file=/etc/hoddmimir/acme/hetzner_dns_api_token", renewal)
+            self.assertNotIn(str(variables["hoddmimir_hetzner_dns_api_token"]), renewal)
             self.assertIn("ENCRYPTION_KEYRING_REVISION=7\n", runtime_file.read_text(encoding="utf-8"))
             configured = run(["docker", "compose", "--file", str(compose_file), "config", "--format", "json"])
             self.assertEqual(0, configured.returncode, configured.stderr)
@@ -566,6 +639,11 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("hoddmimir_web", services["webapp"]["environment"]["DATABASE_USER"])
             self.assertEqual("127.0.0.1", services["webapp"]["ports"][0]["host_ip"])
             self.assertEqual(8080, services["webapp"]["ports"][0]["target"])
+            self.assertEqual("172.31.253.1", services["webapp"]["environment"]["HODDMIMIR_TRUSTED_PROXY"])
+            self.assertEqual(
+                [{"subnet": "172.31.253.0/24", "gateway": "172.31.253.1"}],
+                model["networks"]["internal"]["ipam"]["config"],
+            )
             self.assertEqual("false", services["backup-worker"]["environment"]["BACKUP_EXECUTION_ENABLED"])
             self.assertEqual("false", services["backup-worker"]["environment"]["MATRIX_NOTIFICATION_ENABLED"])
             self.assertEqual("proxmox-backup", services["backup-worker"]["environment"]["MATRIX_WEBHOOK_CHANNEL"])
@@ -707,6 +785,69 @@ class DeploymentStagingIsolationTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertEqual([], list(Path(parent).iterdir()))
 
+
+class HostHttpsAnsibleContractTest(unittest.TestCase):
+    def test_https_role_keeps_caddy_outside_compose_and_acme_identity_isolated(self) -> None:
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        defaults = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "defaults" / "main.yml").read_text(encoding="utf-8")
+        compose = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "templates" / "compose.yaml.j2").read_text(encoding="utf-8")
+        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
+
+        for package in ("caddy", "caddy-openrc", "iproute2", "lego", "openssl"):
+            self.assertIn(f"  - {package}", defaults)
+        self.assertNotIn("\n  caddy:\n", compose)
+        self.assertIn("Create dedicated nologin ACME runtime user", tasks)
+        self.assertIn("shell: /sbin/nologin", tasks)
+        self.assertIn('mode: "0700"', tasks)
+        self.assertIn('mode: "0440"', tasks)
+        self.assertIn("group: \"{{ hoddmimir_acme_group }}\"", tasks)
+        self.assertIn("no_log: true", tasks)
+        self.assertIn("--candidate-caddyfile={{ hoddmimir_caddy_candidate_file }}", tasks)
+        self.assertIn("Enable the Caddy OpenRC service without starting it", tasks)
+        self.assertIn("Enable and start the Alpine periodic scheduler", tasks)
+        self.assertLess(
+            tasks.index("Enable the Caddy OpenRC service without starting it"),
+            tasks.index("Issue or renew the public certificate and activate host Caddy"),
+        )
+        self.assertNotIn("notify:", tasks)
+        self.assertIn("Check public HTTPS API health with full certificate verification", verify)
+        self.assertIn("validate_certs: true", verify)
+        self.assertIn("Require exactly four running services", verify)
+
+    def test_token_is_only_passed_to_lego_through_file_environment(self) -> None:
+        transaction = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "files" / "https_transaction.py").read_text(encoding="utf-8")
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+
+        self.assertIn('"HETZNER_API_TOKEN_FILE": str(token_file)', transaction)
+        self.assertNotIn('"HETZNER_API_TOKEN":', transaction)
+        self.assertNotIn("--token=", transaction)
+        self.assertIn("context=ssl.create_default_context()", transaction)
+        self.assertNotIn("_create_unverified", transaction)
+        self.assertIn("health_checker(arguments.health_url)", transaction)
+        self.assertNotIn("hoddmimir_hetzner_dns_api_token }}\"\n      -", tasks)
+
+    def test_listener_verification_uses_the_configured_non_default_web_port(self) -> None:
+        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
+        listener_contract = verify.split(
+            "- name: Require public TLS listeners and loopback-only application and admin listeners",
+            maxsplit=1,
+        )[1].split("- name: Require a non-expiring public certificate", maxsplit=1)[0]
+        configured_port = 18_080
+
+        self.assertNotIn(":8080", listener_contract)
+        self.assertEqual(3, listener_contract.count("hoddmimir_web_port"))
+        self.assertIn(
+            "':' ~ (hoddmimir_web_port | string) ~ '(\\\\s|$)'",
+            listener_contract,
+        )
+        self.assertIn(
+            "'127\\\\.0\\\\.0\\\\.1:' ~ (hoddmimir_web_port | string) ~ '(\\\\s|$)'",
+            listener_contract,
+        )
+        self.assertIn(
+            f"127.0.0.1:{configured_port}",
+            listener_contract.replace("{{ hoddmimir_web_port }}", str(configured_port)),
+        )
 
 class DeploymentTransactionTest(unittest.TestCase):
     def setUp(self) -> None:

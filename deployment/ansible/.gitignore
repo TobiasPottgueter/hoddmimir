@@ -1,4 +1,5 @@
 inventories/*/hosts.yml
+inventories/*/group_vars/*/main.yml
 inventories/*/group_vars/*/vault.yml
 .vault-password
 .cache/

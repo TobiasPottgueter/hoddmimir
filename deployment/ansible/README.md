@@ -1,6 +1,6 @@
 # Hoddmímir deployment with Ansible
 
-This scaffold bootstraps the Alpine host, installs Docker with OpenRC, deploys the four-service production Compose stack (`webapp`, `data-worker`, `backup-worker`, and `mariadb`), and verifies its health. Nothing runs remotely until an operator explicitly invokes a playbook.
+This scaffold bootstraps the Alpine host, installs Docker with OpenRC, deploys the four-service production Compose stack (`webapp`, `data-worker`, `backup-worker`, and `mariadb`), and verifies its health. Host Caddy is an Alpine/OpenRC service in front of the loopback-only WebApp port; it is intentionally not a fifth container. Nothing runs remotely until an operator explicitly invokes a playbook.
 
 ## Prepare local configuration
 
@@ -9,7 +9,9 @@ This scaffold bootstraps the Alpine host, installs Docker with OpenRC, deploys t
 make production-secrets
 ```
 
-The ignored `.secrets/deployment.env` supplies `DEPLOYMENT_HOST` and `DEPLOYMENT_USER`. `DEPLOYMENT_FQDN` is optional; for DNS-based hosts the generator uses `DEPLOYMENT_HOST`, while IP-based hosts receive the safe local default `hoddmimir.localdomain` unless an explicit FQDN is provided.
+The ignored `.secrets/deployment.env` supplies `DEPLOYMENT_HOST` and `DEPLOYMENT_USER`. `DEPLOYMENT_FQDN` is optional; for DNS-based hosts the generator uses `DEPLOYMENT_HOST`, while IP-based hosts receive the safe local default `hoddmimir.localdomain` unless an explicit FQDN is provided. On first creation of the ignored production group vars it also requires `HODDMIMIR_PUBLIC_DOMAIN`, `HODDMIMIR_ACME_EMAIL`, `HODDMIMIR_DOCKER_SUBNET`, and `HODDMIMIR_DOCKER_GATEWAY`. The network must be a canonical private `/24`, and its gateway must be a usable address inside that subnet.
+
+Real hostnames, the public domain, the ACME email, the production bridge, and image digests live only in ignored mode-`0600` `hosts.yml` and `group_vars/hoddmimir_hosts/main.yml`. Git contains only `hosts.example.yml` and `main.example.yml` with `.example.invalid` identities and non-routable example image references. The generator never overwrites an existing production `main.yml`, because that would discard operator-pinned release digests.
 
 The production initializer generates a set that is separate from the local
 development secrets. It creates distinct application and MariaDB secrets, a
@@ -19,6 +21,17 @@ It then writes the ignored `vault.yml` directly in encrypted form. All secret
 files are mode `0600`; existing valid material is verified and retained, while
 invalid, mismatching or symlinked state fails closed without being replaced.
 The command never prints secret values.
+
+The initializer creates a safe `REPLACE_WITH_HETZNER_DNS_API_TOKEN`
+placeholder when no local Hetzner token exists. Before deployment, put the
+real token in ignored `.secrets/production/hetzner_dns_api_token` with mode `0600`
+and store the same value as `hoddmimir_hetzner_dns_api_token` in the encrypted
+Vault. An older initializer-owned Vault without that field is migrated
+atomically on the next `make production-secrets`; any other mismatch fails
+closed. A later token rotation updates the local file and encrypted Vault as
+one maintenance operation before rerunning validation. Never place the token
+in `deployment.env`, `main.yml`, a command argument, a plaintext environment
+value, or Git.
 
 Matrix delivery remains disabled by default. The encrypted Vault contains only
 `https://matrix.invalid/disabled` until a real webhook is configured as a
@@ -30,7 +43,7 @@ The Make targets use `.secrets/production/ansible_vault_password`
 non-interactively when it exists. Set `ANSIBLE_VAULT_ARGS` explicitly only
 when an operator intentionally uses a different Vault identity.
 
-Set the application image references in `inventories/production/group_vars/hoddmimir_hosts/main.yml` to immutable Hoddmímir release digests (`image@sha256:...`). The checked-in development tags intentionally fail the production pinning assertion. Authenticate Docker to a private registry before deployment without putting registry credentials in this repository.
+Set the application image references in the ignored `inventories/production/group_vars/hoddmimir_hosts/main.yml` to immutable Hoddmímir release digests (`image@sha256:...`). Empty or mutable values fail the production pinning assertion. Authenticate Docker to a private registry before deployment without putting registry credentials in this repository.
 
 The manual publish option of the existing `Hoddmímir CI` workflow publishes
 the worker and web runtime images for both `linux/amd64` and `linux/arm64`.
@@ -73,6 +86,35 @@ make verify
 ```
 
 Bootstrap connects initially as `root`, installs Python if absent, and configures Alpine, Docker, and OpenRC. Deploy creates `/opt/hoddmimir` and root-only secrets under `/etc/hoddmimir/secrets`.
+
+### Public HTTPS boundary
+
+Production Compose binds WebApp port `8080` only to `127.0.0.1` and assigns a
+fixed operator-chosen private bridge subnet and gateway. Symfony trusts exactly
+that one gateway IP as its immediate proxy; it never trusts `REMOTE_ADDR`, all
+private ranges, or an arbitrary CIDR. Host Caddy preserves the direct `Host`
+header and replaces, rather than appends, `X-Forwarded-For` and
+`X-Forwarded-Proto`, so an Internet client cannot inject a second trusted hop.
+Caddy exposes HTTP/HTTPS on ports 80/443, redirects HTTP to HTTPS, keeps its
+admin API on `127.0.0.1:2019`, and runs as the non-root `caddy` user.
+
+Certificate issuance and renewal use Alpine `lego` with the Hetzner DNS-01
+provider. A dedicated nologin `hoddmimir-acme` identity owns its `0700` state.
+The token is installed separately from Docker application secrets as
+`root:hoddmimir-acme` mode `0440`; the parent directory is root-managed and
+Caddy is not a member of that group. Only the token **file path** is supplied
+to lego through `HETZNER_API_TOKEN_FILE`; the token value is never an argument,
+environment value, or logged subprocess output.
+
+The active Caddyfile is never used as its own candidate. Ansible renders a
+separate `root:caddy` mode-`0640` candidate, and the root transaction copies
+ACME state for the unprivileged lego run, validates the hostname, expiry and
+certificate/key match, atomically installs `root:caddy` certificate material,
+validates Caddy, starts or gracefully reloads it, and finally calls the public
+`/api/health` through HTTPS with the system trust store. A TLS, HTTP, JSON,
+readiness, validation, start or reload failure restores the prior Caddyfile,
+certificate, key, ACME state and service state. The same locked transaction is
+installed in `/etc/periodic/daily`; OpenRC `crond` is enabled and running.
 
 `hoddmimir_collector_grid_width_seconds` is the collector's only cadence
 setting, defaults to 120, and is validated against the Application range of one
