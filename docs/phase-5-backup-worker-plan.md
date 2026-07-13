@@ -2,7 +2,9 @@
 
 Status: **lokale Implementierung am 13. Juli 2026 abgeschlossen.** Die reale
 PVE-Labmatrix ist auf ausdrücklichen Nutzerauftrag Bestandteil von Phase 7;
-Phase 7 wurde noch nicht begonnen.
+zum Zeitpunkt dieses lokalen Abschlusses war Phase 7 noch nicht begonnen. Ihr
+späterer Live-Fortschritt steht in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
 
 Dieses Dokument konkretisiert Phase 5 aus dem
 [`rewrite-plan.md`](rewrite-plan.md). Die fachlichen Scheduler- und
@@ -39,8 +41,7 @@ dieses Dokument ersetzt keinen solchen Laufbericht.
 
 Sanitisierte PVE-7/8/9-Fixtures für QEMU und LXC sind lokale Contract-Evidenz,
 aber ausdrücklich kein Live-Nachweis. Reale Backupstarts, echte
-Transportabbrüche und die PVE-7/8/9-QEMU-/LXC-Labmatrix erfolgen erst in Phase
-7. Es wurden dafür in Phase 5 keine Lab-Systeme eingerichtet und keine
+Transportabbrüche und die PVE-7/8/9-QEMU-/LXC-Labmatrix erfolgen erst in Phase 7. Es wurden dafür in Phase 5 keine Lab-Systeme eingerichtet und keine
 Live-Ergebnisse dokumentiert.
 
 ## Ziel und Sicherheitsgrenze

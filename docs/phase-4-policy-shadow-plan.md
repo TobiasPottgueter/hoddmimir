@@ -45,7 +45,9 @@ Unit-/Contract-, echte MariaDB-11.4-, OpenAPI-, Frontend- und Playwright-Tests
 decken diese lokalen Verträge ab. Der vollständige Gate-Satz muss auf jedem
 eingefrorenen Releasekandidaten erneut ausgeführt werden; bereinigte Fixtures
 und die lokale QA-Datenbank ersetzen keine Live-PVE-/PBS-Evidenz. Phase 4 hat
-keinen PVE-Schreibzugriff aktiviert und Phase 7 wurde nicht begonnen.
+keinen PVE-Schreibzugriff aktiviert und zu diesem lokalen Abschlusszeitpunkt
+war Phase 7 noch nicht begonnen. Ihr späterer Live-Fortschritt steht in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
 
 ## Verbindliche Regeln
 

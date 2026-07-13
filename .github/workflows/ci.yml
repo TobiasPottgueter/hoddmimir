@@ -7,6 +7,21 @@ on: # yamllint disable-line rule:truthy
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_images:
+        description: Publish worker and web manifests after all release gates
+        required: true
+        default: false
+        type: boolean
+      image_tag:
+        description: OCI tag applied to both images, for example 2.0.0-rc.1
+        required: false
+        default: ""
+        type: string
+      publication_confirmation:
+        description: Type PUBLISH_MULTIARCH_IMAGES to allow registry writes
+        required: false
+        type: string
   schedule:
     - cron: "17 2 * * *"
 
@@ -15,7 +30,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.publish_images) }}
 
 jobs:
   supply-chain-contract:
@@ -351,3 +366,203 @@ jobs:
           path: artifacts/supply-chain/sbom/*.cdx.json
           if-no-files-found: error
           retention-days: 30
+
+  publish-images:
+    name: Publish worker and web manifests
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images == true
+    needs:
+      - ansible
+      - containers
+      - mutation-full
+      - proxmox-schema-policy
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Validate explicit publication input
+        env:
+          CONFIRMATION: ${{ inputs.publication_confirmation }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -eu
+          test "$CONFIRMATION" = "PUBLISH_MULTIARCH_IMAGES"
+          printf '%s\n' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
+
+      - name: Check out dispatched source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve immutable source identity and registry names
+        id: identity
+        env:
+          REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -eu
+          source_sha=$(git rev-parse --verify HEAD)
+          repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image_namespace="ghcr.io/$repository"
+
+          {
+            printf 'source_sha=%s\n' "$source_sha"
+            printf 'source_ref=%s\n' "$GITHUB_REF"
+            printf 'image_tag=%s\n' "$REQUESTED_IMAGE_TAG"
+            printf 'worker_image=%s/worker\n' "$image_namespace"
+            printf 'web_image=%s/web\n' "$image_namespace"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned QEMU emulation
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          image: tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
+          platforms: arm64
+
+      - name: Set up pinned Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          version: v0.35.0
+          driver-opts: |
+            image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+          buildkitd-flags: --oci-worker-net bridge
+          cache-binary: false
+
+      - name: Authenticate to GHCR with the job token
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish worker manifest
+        id: worker
+        env:
+          IMAGE: ${{ steps.identity.outputs.worker_image }}
+          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
+          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+        run: |
+          set -eu
+          metadata_file="$RUNNER_TEMP/worker-build-metadata.json"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --target worker \
+            --file docker/php/Dockerfile \
+            --tag "$IMAGE:$IMAGE_TAG" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=publish-worker \
+            --cache-to type=gha,mode=max,scope=publish-worker \
+            --metadata-file "$metadata_file" \
+            --push \
+            .
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Publish web manifest
+        id: web
+        env:
+          IMAGE: ${{ steps.identity.outputs.web_image }}
+          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
+          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+        run: |
+          set -eu
+          metadata_file="$RUNNER_TEMP/web-build-metadata.json"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --target web \
+            --file docker/web/Dockerfile \
+            --tag "$IMAGE:$IMAGE_TAG" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=publish-web \
+            --cache-to type=gha,mode=max,scope=publish-web \
+            --metadata-file "$metadata_file" \
+            --push \
+            .
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Remove registry credentials before public pull proof
+        run: docker logout ghcr.io
+
+      - name: Prove both manifests are anonymously pullable
+        env:
+          WORKER_REFERENCE: ${{ steps.identity.outputs.worker_image }}@${{ steps.worker.outputs.digest }}
+          WEB_REFERENCE: ${{ steps.identity.outputs.web_image }}@${{ steps.web.outputs.digest }}
+        run: |
+          set -eu
+          anonymous_config=$(mktemp -d)
+          trap 'rm -rf "$anonymous_config"' EXIT HUP INT TERM
+          DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$WORKER_REFERENCE" >/dev/null
+          DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$WEB_REFERENCE" >/dev/null
+
+      - name: Write immutable deployment references
+        env:
+          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
+          SOURCE_REF: ${{ steps.identity.outputs.source_ref }}
+          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+          WORKER_IMAGE: ${{ steps.identity.outputs.worker_image }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          WEB_IMAGE: ${{ steps.identity.outputs.web_image }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+        run: |
+          set -eu
+          mkdir -p artifacts
+          jq -n \
+            --arg imageTag "$IMAGE_TAG" \
+            --arg sourceRef "$SOURCE_REF" \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg workerTag "$WORKER_IMAGE:$IMAGE_TAG" \
+            --arg workerDigest "$WORKER_DIGEST" \
+            --arg workerReference "$WORKER_IMAGE@$WORKER_DIGEST" \
+            --arg webTag "$WEB_IMAGE:$IMAGE_TAG" \
+            --arg webDigest "$WEB_DIGEST" \
+            --arg webReference "$WEB_IMAGE@$WEB_DIGEST" \
+            '{
+              imageTag: $imageTag,
+              sourceRef: $sourceRef,
+              sourceSha: $sourceSha,
+              images: {
+                worker: {tag: $workerTag, digest: $workerDigest, reference: $workerReference},
+                web: {tag: $webTag, digest: $webDigest, reference: $webReference}
+              }
+            }' > artifacts/published-images.json
+
+      - name: Retain immutable deployment references
+        id: references
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-published-images-${{ steps.identity.outputs.image_tag }}
+          path: artifacts/published-images.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Summarize published manifests
+        env:
+          ARTIFACT_DIGEST: ${{ steps.references.outputs.artifact-digest }}
+          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
+          SOURCE_REF: ${{ steps.identity.outputs.source_ref }}
+          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+          WORKER_REFERENCE: ${{ steps.identity.outputs.worker_image }}@${{ steps.worker.outputs.digest }}
+          WEB_REFERENCE: ${{ steps.identity.outputs.web_image }}@${{ steps.web.outputs.digest }}
+        run: |
+          set -eu
+          {
+            printf '## Published Hoddmímir images\n\n'
+            printf -- '- Source ref: `%s`\n' "$SOURCE_REF"
+            printf -- '- Source commit: `%s`\n' "$SOURCE_SHA"
+            printf -- '- Discovery tag: `%s`\n' "$IMAGE_TAG"
+            printf -- '- Worker: `%s`\n' "$WORKER_REFERENCE"
+            printf -- '- Web: `%s`\n' "$WEB_REFERENCE"
+            printf -- '- Digest artifact SHA-256: `%s`\n' "$ARTIFACT_DIGEST"
+            printf '\nUse only the `@sha256:` references for deployment.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry credentials from the runner
+        if: always()
+        run: docker logout ghcr.io || true

@@ -6,19 +6,50 @@ This scaffold bootstraps the Alpine host, installs Docker with OpenRC, deploys t
 
 ```sh
 ./scripts/init-ansible-inventory.sh
-cd deployment/ansible
-cp inventories/production/group_vars/hoddmimir_hosts/vault.yml.example inventories/production/group_vars/hoddmimir_hosts/vault.yml
+make production-secrets
 ```
 
 The ignored `.secrets/deployment.env` supplies `DEPLOYMENT_HOST` and `DEPLOYMENT_USER`. `DEPLOYMENT_FQDN` is optional; for DNS-based hosts the generator uses `DEPLOYMENT_HOST`, while IP-based hosts receive the safe local default `hoddmimir.localdomain` unless an explicit FQDN is provided.
 
-Replace every application/database/key-material placeholder with a separate `openssl rand -hex 32` value and set `hoddmimir_matrix_webhook_url` to the secret HTTPS webhook URL. The encryption keyring starts with `format: 1`, `revision: 1`, one ID matching `[a-z0-9][a-z0-9_-]{0,31}`, and the same ID in `primaryKeyId`. Then encrypt the file:
+The production initializer generates a set that is separate from the local
+development secrets. It creates distinct application and MariaDB secrets, a
+structured revision-1 encryption keyring, a local administrator password and
+an Ansible Vault password below the ignored `.secrets/production` directory.
+It then writes the ignored `vault.yml` directly in encrypted form. All secret
+files are mode `0600`; existing valid material is verified and retained, while
+invalid, mismatching or symlinked state fails closed without being replaced.
+The command never prints secret values.
 
-```sh
-ansible-vault encrypt inventories/production/group_vars/hoddmimir_hosts/vault.yml
-```
+Matrix delivery remains disabled by default. The encrypted Vault contains only
+`https://matrix.invalid/disabled` until a real webhook is configured as a
+separate explicit maintenance action. The local administrator password is not
+part of the Ansible Vault and is intended only for the secret-file based
+`hoddmimir:user:create-admin` bootstrap command.
+
+The Make targets use `.secrets/production/ansible_vault_password`
+non-interactively when it exists. Set `ANSIBLE_VAULT_ARGS` explicitly only
+when an operator intentionally uses a different Vault identity.
 
 Set the application image references in `inventories/production/group_vars/hoddmimir_hosts/main.yml` to immutable Hoddmímir release digests (`image@sha256:...`). The checked-in development tags intentionally fail the production pinning assertion. Authenticate Docker to a private registry before deployment without putting registry credentials in this repository.
+
+The manual publish option of the existing `Hoddmímir CI` workflow publishes
+the worker and web runtime images for both `linux/amd64` and `linux/arm64`.
+The operator selects the GitHub Actions source ref and supplies an OCI tag plus
+the confirmation text `PUBLISH_MULTIARCH_IMAGES`; ordinary CI never publishes.
+The workflow uses the job-scoped `GITHUB_TOKEN` with `packages: write` only
+after the full manual gate set succeeds, records the resolved source commit,
+and uploads `published-images.json`. Copy only its immutable
+`@sha256:` worker and web references into the production variables; the
+human-readable tag is not a deployment pin. The collector and backup worker
+use the same worker image digest with different commands and credentials.
+Both builds carry the repository source label so GHCR links them to this
+repository. Before it emits deployment references, the workflow logs out of
+GHCR and resolves both manifest digests anonymously. This proof is
+release-blocking because the deployment host intentionally has no registry
+token. GitHub creates a new personal container package as private by default;
+if the first publication stops at this proof, its owner must make both linked
+packages public once in GitHub's package settings and rerun the same manual
+workflow. Package visibility is never changed with a local or long-lived PAT.
 
 ## Run explicitly
 

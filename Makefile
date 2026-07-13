@@ -1,12 +1,14 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
 ANSIBLE_EXAMPLE_INVENTORY := inventories/production/hosts.example.yml
 ANSIBLE_PRODUCTION_INVENTORY := inventories/production/hosts.yml
-ANSIBLE_VAULT_ARGS ?= --ask-vault-pass
+ANSIBLE_VAULT_PASSWORD_FILE ?= $(CURDIR)/.secrets/production/ansible_vault_password
+ANSIBLE_LOCAL_VAULT_ARGS = $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),)
+ANSIBLE_VAULT_ARGS ?= $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),--ask-vault-pass)
 INFECTION_THREADS ?= max
 REUSE_MUTATION_COVERAGE ?= 0
 MUTATION_IMAGE := hoddmimir-backend-mutation:local
@@ -19,6 +21,12 @@ help: ## Show available commands
 
 secrets: ## Generate local development secrets when missing
 	./scripts/init-dev-secrets.sh
+
+production-secrets: ## Generate distinct local production secrets and encrypted Ansible Vault
+	./scripts/init-production-secrets.sh
+
+production-secrets-test: ## Verify safe, idempotent production secret initialization
+	sh scripts/tests/test-init-production-secrets.sh
 
 config: secrets ## Validate the Docker Compose model
 	docker compose config --quiet
@@ -117,12 +125,12 @@ lint: ## Lint the Ansible deployment files
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-lint .
 
 syntax: ## Check all Ansible playbooks without remote access
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_EXAMPLE_INVENTORY) --list >/dev/null
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_EXAMPLE_INVENTORY) --list $(ANSIBLE_LOCAL_VAULT_ARGS) >/dev/null
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
 
-deployment-test: ## Run isolated deployment contract and rollback tests
+deployment-test: production-secrets-test ## Run isolated deployment contract and rollback tests
 	cd $(ANSIBLE_DIRECTORY) && python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ping: inventory ## Test Ansible connectivity to the configured deployment host

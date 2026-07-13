@@ -202,9 +202,10 @@ class SupplyChainGateContractTest(unittest.TestCase):
 
     def test_workflow_runs_build_before_scan_and_never_publishes_or_deploys(self) -> None:
         workflow = read(".github/workflows/ci.yml")
+        ordinary_workflow = workflow.split("\n  publish-images:\n", maxsplit=1)[0]
         relevant = "\n".join(
             (
-                workflow,
+                ordinary_workflow,
                 read("Makefile"),
                 read("scripts/ci/build-container-images.sh"),
                 read("scripts/ci/scan-container-images.sh"),
@@ -237,6 +238,114 @@ class SupplyChainGateContractTest(unittest.TestCase):
 
         self.assertLessEqual(len(entries), 9)
         self.assertEqual(expected, entries)
+
+
+class ImagePublicationWorkflowContractTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workflow = read(".github/workflows/ci.yml")
+        self.publish_job = self.workflow.split("\n  publish-images:\n", maxsplit=1)[1]
+
+    def test_publication_is_manual_explicit_and_has_minimal_write_permission(self) -> None:
+        self.assertIn("workflow_dispatch:", self.workflow)
+        self.assertIn("type: boolean", self.workflow)
+        self.assertIn('image_tag:\n        description:', self.workflow)
+        self.assertIn('required: false\n        default: ""\n        type: string', self.workflow)
+        self.assertIn(
+            "if: github.event_name == 'workflow_dispatch' && inputs.publish_images == true",
+            self.publish_job,
+        )
+        self.assertIn("contents: read", self.publish_job)
+        self.assertIn("packages: write", self.publish_job)
+        self.assertNotIn("id-token: write", self.publish_job)
+        self.assertIn(
+            'test "$CONFIRMATION" = "PUBLISH_MULTIARCH_IMAGES"',
+            self.publish_job,
+        )
+        self.assertIn("persist-credentials: false", self.publish_job)
+        self.assertIn(
+            "cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.publish_images) }}",
+            self.workflow,
+        )
+        for required_gate in (
+            "- ansible",
+            "- containers",
+            "- mutation-full",
+            "- proxmox-schema-policy",
+        ):
+            self.assertIn(required_gate, self.publish_job)
+
+    def test_actions_and_build_infrastructure_are_immutable(self) -> None:
+        for action_ref in re.findall(r"uses:\s*[^@\s]+@([^\s]+)", self.publish_job):
+            self.assertRegex(action_ref, r"^[0-9a-f]{40}$")
+        self.assertRegex(self.publish_job, r"version: v\d+\.\d+\.\d+")
+        self.assertRegex(
+            self.publish_job,
+            r"image=moby/buildkit:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
+        )
+        self.assertRegex(
+            self.publish_job,
+            r"image: tonistiigi/binfmt:[^\s@]+@sha256:[0-9a-f]{64}",
+        )
+
+    def test_exact_worker_and_web_multiarch_manifests_are_published(self) -> None:
+        self.assertEqual(2, self.publish_job.count("docker buildx build"))
+        self.assertEqual(2, self.publish_job.count("--platform linux/amd64,linux/arm64"))
+        self.assertEqual(2, self.publish_job.count("--push"))
+        self.assertIn("--target worker", self.publish_job)
+        self.assertIn("--file docker/php/Dockerfile", self.publish_job)
+        self.assertIn("--target web", self.publish_job)
+        self.assertIn("--file docker/web/Dockerfile", self.publish_job)
+        self.assertNotIn("docker/mariadb/Dockerfile", self.publish_job)
+        self.assertIn("--provenance=mode=max", self.publish_job)
+        self.assertIn("--sbom=true", self.publish_job)
+
+    def test_manifest_digests_are_validated_and_exported_for_deployment(self) -> None:
+        self.assertEqual(
+            2,
+            self.publish_job.count(
+                'select(test("^sha256:[0-9a-f]{64}$"))'
+            ),
+        )
+        self.assertIn("artifacts/published-images.json", self.publish_job)
+        self.assertIn("workerReference", self.publish_job)
+        self.assertIn("webReference", self.publish_job)
+        self.assertIn("artifact-digest", self.publish_job)
+        self.assertIn("Use only the `@sha256:` references for deployment.", self.publish_job)
+
+    def test_anonymous_digest_pull_is_proved_before_references_are_exported(self) -> None:
+        logout = self.publish_job.index(
+            "Remove registry credentials before public pull proof"
+        )
+        proof = self.publish_job.index("Prove both manifests are anonymously pullable")
+        export = self.publish_job.index("Write immutable deployment references")
+
+        self.assertLess(logout, proof)
+        self.assertLess(proof, export)
+        self.assertEqual(
+            2,
+            self.publish_job.count("docker buildx imagetools inspect"),
+        )
+        self.assertEqual(
+            2,
+            self.publish_job.count(
+                'DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect'
+            ),
+        )
+        self.assertIn(
+            "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY",
+            self.publish_job,
+        )
+
+    def test_untrusted_dispatch_inputs_are_not_interpolated_into_shell_programs(self) -> None:
+        run_blocks = re.findall(
+            r"(?ms)^\s+run: \|\n(.*?)(?=^\s{6}- name:|\Z)",
+            self.publish_job,
+        )
+        self.assertGreater(len(run_blocks), 0)
+        for run_block in run_blocks:
+            self.assertNotIn("${{ inputs.", run_block)
+        self.assertIn("REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}", self.publish_job)
+        self.assertIn("printf 'source_ref=%s\\n' \"$GITHUB_REF\"", self.publish_job)
 
 
 if __name__ == "__main__":

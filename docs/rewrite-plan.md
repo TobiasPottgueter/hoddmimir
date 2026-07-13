@@ -642,8 +642,7 @@ Abnahme: Die vier Funktionen aus Abschnitt 1.1 sind vollständig bedienbar; säm
 
 ### Phase 5 – Backup Worker und UPID-Monitoring
 
-Status: **lokal implementiert und abgenommen; reale PVE-Labtests bleiben Phase
-7.** Der lokale Abschluss und der At-most-once-Vertrag stehen in
+Status: **lokal implementiert und abgenommen; reale PVE-Labtests bleiben Phase 7.** Der lokale Abschluss und der At-most-once-Vertrag stehen in
 [`phase-5-backup-worker-plan.md`](phase-5-backup-worker-plan.md).
 
 - Claim, Start, UPID-Persistierung, Polling, Log, Cancel und Recovery.
@@ -672,7 +671,11 @@ Abnahme: alle kritischen Bedienabläufe sind component- und end-to-end-getestet.
 
 ### Phase 7 – Neueinrichtung und produktionsnaher Parallelbetrieb
 
-Status: **nicht begonnen.**
+Status: **begonnen, nicht abgeschlossen.** Der reale Host-Bootstrap und der
+fortschreibbare Evidenzstand stehen in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md). Release-Images,
+Anwendungsdeploy, neue Proxmox-Konfiguration, Live-Matrix, Shadow-Zyklus und
+isolierte Labbackups bleiben bis zu ihrem tatsächlichen Nachweis offen.
 
 - leere V2-Datenbank installieren.
 - produktionsnahes Deployment über die vorbereitete Ansible-Automation

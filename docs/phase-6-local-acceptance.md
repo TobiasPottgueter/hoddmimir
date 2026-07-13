@@ -18,16 +18,18 @@ Ergebnisse bewusst von den extern noch ausstehenden Prüfungen.
 - Arbeitsstandsbezeichnung: `phase6-local-2026-07-13`;
 - Ausführungsplattform: Docker Desktop `linux/arm64` auf der lokalen
   Entwicklungsmaschine; die Multiarch-Gates bauen zusätzlich `linux/amd64`;
-- Veröffentlichungsstand: lokaler Arbeitsbaum, noch nicht committed oder
-  gepusht.
+- unveränderliche Git-Identität des abgenommenen Arbeitsstands:
+  `d88d38a7af89565e7d2aa0a5440ea87c3c804fd1`;
+- Veröffentlichungsstand: als Commit `d88d38a` auf
+  `origin/codex/policies-shadow-mode` veröffentlicht; lokaler Branch und
+  Upstream standen bei der Aktualisierung dieses Nachweises bei `0/0`.
 
-Der Nachweis gehört zum vollständigen Arbeitsbaum, der dieses Dokument
-enthält. Der uncommittete Arbeitsstand ist durch Branch und Basis-Commit nicht
-reproduzierbar identifiziert; erst ein späterer Commit kann ihn unveränderlich
-in Git fixieren. Eine Änderung an produktivem Source, Dependencies,
-Containern, Migrationen oder Tests entwertet die betroffenen Nachweise und
-verlangt deren Wiederholung. Dieses Dokument behauptet keinen bereits
-erfolgten Commit oder Push.
+Der Nachweis gehört zum vollständigen Implementierungs- und Teststand, der
+durch `d88d38a` unveränderlich in Git fixiert ist. Commit und Push erfolgten
+nach den dokumentierten lokalen Prüfläufen ohne eine weitere Änderung an
+deren Source-, Dependency-, Container-, Migrations- oder Testeingaben. Jede
+spätere Änderung an einem solchen Eingang entwertet die jeweils betroffenen
+Nachweise und verlangt deren Wiederholung auf einem neuen Kandidaten.
 
 ## Geltungsbereich und Grenzen
 
@@ -41,29 +43,31 @@ kein Beleg für:
 - einen gestarteten `vzdump`, ein reales QEMU-/LXC-Backup oder Restore;
 - die Freigabe oder Aktivierung des Backup Workers im produktiven Betrieb.
 
-**Phase 7 wurde nicht begonnen.** Live-PVE-/PBS-Matrix, produktionsnahes
-Deployment und reale Backup-/Restore-Nachweise bleiben ausdrücklich Phase 7
-beziehungsweise Phase 8 vorbehalten.
+Zum Zeitpunkt dieser lokalen Abnahme war **Phase 7 noch nicht begonnen**.
+Ihr späterer, weiterhin unvollständiger Live-Fortschritt wird getrennt im
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md) dokumentiert.
+Live-PVE-/PBS-Matrix, produktionsnahes Deployment und reale Backup- sowie
+Restore-Nachweise werden durch diesen Phase-6-Nachweis weiterhin nicht belegt.
 
 ## Ergebnisübersicht
 
-| Prüfbereich | Aktueller Nachweis | Status für den Abschluss |
-| --- | --- | --- |
-| PHP Coverage | Domain, Application und eigene Proxmox-Kompatibilitätsschicht jeweils 100 % Line und Branch; global 95,56 % Line und 91,87 % Branch | belegt |
-| Backend-Test | 2.277 Tests, 11.088 Assertions; PHPStan 1.081/1.081; keine Composer-/PSR-4-Warnung | belegt |
-| MariaDB-Integration | normaler Integrationslauf 228 Tests/5.230 Assertions; Coverage-Owner-Lauf 395 Tests/5.723 Assertions gegen reale MariaDB | belegt |
-| Frontend Unit/Component | 61 Testdateien, 286 Tests; 97,28 % Statements, 93,49 % Branches, 93,79 % Functions und 97,64 % Lines | belegt |
-| Browser-E2E | 19 von 19 Tests auf Desktop- und Mobile-Chromium bestanden | belegt |
-| Proxmox-API-Schema-Drift | 20 bestandene Tests | belegt |
-| Deployment-Automation | 65 bestandene Tests | belegt |
-| Multiarch-Container | 6 Produktionsimages: Worker, Web und MariaDB für `linux/amd64` und `linux/arm64` | belegt |
-| Container-Sicherheit | 0 HIGH/CRITICAL-Funde in allen 6 Images | belegt |
-| SBOM | 6 valide CycloneDX-1.6-SBOMs | belegt |
-| Secret Scan | 9 Commits sowie Snapshot aller 1.535 vorhandenen, nicht ignorierten Arbeitsbaumdateien ohne Fund | belegt |
-| Mutation | Critical 90,38 %, Global 80,34 %, jeweils 100 % Mutation-Code-Coverage und 0 Timeouts | belegt |
-| Finaler Backend-Test | vollständiger Backend- und Coverage-Gate-Lauf auf dem dokumentierten Arbeitsstand | belegt |
-| Vier-Service-Smoke | 27 Migrationen; MariaDB, Collector, Backup Worker und WebApp gesund; API bereit; Backupausführung deaktiviert | belegt |
-| Visuelle Desktop-/Mobile-Abnahme | korrigierten QA-Build auf 1440 × 900 und 390 × 844 geprüft; keine offenen Findings | belegt |
+| Prüfbereich                      | Aktueller Nachweis                                                                                                                  | Status für den Abschluss |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| PHP Coverage                     | Domain, Application und eigene Proxmox-Kompatibilitätsschicht jeweils 100 % Line und Branch; global 95,56 % Line und 91,87 % Branch | belegt                   |
+| Backend-Test                     | 2.277 Tests, 11.088 Assertions; PHPStan 1.081/1.081; keine Composer-/PSR-4-Warnung                                                  | belegt                   |
+| MariaDB-Integration              | normaler Integrationslauf 228 Tests/5.230 Assertions; Coverage-Owner-Lauf 395 Tests/5.723 Assertions gegen reale MariaDB            | belegt                   |
+| Frontend Unit/Component          | 61 Testdateien, 286 Tests; 97,28 % Statements, 93,49 % Branches, 93,79 % Functions und 97,64 % Lines                                | belegt                   |
+| Browser-E2E                      | 19 von 19 Tests auf Desktop- und Mobile-Chromium bestanden                                                                          | belegt                   |
+| Proxmox-API-Schema-Drift         | 20 bestandene Tests                                                                                                                 | belegt                   |
+| Deployment-Automation            | 65 bestandene Tests                                                                                                                 | belegt                   |
+| Multiarch-Container              | 6 Produktionsimages: Worker, Web und MariaDB für `linux/amd64` und `linux/arm64`                                                    | belegt                   |
+| Container-Sicherheit             | 0 HIGH/CRITICAL-Funde in allen 6 Images                                                                                             | belegt                   |
+| SBOM                             | 6 valide CycloneDX-1.6-SBOMs                                                                                                        | belegt                   |
+| Secret Scan                      | aktuell 10 Commits sowie der damalige Snapshot aller 1.535 vorhandenen, nicht ignorierten Arbeitsbaumdateien ohne Fund              | belegt                   |
+| Mutation                         | Critical 90,38 %, Global 80,34 %, jeweils 100 % Mutation-Code-Coverage und 0 Timeouts                                               | belegt                   |
+| Finaler Backend-Test             | vollständiger Backend- und Coverage-Gate-Lauf auf dem dokumentierten Arbeitsstand                                                   | belegt                   |
+| Vier-Service-Smoke               | 27 Migrationen; MariaDB, Collector, Backup Worker und WebApp gesund; API bereit; Backupausführung deaktiviert                       | belegt                   |
+| Visuelle Desktop-/Mobile-Abnahme | korrigierten QA-Build auf 1440 × 900 und 390 × 844 geprüft; keine offenen Findings                                                  | belegt                   |
 
 ## Belegte lokale Quality Gates
 
@@ -153,12 +157,13 @@ CycloneDX-1.6-SBOM erzeugt, insgesamt sechs SBOMs. Die Artefakte liegen im von
 Git ignorierten `artifacts/`-Verzeichnis und sind kein Release oder Registry-
 Push.
 
-Der reguläre Secret Scan prüfte den vollständigen vorhandenen Git-Stand mit
-neun Commits und meldete keinen Fund. Weil der Abschlussarbeitsstand noch nicht
-committed ist, wurde zusätzlich ein Snapshot aller 1.535 vorhandenen Dateien
+Ein nach Commit und Push frisch wiederholter regulärer Secret Scan prüfte den
+vollständigen Git-Stand mit zehn Commits und meldete keinen Fund. Vor dem
+Commit wurde zusätzlich ein Snapshot aller damaligen 1.535 vorhandenen Dateien
 aus `git ls-files --cached --others --exclude-standard` mit dem
-digest-gepinnten Gitleaks 8.24.3 im `dir`-Modus geprüft. Der Scan umfasste rund
-7,20 MB und meldete ebenfalls keinen Fund. Seine temporäre Allowlist akzeptierte
+digest-gepinnten Gitleaks 8.24.3 im `dir`-Modus geprüft. Dieser frühere Scan
+umfasste rund 7,20 MB und meldete ebenfalls keinen Fund. Seine temporäre
+Allowlist akzeptierte
 nur die exakten synthetischen `AUTH-SENTINEL`-/`NONCE-SENTINEL`-Werte des
 Redaction-Tests und die literalen `REPLACE_WITH_*`-Werte des Beispiel-Vaults;
 ignorierte `.secrets/`, Dependencies und generierte Artefakte waren nicht Teil
@@ -226,4 +231,6 @@ Produktions-Containerstart und die Multiarch-/Supply-Chain-Eigenschaften des
 aktuellen Arbeitsstands. Damit ist Phase 6 lokal abgenommen.
 
 Es wird weder eine Live-Systemabnahme noch ein Deploy- oder Backup-Erfolg
-behauptet. Phase 7 bleibt strikt nicht begonnen.
+behauptet. Der nach diesem lokalen Abschluss begonnene Phase-7-Fortschritt
+steht ausschließlich im getrennten
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).

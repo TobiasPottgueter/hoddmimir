@@ -60,9 +60,12 @@ Endpoint-Änderung gehören zum getesteten Phase-6-Vertrag.
 Frontend-Unit-/Component-Tests, Backend-/MariaDB-Tests, OpenAPI-Driftprüfung
 und die lokalen Browserflüsse bilden die Abnahmegrundlage. Der vollständige
 Gate-Satz und die visuelle Prüfung des gestarteten Stacks werden auf dem
-jeweiligen dokumentierten Abschlussarbeitsstand ausgeführt. Die lokale QA-Evidenz ist kein
-Nachweis für reale PVE-/PBS-Versionen oder ein Deployment; Phase 7 wurde nicht
-begonnen und Backupausführung bleibt standardmäßig deaktiviert.
+jeweiligen dokumentierten Abschlussarbeitsstand ausgeführt. Die lokale
+QA-Evidenz ist kein Nachweis für reale PVE-/PBS-Versionen oder ein Deployment;
+zum Zeitpunkt dieses lokalen Abschlusses war Phase 7 noch nicht begonnen und
+Backupausführung bleibt standardmäßig deaktiviert. Ihr späterer
+Live-Fortschritt steht in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
 
 ## Sicherheits- und Datenvertrag
 
