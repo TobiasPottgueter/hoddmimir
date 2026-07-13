@@ -14,7 +14,7 @@
     "require-dev": {
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^12.5",
-        "symfony/browser-kit": "^7.4",
+        "symfony/browser-kit": "^8.1",
         "symfony/css-selector": "^7.4"
     },
     "conflict": {
