@@ -125,7 +125,8 @@ run_case() {
         assert_contains "$output" "$expected_message"
     fi
 
-    assert_call_count "$call_log" ' --abort-on-container-exit --exit-code-from backend-tests backend-tests' "$expected_up_calls"
+    assert_call_count "$call_log" ' up --no-deps --abort-on-container-exit --exit-code-from backend-tests backend-tests$' "$expected_up_calls"
+    assert_call_count "$call_log" ' up --abort-on-container-exit --exit-code-from backend-tests backend-tests$' 0
     assert_call_count "$call_log" ' up --detach --wait mariadb-integration$' "$expected_up_calls"
     assert_call_count "$call_log" ' exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap$' "$expected_up_calls"
     assert_call_count "$call_log" ' down --volumes --remove-orphans' 1

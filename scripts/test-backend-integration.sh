@@ -134,7 +134,7 @@ if [ "$COVERAGE_ENABLED" -eq 0 ]; then
 fi
 compose up --detach --wait mariadb-integration
 compose exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap
-compose up --abort-on-container-exit --exit-code-from backend-tests backend-tests
+compose up --no-deps --abort-on-container-exit --exit-code-from backend-tests backend-tests
 
 if [ "$COVERAGE_ENABLED" -eq 1 ]; then
     for artifact in "$COVERAGE_PHP_OUTPUT" "$COVERAGE_CLOVER_OUTPUT"; do
