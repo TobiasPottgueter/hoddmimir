@@ -29,6 +29,14 @@ docker run --rm --volume "$secret_volume:/secrets" alpine:3.23 sh -eu -c '
     mkfifo /secrets/fifo
     ln -s app_secret /secrets/symlink
     chmod 0600 /secrets/app_secret /secrets/encryption_key /secrets/database_password /secrets/matrix_webhook_url /secrets/empty /secrets/oversized
+    chown 12345:12345 /secrets/app_secret /secrets/encryption_key /secrets/database_password /secrets/matrix_webhook_url
+'
+
+docker run --rm --volume "$secret_volume:/secrets:ro" alpine:3.23 sh -eu -c '
+    for secret in app_secret encryption_key database_password matrix_webhook_url; do
+        test "$(stat -c %a "/secrets/$secret")" = 600
+        test "$(stat -c %u "/secrets/$secret")" = 12345
+    done
 '
 
 run_hardened() {
@@ -40,6 +48,7 @@ run_hardened() {
         --read-only \
         --cap-drop ALL \
         --cap-add CHOWN \
+        --cap-add DAC_READ_SEARCH \
         --cap-add SETGID \
         --cap-add SETUID \
         --security-opt no-new-privileges:true \
@@ -82,6 +91,7 @@ docker run --rm \
     --read-only \
     --cap-drop ALL \
     --cap-add CHOWN \
+    --cap-add DAC_READ_SEARCH \
     --cap-add SETGID \
     --cap-add SETUID \
     --security-opt no-new-privileges:true \
@@ -95,6 +105,7 @@ docker run --rm \
     "$worker_image" \
     sh -eu -c '
         test "$(id -u)" = 10001
+        test "$(awk "/^CapEff:/ { print \$2 }" /proc/self/status)" = 0000000000000000
         test -r "$APP_SECRET_FILE"
         test -r "$DATABASE_PASSWORD_FILE"
         test ! -e /run/hoddmimir-secrets/encryption_key
@@ -118,6 +129,7 @@ docker run --detach --name "$health_container" \
     --read-only \
     --cap-drop ALL \
     --cap-add CHOWN \
+    --cap-add DAC_READ_SEARCH \
     --cap-add SETGID \
     --cap-add SETUID \
     --security-opt no-new-privileges:true \
@@ -156,11 +168,22 @@ expect_failure() {
 
 expect_failure 'unsupported file-backed variable' \
     docker run --rm \
-        --cap-drop ALL --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+        --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add SETGID --cap-add SETUID \
         --tmpfs /run/hoddmimir-secrets:mode=0700 \
         --mount "type=volume,source=$secret_volume,target=/run/secrets,readonly" \
         --env HODDMIMIR_RUNTIME_USER=app \
         --env UNTRUSTED_FILE=/run/secrets/app_secret \
+        --entrypoint /usr/local/bin/hoddmimir-app-entrypoint "$worker_image" true
+expect_failure 'APP_SECRET_FILE cannot be measured' \
+    docker run --rm \
+        --read-only \
+        --cap-drop ALL --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+        --security-opt no-new-privileges:true \
+        --tmpfs /tmp:mode=1777 \
+        --tmpfs /run/hoddmimir-secrets:mode=0700 \
+        --mount "type=volume,source=$secret_volume,target=/run/secrets,readonly" \
+        --env HODDMIMIR_RUNTIME_USER=app \
+        --env APP_SECRET_FILE=/run/secrets/app_secret \
         --entrypoint /usr/local/bin/hoddmimir-app-entrypoint "$worker_image" true
 expect_failure 'must name one direct mounted secret' \
     run_hardened "$worker_image" app /run/secrets/subdirectory/value true

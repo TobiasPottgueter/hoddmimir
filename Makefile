@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
@@ -95,7 +95,10 @@ mutation: mutation-image ## Enforce both mutation gates with one reusable covera
 frontend-test: ## Build and run the frontend validation target
 	docker build --target frontend-test --file docker/web/Dockerfile .
 
-e2e: ## Run isolated MariaDB-seeded Playwright browser flows
+e2e-wrapper-test: ## Verify E2E diagnostics, cleanup, and exit semantics without Docker
+	sh scripts/tests/test-e2e-cleanup.sh
+
+e2e: e2e-wrapper-test ## Run isolated MariaDB-seeded Playwright browser flows
 	./scripts/test-e2e.sh
 
 api-schema-drift-test: ## Test the official Proxmox schema drift policy offline

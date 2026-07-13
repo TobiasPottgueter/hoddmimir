@@ -600,7 +600,7 @@ class ComposeContractTest(unittest.TestCase):
                 self.assertEqual(128, service["pids_limit"])
                 self.assertTrue(service["read_only"])
                 self.assertEqual(["ALL"], service["cap_drop"])
-                self.assertEqual(["CHOWN", "SETGID", "SETUID"], service["cap_add"])
+                self.assertEqual(["CHOWN", "DAC_READ_SEARCH", "SETGID", "SETUID"], service["cap_add"])
                 self.assertEqual(["no-new-privileges:true"], service["security_opt"])
                 self.assertIn("/run/hoddmimir-secrets:mode=0700", service["tmpfs"])
 
@@ -644,7 +644,7 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("/run/secrets/mariadb_migration_password", migration["environment"]["DATABASE_PASSWORD_FILE"])
             self.assertTrue(migration["read_only"])
             self.assertEqual(["ALL"], migration["cap_drop"])
-            self.assertEqual(["CHOWN", "SETGID", "SETUID"], migration["cap_add"])
+            self.assertEqual(["CHOWN", "DAC_READ_SEARCH", "SETGID", "SETUID"], migration["cap_add"])
             self.assertIn("/run/hoddmimir-secrets:mode=0700", migration["tmpfs"])
             self.assertEqual(1, migration["cpus"])
             self.assertEqual("536870912", str(migration["mem_limit"]))
