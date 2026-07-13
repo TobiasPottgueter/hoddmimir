@@ -131,6 +131,7 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 "pkgconf",
                 "re2c",
                 "linux-headers",
+                "su-exec",
             },
             "docker/web/Dockerfile": {
                 "c-ares",
@@ -146,6 +147,7 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 "make",
                 "pkgconf",
                 "re2c",
+                "su-exec",
             },
         }
 

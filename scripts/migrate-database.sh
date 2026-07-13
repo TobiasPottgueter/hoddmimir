@@ -14,6 +14,8 @@ cd "$repository_root"
 docker compose --file "$base_compose" config --quiet
 docker compose --file "$base_compose" --file "$migration_compose" config --quiet
 docker compose --file "$base_compose" up --detach --wait mariadb
+docker compose --file "$base_compose" \
+    exec -T --user 0 mariadb /usr/local/bin/hoddmimir-database-user-bootstrap
 docker compose \
     --file "$base_compose" \
     --file "$migration_compose" \

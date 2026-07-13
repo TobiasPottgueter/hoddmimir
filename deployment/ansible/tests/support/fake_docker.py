@@ -30,6 +30,11 @@ def main() -> int:
     operation = operation_arguments[0]
     if operation == "run" and "doctrine:migrations:up-to-date" in operation_arguments:
         operation = "schema-check"
+    elif operation == "exec" and operation_arguments[-2:] == [
+        "mariadb",
+        "/usr/local/bin/hoddmimir-database-user-bootstrap",
+    ]:
+        operation = "bootstrap"
     counts = state.setdefault("counts", {})
     counts[operation] = counts.get(operation, 0) + 1
     call_number = counts[operation]
@@ -61,6 +66,16 @@ def main() -> int:
     if operation == "up":
         if operation_arguments[-1:] == ["mariadb"]:
             state["running_services"] = sorted(set(state.get("running_services", [])) | {"mariadb"})
+        elif "--force-recreate" in operation_arguments:
+            application_services = operation_arguments[-3:]
+            if application_services != ["data-worker", "backup-worker", "webapp"]:
+                return 2
+            state["running_services"] = sorted(
+                set(state.get("running_services", [])) | set(application_services),
+            )
+            generations = state.setdefault("service_generations", {})
+            for service in application_services:
+                generations[service] = generations.get(service, 0) + 1
         else:
             state["running_services"] = state["expected_services"]
         state["active_compose_hash"] = compose_hash.hexdigest()
@@ -75,7 +90,7 @@ def main() -> int:
         if state.get("schema_check_returncode") is not None:
             return int(state["schema_check_returncode"])
         return 0 if state.get("schema_up_to_date", False) else 1
-    elif operation not in {"config", "pull", "run"}:
+    elif operation not in {"bootstrap", "config", "pull", "run"}:
         state_path.write_text(json.dumps(state), encoding="utf-8")
         return 2
 

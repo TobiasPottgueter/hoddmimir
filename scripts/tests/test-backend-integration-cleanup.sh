@@ -126,6 +126,8 @@ run_case() {
     fi
 
     assert_call_count "$call_log" ' --abort-on-container-exit --exit-code-from backend-tests backend-tests' "$expected_up_calls"
+    assert_call_count "$call_log" ' up --detach --wait mariadb-integration$' "$expected_up_calls"
+    assert_call_count "$call_log" ' exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap$' "$expected_up_calls"
     assert_call_count "$call_log" ' down --volumes --remove-orphans' 1
 
     expected_diagnostic_calls=0
@@ -154,9 +156,9 @@ run_case() {
 
     if [ "$coverage_mode" -ne 0 ]; then
         assert_contains "$(cat "$call_log")" 'compose.integration-coverage.yaml'
-        assert_call_count "$call_log" ' up --build --abort-on-container-exit ' 0
+        assert_call_count "$call_log" ' build mariadb-integration backend-tests$' 0
     else
-        assert_call_count "$call_log" ' up --build --abort-on-container-exit ' "$expected_up_calls"
+        assert_call_count "$call_log" ' build mariadb-integration backend-tests$' "$expected_up_calls"
     fi
 
     if [ "$coverage_symlink_mode" -eq 2 ]; then

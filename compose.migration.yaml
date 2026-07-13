@@ -24,11 +24,16 @@ services:
     read_only: true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp:mode=1777
       - /app/var:uid=10001,gid=10001,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
     init: true
     restart: "no"
     cpus: ${APP_CPU_LIMIT:-1.0}

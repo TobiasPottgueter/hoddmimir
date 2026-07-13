@@ -1,0 +1,81 @@
+---
+name: hoddmimir-mariadb-bootstrap-test
+
+x-database: &database
+  build:
+    context: ${HODDMIMIR_REPOSITORY_ROOT}
+    dockerfile: docker/mariadb/Dockerfile
+  environment:
+    MARIADB_DATABASE: hoddmimir_bootstrap_test
+    MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_actual_root_password
+    MARIADB_ROOT_HOST: localhost
+    TZ: UTC
+  tmpfs:
+    - /var/lib/mysql:rw,nosuid,nodev,noexec,size=256m
+  healthcheck:
+    test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+    interval: 1s
+    timeout: 5s
+    retries: 30
+    start_period: 3s
+  restart: "no"
+
+services:
+  mariadb-valid:
+    <<: *database
+    secrets:
+      - mariadb_actual_root_password
+      - mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+
+  mariadb-missing-secret:
+    <<: *database
+    secrets:
+      - mariadb_actual_root_password
+      - mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+
+  mariadb-invalid-secret:
+    <<: *database
+    secrets:
+      - mariadb_actual_root_password
+      - source: mariadb_invalid_root_password
+        target: mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+
+  mariadb-wrong-root:
+    <<: *database
+    secrets:
+      - mariadb_actual_root_password
+      - source: mariadb_wrong_root_password
+        target: mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+
+secrets:
+  mariadb_actual_root_password:
+    file: ${HODDMIMIR_ACTUAL_ROOT_SECRET_FILE}
+  mariadb_root_password:
+    file: ${HODDMIMIR_ACTUAL_ROOT_SECRET_FILE}
+  mariadb_invalid_root_password:
+    file: ${HODDMIMIR_INVALID_ROOT_SECRET_FILE}
+  mariadb_wrong_root_password:
+    file: ${HODDMIMIR_WRONG_ROOT_SECRET_FILE}
+  mariadb_migration_password:
+    file: ${HODDMIMIR_MIGRATION_SECRET_FILE}
+  mariadb_web_password:
+    file: ${HODDMIMIR_WEB_SECRET_FILE}
+  mariadb_collector_password:
+    file: ${HODDMIMIR_COLLECTOR_SECRET_FILE}
+  mariadb_backup_worker_password:
+    file: ${HODDMIMIR_BACKUP_SECRET_FILE}

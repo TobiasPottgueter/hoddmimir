@@ -5,7 +5,16 @@ set -eu
 printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
 
 case " $* " in
-    *' up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests '*|*' up --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
+    *' build mariadb-integration backend-tests '*)
+        exit 0
+        ;;
+    *' up --detach --wait mariadb-integration '*)
+        exit 0
+        ;;
+    *' exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap '*)
+        exit "${FAKE_DOCKER_BOOTSTRAP_STATUS:-0}"
+        ;;
+    *' up --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
         status=${FAKE_DOCKER_UP_STATUS:-0}
 
         if [ "$status" -ne 0 ]; then

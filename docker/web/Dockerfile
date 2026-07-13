@@ -44,6 +44,7 @@ ARG MUSL_DEV_VERSION=1.2.6-r2
 ARG MAKE_VERSION=4.4.1-r4
 ARG PKGCONF_VERSION=2.5.1-r0
 ARG RE2C_VERSION=4.5.1-r0
+ARG SU_EXEC_VERSION=0.3-r0
 
 ENV APP_ENV=prod \
     APP_DEBUG=0 \
@@ -55,6 +56,7 @@ ENV APP_ENV=prod \
 RUN apk add --no-cache \
         "c-ares=${C_ARES_VERSION}" \
         "icu-libs=${ICU_VERSION}" \
+        "su-exec=${SU_EXEC_VERSION}" \
     && apk add --no-cache --virtual .php-ext-build-deps \
         "autoconf=${AUTOCONF_VERSION}" \
         "dpkg-dev=${DPKG_DEV_VERSION}" \
@@ -106,6 +108,8 @@ FROM web-runtime AS web
 
 COPY --from=web-build --chown=www-data:www-data /app /app
 COPY docker/web/Caddyfile /etc/caddy/Caddyfile
+COPY --chmod=0555 docker/common/app-entrypoint.sh /usr/local/bin/hoddmimir-app-entrypoint
+COPY --chmod=0555 docker/common/app-healthcheck.sh /usr/local/bin/hoddmimir-app-healthcheck
 
 RUN setcap -r /usr/local/bin/frankenphp \
     && mkdir -p var /config/caddy /data/caddy \
@@ -119,13 +123,14 @@ RUN setcap -r /usr/local/bin/frankenphp \
     && test ! -e /app/config/services_test.php \
     && test ! -e /app/config/services_e2e.php
 
-USER www-data
+ENV HODDMIMIR_RUNTIME_USER=www-data
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
-    CMD wget --quiet --output-document=- http://127.0.0.1:8080/api/health >/dev/null || exit 1
+    CMD /usr/local/bin/hoddmimir-app-healthcheck wget --quiet --output-document=- http://127.0.0.1:8080/api/health >/dev/null || exit 1
 
+ENTRYPOINT ["/usr/local/bin/hoddmimir-app-entrypoint"]
 CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
 
 # Browser E2E is intentionally isolated from the production image. It needs
@@ -143,17 +148,20 @@ RUN composer install --no-interaction --no-progress --prefer-dist
 COPY backend/ ./
 COPY --from=frontend-build /frontend/dist/ ./public/
 COPY docker/web/Caddyfile /etc/caddy/Caddyfile
+COPY --chmod=0555 docker/common/app-entrypoint.sh /usr/local/bin/hoddmimir-app-entrypoint
+COPY --chmod=0555 docker/common/app-healthcheck.sh /usr/local/bin/hoddmimir-app-healthcheck
 
 RUN composer dump-autoload --classmap-authoritative \
     && setcap -r /usr/local/bin/frankenphp \
     && mkdir -p var /config/caddy /data/caddy \
     && chown -R www-data:www-data /app/var /config /data
 
-USER www-data
+ENV HODDMIMIR_RUNTIME_USER=www-data
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
-    CMD wget --quiet --output-document=- http://127.0.0.1:8080/api/health >/dev/null || exit 1
+    CMD /usr/local/bin/hoddmimir-app-healthcheck wget --quiet --output-document=- http://127.0.0.1:8080/api/health >/dev/null || exit 1
 
+ENTRYPOINT ["/usr/local/bin/hoddmimir-app-entrypoint"]
 CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]

@@ -9,6 +9,7 @@ services:
     environment:
       MARIADB_DATABASE: hoddmimir_test
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_ROOT_HOST: localhost
       TZ: Europe/Berlin
     secrets:
       - mariadb_root_password

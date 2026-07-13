@@ -38,6 +38,11 @@ DATABASE_SECRET_NAMES = (
     "mariadb_collector_password",
     "mariadb_backup_worker_password",
 )
+APPLICATION_SERVICES = (
+    "data-worker",
+    "backup-worker",
+    "webapp",
+)
 MAXIMUM_KEYRING_BYTES = 65536
 KEY_ID_PATTERN = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,31}\Z")
 KEY_MATERIAL_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -324,16 +329,23 @@ class DockerCompose:
     def pull(self, compose_file: Path) -> None:
         self._run((compose_file,), ("pull",))
 
-    def up(self, compose_file: Path) -> None:
+    def force_recreate_applications(
+        self,
+        compose_file: Path,
+        application_services: Sequence[str],
+    ) -> None:
         self._run(
             (compose_file,),
             (
                 "up",
                 "--detach",
+                "--no-deps",
+                "--force-recreate",
                 "--remove-orphans",
                 "--wait",
                 "--wait-timeout",
                 str(self.wait_timeout),
+                *application_services,
             ),
         )
 
@@ -348,6 +360,17 @@ class DockerCompose:
                 str(self.wait_timeout),
                 "mariadb",
             ),
+        )
+
+    def bootstrap_database_users(
+        self,
+        compose_file: Path,
+        database_service: str,
+        bootstrap_script: str,
+    ) -> None:
+        self._run(
+            (compose_file,),
+            ("exec", "-T", "--user", "0", database_service, bootstrap_script),
         )
 
     def migrate(
@@ -528,6 +551,7 @@ def recover_transaction(
     current_compose_file: Path,
     current_secrets_directory: Path,
     expected_services: set[str],
+    application_services: Sequence[str],
     health_url: str,
     previous_compose_exists: bool,
     previous_running_services: set[str],
@@ -558,7 +582,9 @@ def recover_transaction(
             if previous_secrets_directory_mode is not None:
                 os.chmod(current_secrets_directory, previous_secrets_directory_mode)
             if previous_running_services:
-                docker.up(current_compose_file)
+                docker.up_database(current_compose_file)
+                if candidate_services_may_have_started:
+                    docker.force_recreate_applications(current_compose_file, application_services)
                 verify_stack(docker, current_compose_file, expected_services, health_url)
             else:
                 docker.down(current_compose_file)
@@ -690,10 +716,14 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
     current_migration_compose_file = Path(arguments.current_migration_compose_file)
     current_secrets_directory = Path(arguments.current_secrets_directory)
     expected_services = set(arguments.expected_service)
+    application_services = APPLICATION_SERVICES
     docker = DockerCompose(arguments.docker_executable, arguments.wait_timeout)
     managed_files = build_managed_files(arguments)
 
-    if len(expected_services) != 4:
+    if (
+        arguments.database_service != "mariadb"
+        or expected_services != {arguments.database_service, *application_services}
+    ):
         raise DeploymentError("The production service contract must contain exactly four services.")
     for managed_file in managed_files:
         if not managed_file.staged.is_file():
@@ -727,6 +757,11 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
     if not changed_files and not secrets_directory_needs_update:
         try:
             docker.up_database(current_compose_file)
+            docker.bootstrap_database_users(
+                current_compose_file,
+                arguments.database_service,
+                arguments.database_bootstrap_script,
+            )
             migration_changed = docker.migrate(
                 current_compose_file,
                 current_migration_compose_file,
@@ -763,13 +798,18 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
             atomic_install(managed_file.staged, managed_file.current, managed_file.mode)
 
         docker.up_database(current_compose_file)
+        docker.bootstrap_database_users(
+            current_compose_file,
+            arguments.database_service,
+            arguments.database_bootstrap_script,
+        )
         docker.migrate(
             current_compose_file,
             current_migration_compose_file,
             arguments.migration_service,
         )
         candidate_services_may_have_started = True
-        docker.up(current_compose_file)
+        docker.force_recreate_applications(current_compose_file, application_services)
         verify_stack(docker, current_compose_file, expected_services, arguments.health_url)
     except (DeploymentError, OSError) as deployment_error:
         if not mutation_started:
@@ -784,6 +824,7 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
             current_compose_file=current_compose_file,
             current_secrets_directory=current_secrets_directory,
             expected_services=expected_services,
+            application_services=application_services,
             health_url=arguments.health_url,
             previous_compose_exists=previous_compose_exists,
             previous_running_services=previous_running_services,
@@ -795,7 +836,10 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
         )
         recovery_status = "Deployment failed; managed application files were restored."
         if previous_compose_exists and previous_running_services:
-            recovery_status += " The previously running stack was restarted and verified."
+            if candidate_services_may_have_started:
+                recovery_status += " The restored application services were recreated and the stack was verified."
+            else:
+                recovery_status += " The previously running application services remained running and the stack was verified."
         elif previous_compose_exists:
             recovery_status += " The previously stopped stack remains stopped."
         else:
@@ -833,6 +877,8 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--health-url", required=True)
     parser.add_argument("--wait-timeout", type=int, required=True)
     parser.add_argument("--migration-service", required=True)
+    parser.add_argument("--database-service", required=True)
+    parser.add_argument("--database-bootstrap-script", required=True)
     parser.add_argument("--encryption-keyring-revision", required=True)
     parser.add_argument("--transaction-lock-file", required=True)
 

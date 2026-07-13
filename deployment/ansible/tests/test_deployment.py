@@ -517,6 +517,7 @@ class ComposeContractTest(unittest.TestCase):
             self.assertTrue(all("build" not in service for service in services.values()))
             self.assertTrue(all("@sha256:" in service["image"] for service in services.values()))
             self.assertEqual("hoddmimir", services["mariadb"]["environment"]["MARIADB_DATABASE"])
+            self.assertEqual("localhost", services["mariadb"]["environment"]["MARIADB_ROOT_HOST"])
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
             self.assertEqual("hoddmimir_collector", services["data-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_GRID_WIDTH_SECONDS"])
@@ -583,12 +584,12 @@ class ComposeContractTest(unittest.TestCase):
                 services["backup-worker"]["command"],
             )
             self.assertEqual(
-                ["CMD", "php", "bin/console", "hoddmimir:worker:health", "collector"],
+                ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "php", "bin/console", "hoddmimir:worker:health", "collector"],
                 services["data-worker"]["healthcheck"]["test"],
             )
             self.assertEqual("1m15s", services["data-worker"]["stop_grace_period"])
             self.assertEqual(
-                ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "backup"],
+                ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "php", "bin/console", "hoddmimir:worker:readiness", "backup"],
                 services["backup-worker"]["healthcheck"]["test"],
             )
             self.assertNotIn("ports", services["mariadb"])
@@ -599,7 +600,9 @@ class ComposeContractTest(unittest.TestCase):
                 self.assertEqual(128, service["pids_limit"])
                 self.assertTrue(service["read_only"])
                 self.assertEqual(["ALL"], service["cap_drop"])
+                self.assertEqual(["CHOWN", "SETGID", "SETUID"], service["cap_add"])
                 self.assertEqual(["no-new-privileges:true"], service["security_opt"])
+                self.assertIn("/run/hoddmimir-secrets:mode=0700", service["tmpfs"])
 
             mariadb = services["mariadb"]
             self.assertEqual(2, mariadb["cpus"])
@@ -611,6 +614,14 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual(["no-new-privileges:true"], mariadb["security_opt"])
             self.assertIn("/tmp:mode=1777", mariadb["tmpfs"])
             self.assertIn("/run/mysqld:uid=999,gid=999,mode=1770", mariadb["tmpfs"])
+            bootstrap_mount = next(
+                volume
+                for volume in mariadb["volumes"]
+                if volume["target"] == "/usr/local/bin/hoddmimir-database-user-bootstrap"
+            )
+            self.assertEqual("bind", bootstrap_mount["type"])
+            self.assertEqual(str(init_script), bootstrap_mount["source"])
+            self.assertTrue(bootstrap_mount["read_only"])
 
             migration_configured = run([
                 "docker",
@@ -633,6 +644,8 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("/run/secrets/mariadb_migration_password", migration["environment"]["DATABASE_PASSWORD_FILE"])
             self.assertTrue(migration["read_only"])
             self.assertEqual(["ALL"], migration["cap_drop"])
+            self.assertEqual(["CHOWN", "SETGID", "SETUID"], migration["cap_add"])
+            self.assertIn("/run/hoddmimir-secrets:mode=0700", migration["tmpfs"])
             self.assertEqual(1, migration["cpus"])
             self.assertEqual("536870912", str(migration["mem_limit"]))
             self.assertEqual(128, migration["pids_limit"])
@@ -654,6 +667,12 @@ class ComposeContractTest(unittest.TestCase):
                 "hoddmimir_backup_worker",
             ):
                 self.assertIn(f"CREATE USER IF NOT EXISTS '{database_user}'@'%'", users)
+            self.assertIn("protocol=socket", users)
+            self.assertIn("readonly database_socket=/run/mysqld/mysqld.sock", users)
+            self.assertIn('"socket=$database_socket"', users)
+            self.assertNotIn("protocol=tcp", users)
+            self.assertNotIn("MARIADB_ROOT_HOST", users)
+            self.assertNotIn("HODDMIMIR_DATABASE_BOOTSTRAP_HOST", users)
 
 
 class DeploymentStagingIsolationTest(unittest.TestCase):
@@ -723,7 +742,7 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertEqual(0o640, stat.S_IMODE((self.install / "runtime.env").stat().st_mode))
         self.assertEqual(0o555, stat.S_IMODE((self.install / "10-create-app-users.sh").stat().st_mode))
         self.assertEqual(
-            ["config", "config", "pull", "up", "schema-check", "run", "up", "ps"],
+            ["config", "config", "pull", "up", "bootstrap", "schema-check", "run", "up", "ps"],
             self.operations(),
         )
         self.assert_safe_docker_calls()
@@ -750,6 +769,23 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertNotIn(KEY_MATERIAL_NEW, result.stdout + result.stderr)
         self.assert_transaction_lock_available()
 
+    def test_noncanonical_database_service_is_rejected_before_docker_or_mutation(self) -> None:
+        self.install_current("new")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES))
+        environment = os.environ.copy()
+        environment["FAKE_DOCKER_STATE"] = str(self.state_file)
+        with health_server() as health_url:
+            arguments = self.transaction_arguments(health_url)
+            database_argument = arguments.index("--database-service=mariadb")
+            arguments[database_argument] = "--database-service=database"
+            result = run([sys.executable, str(TRANSACTION_SCRIPT), *arguments], env=environment)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual([], self.operations())
+        self.assertIn("exactly four services", result.stderr)
+
     def test_transaction_body_oserror_is_not_misclassified_as_a_lock_failure(self) -> None:
         with self.assertRaises(OSError) as caught:
             with TRANSACTION_MODULE.deployment_lock(self.lock_file):
@@ -767,7 +803,7 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
-        self.assertEqual(["config", "config", "up", "schema-check", "ps"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "ps"], self.operations())
         self.assertIn("without changing application files", result.stderr)
         self.assertIn("existing application services were not stopped", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
@@ -785,7 +821,104 @@ class DeploymentTransactionTest(unittest.TestCase):
             {"changed": False, "status": "verified-unchanged"},
             json.loads(result.stdout),
         )
-        self.assertEqual(["config", "config", "up", "schema-check", "ps"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "ps"], self.operations())
+        self.assertEqual([], self.force_recreate_calls())
+        self.assertEqual(
+            {service: 1 for service in EXPECTED_SERVICES},
+            self.service_generations(),
+        )
+        self.assert_safe_docker_calls()
+
+    def test_secret_only_rotation_force_recreates_each_application_but_not_mariadb(self) -> None:
+        self.install_current("new")
+        rotated_app_secret = "ROTATED-APP-SECRET-SENTINEL"
+        rotated_matrix_webhook = "https://matrix.example.test/ROTATED-WEBHOOK-SENTINEL"
+        (self.staging / "secrets" / "app_secret").write_text(rotated_app_secret + "\n", encoding="utf-8")
+        (self.staging / "secrets" / "matrix_webhook_url").write_text(
+            rotated_matrix_webhook + "\n",
+            encoding="utf-8",
+        )
+        self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({"changed": True, "status": "deployed"}, json.loads(result.stdout))
+        self.assertEqual(rotated_app_secret + "\n", (self.secrets / "app_secret").read_text(encoding="utf-8"))
+        self.assertEqual(
+            rotated_matrix_webhook + "\n",
+            (self.secrets / "matrix_webhook_url").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(1, len(self.force_recreate_calls()))
+        self.assertEqual(
+            {"mariadb": 1, "data-worker": 2, "backup-worker": 2, "webapp": 2},
+            self.service_generations(),
+        )
+        self.assertNotIn(rotated_app_secret, result.stdout + result.stderr)
+        self.assertNotIn(rotated_matrix_webhook, result.stdout + result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_secret_only_failure_recreates_restored_applications_before_reverification(self) -> None:
+        self.install_current("new")
+        before = self.current_state()
+        candidate_secret = "FAILED-CANDIDATE-SECRET-SENTINEL"
+        (self.staging / "secrets" / "app_secret").write_text(candidate_secret + "\n", encoding="utf-8")
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"ps": [2]}, schema_up_to_date=True)
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        after = self.current_state()
+        keyring_path = str(self.secrets / "encryption_key")
+        self.assertEqual(before[keyring_path][1], after[keyring_path][1])
+        before_keyring = json.loads(before[keyring_path][0])
+        after_keyring = json.loads(after[keyring_path][0])
+        self.assertEqual(before_keyring["format"], after_keyring["format"])
+        self.assertEqual(before_keyring["revision"], after_keyring["revision"])
+        self.assertEqual(before_keyring["primaryKeyId"], after_keyring["primaryKeyId"])
+        self.assertEqual(
+            {entry["id"]: entry["material"] for entry in before_keyring["keys"]},
+            {entry["id"]: entry["material"] for entry in after_keyring["keys"]},
+        )
+        before.pop(keyring_path)
+        after.pop(keyring_path)
+        self.assertEqual(before, after)
+        self.assertEqual(2, len(self.force_recreate_calls()))
+        self.assertEqual(
+            {"mariadb": 1, "data-worker": 3, "backup-worker": 3, "webapp": 3},
+            self.service_generations(),
+        )
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "up", "ps", "up", "up", "ps"],
+            self.operations(),
+        )
+        self.assertIn("restored application services were recreated", result.stderr)
+        self.assertNotIn(candidate_secret, result.stdout + result.stderr)
+        self.assert_safe_docker_calls()
+
+    def test_unchanged_bootstrap_failure_keeps_stack_and_is_retried_next_deployment(self) -> None:
+        self.install_current("new")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"bootstrap": [1]}, schema_up_to_date=True)
+
+        failed = self.run_transaction()
+
+        self.assertNotEqual(0, failed.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(["config", "config", "up", "bootstrap"], self.operations())
+        self.assertNotIn("down", self.operations())
+        self.assertIn("existing application services were not stopped", failed.stderr)
+
+        retried = self.run_transaction()
+
+        self.assertEqual(0, retried.returncode, retried.stderr)
+        self.assertEqual(
+            [
+                "config", "config", "up", "bootstrap",
+                "config", "config", "up", "bootstrap", "schema-check", "ps",
+            ],
+            self.operations(),
+        )
         self.assert_safe_docker_calls()
 
     def test_unchanged_schema_status_error_never_runs_migration_or_stops_stack(self) -> None:
@@ -797,7 +930,7 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
-        self.assertEqual(["config", "config", "up", "schema-check"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check"], self.operations())
         self.assertNotIn("run", self.operations())
         self.assertNotIn("down", self.operations())
         self.assertIn("without changing application files", result.stderr)
@@ -815,7 +948,7 @@ class DeploymentTransactionTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["changed"])
         self.assertEqual("schema-migrated-and-verified", payload["status"])
-        self.assertEqual(["config", "config", "up", "schema-check", "run", "ps"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "run", "ps"], self.operations())
         self.assert_safe_docker_calls()
 
     def test_unchanged_migration_failure_keeps_application_files_and_services(self) -> None:
@@ -827,7 +960,7 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
-        self.assertEqual(["config", "config", "up", "schema-check", "run"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "run"], self.operations())
         self.assertNotIn("down", self.operations())
         self.assertIn("without changing application files", result.stderr)
         self.assertIn("existing application services were not stopped", result.stderr)
@@ -844,13 +977,33 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assert_recovered_with_additive_union(before)
         self.assertEqual(
-            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps", "up", "ps"],
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "up", "ps", "up", "up", "ps"],
             self.operations(),
         )
         self.assertIn("retained for recovery and must not be removed", result.stderr)
         self.assertNotIn("down", self.operations())
         self.assert_safe_docker_calls()
         self.assert_transaction_lock_available()
+
+    def test_changed_bootstrap_failure_restores_previous_stack_before_migration(self) -> None:
+        self.install_current("old")
+        before = self.current_state()
+        self.write_state(sorted(EXPECTED_SERVICES), failures={"bootstrap": [1]})
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertEqual(
+            ["config", "config", "ps", "pull", "up", "bootstrap", "up", "ps"],
+            self.operations(),
+        )
+        self.assertNotIn("schema-check", self.operations())
+        self.assertNotIn("run", self.operations())
+        self.assertIn("managed application files were restored", result.stderr)
+        self.assertIn("application services remained running", result.stderr)
+        self.assertNotIn("retained for recovery", result.stderr)
+        self.assert_safe_docker_calls()
 
     def test_changed_schema_status_error_restores_previous_stack_without_running_migration(self) -> None:
         self.install_current("old")
@@ -862,13 +1015,14 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
         self.assertEqual(
-            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps"],
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "up", "ps"],
             self.operations(),
         )
         self.assertNotIn("run", self.operations())
         self.assertNotIn("down", self.operations())
         self.assertIn("managed application files were restored", result.stderr)
-        self.assertIn("previously running stack was restarted and verified", result.stderr)
+        self.assertIn("application services remained running", result.stderr)
+        self.assertNotIn("retained for recovery", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assert_safe_docker_calls()
 
@@ -882,11 +1036,11 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assert_recovered_with_additive_union(before)
         self.assertEqual(
-            ["config", "config", "ps", "pull", "up", "schema-check", "up", "ps", "up", "ps"],
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "up", "ps", "up", "up", "ps"],
             self.operations(),
         )
         self.assertIn("managed application files were restored", result.stderr)
-        self.assertIn("previously running stack was restarted and verified", result.stderr)
+        self.assertIn("restored application services were recreated", result.stderr)
         self.assertIn("Cause: Web health endpoint returned HTTP 503.", result.stderr)
         self.assertIn("retained for recovery and must not be removed", result.stderr)
         self.assert_safe_docker_calls()
@@ -897,7 +1051,7 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(
-            ["config", "config", "pull", "up", "schema-check", "run", "up", "ps", "down"],
+            ["config", "config", "pull", "up", "bootstrap", "schema-check", "run", "up", "ps", "down"],
             self.operations(),
         )
         self.assertFalse((self.install / "compose.yaml").exists())
@@ -912,14 +1066,14 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertIn("retained for recovery and must not be removed", result.stderr)
         self.assert_safe_docker_calls()
 
-    def test_failed_first_migration_preserves_database_credentials_and_reports_partial_ddl(self) -> None:
-        self.write_state([], failures={"run": [1]})
+    def test_failed_first_bootstrap_stops_database_and_preserves_database_credentials(self) -> None:
+        self.write_state([], failures={"bootstrap": [1]})
 
         result = self.run_transaction()
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(
-            ["config", "config", "pull", "up", "schema-check", "run", "down"],
+            ["config", "config", "pull", "up", "bootstrap", "down"],
             self.operations(),
         )
         for artifact in (
@@ -935,6 +1089,35 @@ class DeploymentTransactionTest(unittest.TestCase):
             self.assertTrue((self.secrets / secret_name).is_file())
             self.assertEqual(0o600, stat.S_IMODE((self.secrets / secret_name).stat().st_mode))
         self.assertIn("First-deployment containers were stopped", result.stderr)
+        self.assertNotIn("retained for recovery", result.stderr)
+        self.assertNotIn("schema-check", self.operations())
+        self.assertNotIn("run", self.operations())
+        self.assert_safe_docker_calls()
+
+    def test_failed_first_migration_preserves_database_credentials_and_reports_partial_ddl(self) -> None:
+        self.write_state([], failures={"run": [1]})
+
+        result = self.run_transaction()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(
+            ["config", "config", "pull", "up", "bootstrap", "schema-check", "run", "down"],
+            self.operations(),
+        )
+        for artifact in (
+            self.install / "compose.yaml",
+            self.install / "compose.migration.yaml",
+            self.install / "runtime.env",
+            self.install / "10-create-app-users.sh",
+            self.secrets / "app_secret",
+            self.secrets / "encryption_key",
+        ):
+            self.assertFalse(artifact.exists())
+        for secret_name in DATABASE_SECRET_NAMES:
+            self.assertTrue((self.secrets / secret_name).is_file())
+            self.assertEqual(0o600, stat.S_IMODE((self.secrets / secret_name).stat().st_mode))
+        self.assertIn("First-deployment containers were stopped", result.stderr)
+        self.assertNotIn("retained for recovery", result.stderr)
         self.assertIn("MariaDB DDL may already be applied or partially applied", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assert_safe_docker_calls()
@@ -951,9 +1134,11 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertIn("MariaDB DDL may already be applied or partially applied", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assertEqual(
-            ["config", "config", "ps", "pull", "up", "schema-check", "run", "up", "ps"],
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "run", "up", "ps"],
             self.operations(),
         )
+        self.assertIn("application services remained running", result.stderr)
+        self.assertNotIn("retained for recovery", result.stderr)
         self.assert_safe_docker_calls()
 
     def test_database_credential_change_is_blocked_before_docker_or_file_mutation(self) -> None:
@@ -1533,6 +1718,7 @@ class DeploymentTransactionTest(unittest.TestCase):
                     "failures": failures or {},
                     "schema_up_to_date": bool(running_services) if schema_up_to_date is None else schema_up_to_date,
                     "schema_check_returncode": schema_check_returncode,
+                    "service_generations": {service: 1 for service in running_services},
                     "calls": [],
                 },
             ),
@@ -1634,6 +1820,8 @@ class DeploymentTransactionTest(unittest.TestCase):
             f"--health-url={health_url}",
             "--wait-timeout=10",
             "--migration-service=schema-migration",
+            "--database-service=mariadb",
+            "--database-bootstrap-script=/usr/local/bin/hoddmimir-database-user-bootstrap",
             f"--encryption-keyring-revision={self.expected_keyring_revision}",
             f"--transaction-lock-file={self.lock_file}",
         ]
@@ -1644,13 +1832,45 @@ class DeploymentTransactionTest(unittest.TestCase):
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
         return [call["operation"] for call in state["calls"]]
 
+    def force_recreate_calls(self) -> list[dict[str, object]]:
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        return [
+            call
+            for call in state["calls"]
+            if call["operation"] == "up" and "--force-recreate" in call["arguments"]
+        ]
+
+    def service_generations(self) -> dict[str, int]:
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        return state["service_generations"]
+
     def assert_safe_docker_calls(self) -> None:
         expected_arguments = {
             "config": ["config", "--quiet"],
+            "bootstrap": [
+                "exec",
+                "-T",
+                "--user",
+                "0",
+                "mariadb",
+                "/usr/local/bin/hoddmimir-database-user-bootstrap",
+            ],
             "pull": ["pull"],
             "up": (
                 ["up", "--detach", "--wait", "--wait-timeout", "10", "mariadb"],
-                ["up", "--detach", "--remove-orphans", "--wait", "--wait-timeout", "10"],
+                [
+                    "up",
+                    "--detach",
+                    "--no-deps",
+                    "--force-recreate",
+                    "--remove-orphans",
+                    "--wait",
+                    "--wait-timeout",
+                    "10",
+                    "data-worker",
+                    "backup-worker",
+                    "webapp",
+                ],
             ),
             "run": ["run", "--rm", "--no-deps", "schema-migration"],
             "schema-check": [

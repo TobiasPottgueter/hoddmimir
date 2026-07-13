@@ -129,11 +129,12 @@ if [ "$COVERAGE_ENABLED" -eq 1 ]; then
     export COVERAGE_UID COVERAGE_GID
 fi
 
-if [ "$COVERAGE_ENABLED" -eq 1 ]; then
-    compose up --abort-on-container-exit --exit-code-from backend-tests backend-tests
-else
-    compose up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests
+if [ "$COVERAGE_ENABLED" -eq 0 ]; then
+    compose build mariadb-integration backend-tests
 fi
+compose up --detach --wait mariadb-integration
+compose exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap
+compose up --abort-on-container-exit --exit-code-from backend-tests backend-tests
 
 if [ "$COVERAGE_ENABLED" -eq 1 ]; then
     for artifact in "$COVERAGE_PHP_OUTPUT" "$COVERAGE_CLOVER_OUTPUT"; do

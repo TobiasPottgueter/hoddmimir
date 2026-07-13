@@ -58,3 +58,5 @@ hoddmimir_expected_services:
   - mariadb
   - webapp
 hoddmimir_migration_service: schema-migration
+hoddmimir_database_service: mariadb
+hoddmimir_database_bootstrap_script: /usr/local/bin/hoddmimir-database-user-bootstrap

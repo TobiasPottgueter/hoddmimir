@@ -12,10 +12,12 @@ x-app-environment: &app-environment
 x-app-security: &app-security
   read_only: true
   cap_drop: [ALL]
+  cap_add: [CHOWN, SETGID, SETUID]
   security_opt: [no-new-privileges:true]
   tmpfs:
     - /tmp:mode=1777
     - /app/var:uid=10001,gid=10001,mode=0770
+    - /run/hoddmimir-secrets:mode=0700
   init: true
   restart: unless-stopped
   stop_grace_period: 30s
@@ -32,11 +34,12 @@ services:
     environment:
       MARIADB_DATABASE: {{ hoddmimir_database_name | to_json }}
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_ROOT_HOST: localhost
       TZ: UTC
     secrets: [mariadb_root_password, mariadb_migration_password, mariadb_web_password, mariadb_collector_password, mariadb_backup_worker_password]
     volumes:
       - mariadb_data:/var/lib/mysql
-      - {{ (hoddmimir_mariadb_init_script ~ ':/docker-entrypoint-initdb.d/10-create-app-users.sh:ro') | to_json }}
+      - {{ (hoddmimir_mariadb_init_script ~ ':/usr/local/bin/hoddmimir-database-user-bootstrap:ro') | to_json }}
     read_only: true
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
@@ -69,7 +72,7 @@ services:
     depends_on:
       mariadb: { condition: service_healthy }
     healthcheck:
-      test: [CMD, php, bin/console, hoddmimir:worker:health, collector]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, php, bin/console, hoddmimir:worker:health, collector]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -90,7 +93,7 @@ services:
     depends_on:
       mariadb: { condition: service_healthy }
     healthcheck:
-      test: [CMD, php, bin/console, hoddmimir:worker:readiness, backup]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, php, bin/console, hoddmimir:worker:readiness, backup]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -111,7 +114,7 @@ services:
     ports:
       - {{ ('127.0.0.1:' ~ hoddmimir_web_port ~ ':8080') | to_json }}
     healthcheck:
-      test: [CMD, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -119,12 +122,14 @@ services:
     networks: [internal]
     read_only: true
     cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     tmpfs:
       - /tmp:mode=1777
       - /app/var:uid=82,gid=82,mode=0770
       - /config:uid=82,gid=82,mode=0770
       - /data:uid=82,gid=82,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
     init: true
     restart: unless-stopped
     stop_grace_period: 30s

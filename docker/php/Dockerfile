@@ -19,6 +19,7 @@ ARG MUSL_DEV_VERSION=1.2.5-r23
 ARG MAKE_VERSION=4.4.1-r3
 ARG PKGCONF_VERSION=2.5.1-r0
 ARG RE2C_VERSION=4.3.1-r0
+ARG SU_EXEC_VERSION=0.3-r0
 
 ENV APP_ENV=prod \
     APP_DEBUG=0 \
@@ -28,6 +29,7 @@ ENV APP_ENV=prod \
 RUN apk add --no-cache \
         "c-ares=${C_ARES_VERSION}" \
         "icu-libs=${ICU_VERSION}" \
+        "su-exec=${SU_EXEC_VERSION}" \
     && apk add --no-cache --virtual .php-ext-build-deps \
         "autoconf=${AUTOCONF_VERSION}" \
         "dpkg-dev=${DPKG_DEV_VERSION}" \
@@ -133,6 +135,8 @@ RUN composer dump-autoload --no-dev --classmap-authoritative \
 FROM php-base AS worker
 
 COPY --from=worker-build --chown=app:app /app /app
+COPY --chmod=0555 docker/common/app-entrypoint.sh /usr/local/bin/hoddmimir-app-entrypoint
+COPY --chmod=0555 docker/common/app-healthcheck.sh /usr/local/bin/hoddmimir-app-healthcheck
 
 RUN mkdir -p var \
     && chown -R app:app /app/var \
@@ -145,6 +149,6 @@ RUN mkdir -p var \
     && test ! -e /app/config/services_test.php \
     && test ! -e /app/config/services_e2e.php
 
-USER app
+ENV HODDMIMIR_RUNTIME_USER=app
 
-ENTRYPOINT ["php", "bin/console"]
+ENTRYPOINT ["/usr/local/bin/hoddmimir-app-entrypoint", "php", "bin/console"]

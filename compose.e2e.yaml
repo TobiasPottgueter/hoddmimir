@@ -19,6 +19,7 @@ services:
     environment:
       MARIADB_DATABASE: hoddmimir_e2e
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_ROOT_HOST: localhost
       TZ: UTC
     secrets:
       - mariadb_root_password
@@ -87,19 +88,21 @@ services:
     ports:
       - "127.0.0.1:${E2E_WEB_PORT:-18080}:8080"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
       interval: 2s
       timeout: 5s
       retries: 30
       start_period: 5s
     read_only: true
     cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "SETGID", "SETUID"]
     security_opt: ["no-new-privileges:true"]
     tmpfs:
       - /tmp:mode=1777
       - /app/var:uid=82,gid=82,mode=0770
       - /config:uid=82,gid=82,mode=0770
       - /data:uid=82,gid=82,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
     restart: "no"
     networks:
       - e2e

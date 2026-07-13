@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
@@ -27,6 +27,9 @@ production-secrets: ## Generate distinct local production secrets and encrypted 
 
 production-secrets-test: ## Verify safe, idempotent production secret initialization
 	sh scripts/tests/test-init-production-secrets.sh
+
+app-secret-staging-test: ## Verify fail-closed non-root secret staging in native Linux containers
+	sh scripts/tests/test-app-secret-staging.sh
 
 config: secrets ## Validate the Docker Compose model
 	docker compose config --quiet
@@ -58,7 +61,10 @@ backend-test: ## Build and run the PHP validation target
 backend-integration-wrapper-test: ## Test integration cleanup and exit semantics without Docker
 	sh scripts/tests/test-backend-integration-cleanup.sh
 
-backend-integration: migration-wrapper-test backend-integration-wrapper-test ## Run the isolated MariaDB 11.4 integration suite
+mariadb-bootstrap-test: ## Verify fail-closed, idempotent MariaDB user bootstrap against real containers
+	sh scripts/tests/test-mariadb-user-bootstrap.sh
+
+backend-integration: migration-wrapper-test backend-integration-wrapper-test mariadb-bootstrap-test ## Run the isolated MariaDB 11.4 integration suite
 	./scripts/test-backend-integration.sh
 
 backend-coverage-wrapper-test: ## Test owned split coverage cleanup and failure propagation without Docker

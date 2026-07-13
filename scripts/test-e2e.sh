@@ -17,6 +17,8 @@ mkdir -p "$project_root/frontend/playwright-report" "$project_root/frontend/test
 
 docker compose --file "$compose_file" build mariadb-e2e qa-seed webapp-e2e playwright
 docker compose --file "$compose_file" up --detach --wait mariadb-e2e
+docker compose --file "$compose_file" \
+    exec -T --user 0 mariadb-e2e /usr/local/bin/hoddmimir-database-user-bootstrap
 docker compose --file "$compose_file" run --rm qa-seed
 docker compose --file "$compose_file" up --detach --wait webapp-e2e
 docker compose --file "$compose_file" run --rm playwright

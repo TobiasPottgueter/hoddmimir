@@ -68,14 +68,18 @@ run_case() {
         test "$(sed -n '3p' "$docker_log")" = "compose --file $case_root/compose.yaml up --detach --wait mariadb"
     fi
     if [ "$expected_calls" -ge 4 ]; then
-        test "$(sed -n '4p' "$docker_log")" = "compose --file $case_root/compose.yaml --file $case_root/compose.migration.yaml run --rm --build --no-deps schema-migration"
+        test "$(sed -n '4p' "$docker_log")" = "compose --file $case_root/compose.yaml exec -T --user 0 mariadb /usr/local/bin/hoddmimir-database-user-bootstrap"
+    fi
+    if [ "$expected_calls" -ge 5 ]; then
+        test "$(sed -n '5p' "$docker_log")" = "compose --file $case_root/compose.yaml --file $case_root/compose.migration.yaml run --rm --build --no-deps schema-migration"
         ! grep -Eq '(^| )(down|stop|rm)( |$)|--volumes|-v' "$docker_log"
     fi
 }
 
-run_case success 0 0 0 4
+run_case success 0 0 0 5
 run_case init-failure 41 0 1 0
 run_case base-config-failure 42 1 0 1
 run_case overlay-config-failure 42 2 0 2
 run_case database-up-failure 42 3 0 3
-run_case migration-run-failure 42 4 0 4
+run_case database-bootstrap-failure 42 4 0 4
+run_case migration-run-failure 42 5 0 5

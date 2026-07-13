@@ -18,4 +18,4 @@ RUN git clone https://github.com/tianon/gosu.git /src/gosu \
 FROM ${MARIADB_IMAGE}
 
 COPY --from=gosu-build /go/bin/gosu /usr/local/bin/gosu
-COPY --chmod=0555 docker/mariadb/init/10-create-app-users.sh /docker-entrypoint-initdb.d/10-create-app-users.sh
+COPY --chmod=0555 docker/mariadb/init/10-create-app-users.sh /usr/local/bin/hoddmimir-database-user-bootstrap
