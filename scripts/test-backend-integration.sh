@@ -47,10 +47,24 @@ cleanup() {
     compose down --volumes --remove-orphans >/dev/null
 }
 
+collect_failure_diagnostics() {
+    if ! compose ps --all >&2; then
+        printf 'Could not capture integration Compose status.\n' >&2
+    fi
+
+    if ! compose logs --no-color --timestamps mariadb-integration backend-tests >&2; then
+        printf 'Could not capture integration Compose logs.\n' >&2
+    fi
+}
+
 finish() {
     primary_status=$?
 
     trap - 0 1 2 15
+
+    if [ "$primary_status" -ne 0 ]; then
+        collect_failure_diagnostics
+    fi
 
     if cleanup; then
         cleanup_status=0

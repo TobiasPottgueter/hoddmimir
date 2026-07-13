@@ -30,6 +30,16 @@ case " $* " in
 
         exit "$status"
         ;;
+    *' ps --all '*)
+        status=${FAKE_DOCKER_PS_STATUS:-0}
+        printf 'simulated Compose status\n'
+        exit "$status"
+        ;;
+    *' logs --no-color --timestamps mariadb-integration backend-tests '*)
+        status=${FAKE_DOCKER_LOGS_STATUS:-0}
+        printf 'simulated MariaDB diagnostic log\n'
+        exit "$status"
+        ;;
     *)
         printf 'unexpected fake docker invocation: %s\n' "$*" >&2
         exit 64
