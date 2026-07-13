@@ -28,6 +28,10 @@ final readonly class BuildPveVzdumpPayload
         if (null !== $submission->legacyMaxFiles) {
             $payload['maxfiles'] = $submission->legacyMaxFiles;
         }
+        if (null !== $submission->failureNotificationRecipients) {
+            $payload['mailto'] = $submission->failureNotificationRecipients->parameterValue();
+            $payload['mailnotification'] = 'failure';
+        }
 
         return $payload;
     }

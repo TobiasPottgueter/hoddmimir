@@ -31,7 +31,7 @@ run_profile() {
 
     rm -rf "$report_directory"
     mkdir -p "$report_directory"
-    php -d memory_limit=1G vendor/bin/infection \
+    php -d memory_limit=2G vendor/bin/infection \
         --configuration="$configuration" \
         --coverage="$coverage_directory" \
         --threads="$threads" \

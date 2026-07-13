@@ -1,0 +1,145 @@
+name: hoddmimir-e2e
+
+x-app-environment: &app-environment
+  APP_ENV: test
+  APP_DEBUG: "0"
+  APP_TIMEZONE: UTC
+  APP_SECRET_FILE: /run/secrets/app_secret
+  ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  ENCRYPTION_KEYRING_REVISION: "1"
+  DATABASE_HOST: mariadb-e2e
+  DATABASE_PORT: "3306"
+  DATABASE_NAME: hoddmimir_e2e
+
+services:
+  mariadb-e2e:
+    build:
+      context: .
+      dockerfile: docker/mariadb/Dockerfile
+    environment:
+      MARIADB_DATABASE: hoddmimir_e2e
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      TZ: UTC
+    secrets:
+      - mariadb_root_password
+      - mariadb_migration_password
+      - mariadb_web_password
+      - mariadb_collector_password
+      - mariadb_backup_worker_password
+    tmpfs:
+      - /var/lib/mysql:rw,nosuid,nodev,noexec,size=512m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: "no"
+    networks:
+      - e2e
+
+  qa-seed:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      target: backend-test-runtime
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        php bin/console doctrine:migrations:migrate --no-interaction
+        php bin/console hoddmimir:qa:seed --password-file=/run/secrets/qa_admin_password --no-interaction
+    environment:
+      <<: *app-environment
+      DATABASE_USER: hoddmimir_migration
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_migration_password
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_migration_password
+      - qa_admin_password
+    depends_on:
+      mariadb-e2e:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - e2e
+
+  webapp-e2e:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      target: web-e2e
+    environment:
+      <<: *app-environment
+      # The browser stack uses the real authenticator plus only the explicit
+      # services_e2e.php remote-boundary fake. Production cannot load it.
+      APP_ENV: e2e
+      DATABASE_USER: hoddmimir_web
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_web_password
+    secrets:
+      - app_secret
+      - encryption_key
+      - mariadb_web_password
+    depends_on:
+      mariadb-e2e:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${E2E_WEB_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/var:uid=82,gid=82,mode=0770
+      - /config:uid=82,gid=82,mode=0770
+      - /data:uid=82,gid=82,mode=0770
+    restart: "no"
+    networks:
+      - e2e
+
+  playwright:
+    build:
+      context: .
+      dockerfile: docker/e2e/Dockerfile
+    environment:
+      # Share the WebApp namespace so Chromium sees a trustworthy loopback
+      # origin; the UI intentionally relies on secure-context randomUUID().
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:8080
+      QA_ADMIN_PASSWORD_FILE: /run/secrets/qa_admin_password
+    secrets:
+      - qa_admin_password
+    volumes:
+      - ./frontend/playwright-report:/frontend/playwright-report
+      - ./frontend/test-results:/frontend/test-results
+    ipc: host
+    network_mode: service:webapp-e2e
+    restart: "no"
+
+networks:
+  e2e:
+    internal: true
+
+secrets:
+  app_secret:
+    file: ./.secrets/app_secret
+  encryption_key:
+    file: ./.secrets/encryption_key
+  mariadb_root_password:
+    file: ./.secrets/mariadb_root_password
+  mariadb_migration_password:
+    file: ./.secrets/mariadb_migration_password
+  mariadb_web_password:
+    file: ./.secrets/mariadb_web_password
+  mariadb_collector_password:
+    file: ./.secrets/mariadb_collector_password
+  mariadb_backup_worker_password:
+    file: ./.secrets/mariadb_backup_worker_password
+  qa_admin_password:
+    file: ./.secrets/qa_admin_password

@@ -1,123 +1,242 @@
 <script setup lang="ts">
+import { computed, onMounted } from "vue";
 import Message from "primevue/message";
-import { RouterLink } from "vue-router";
+import Tag from "primevue/tag";
+import {
+  backupRequestStateLabel,
+  backupRequestStateSeverity,
+  backupRunStateLabel,
+  backupRunStateSeverity,
+  operationsWorkerStatusLabel,
+  operationsWorkerStatusSeverity,
+} from "@/composables/useBackupOperations";
+import { useAdministration } from "@/composables/useAdministration";
+import { formatUtc } from "@/composables/useFormatters";
+import { useBackupOperationsStore } from "@/stores/backupOperations";
 
-const overviewLinks = [
-  {
-    title: "Erkannte Systeme",
-    description:
-      "PVE-Cluster und PBS-Server aus dem aktuellen Collector-Inventar einsehen.",
-    icon: "pi pi-server",
-    actionLabel: "Systeme öffnen",
-    actionTo: "/systems",
-  },
-  {
-    title: "Inventar",
-    description:
-      "Nodes, Gäste, Storages, Datastores und PBS-Inhalte read-only auswerten.",
-    icon: "pi pi-sitemap",
-    actionLabel: "Inventar öffnen",
-    actionTo: "/inventory",
-  },
-  {
-    title: "Collector-Betrieb",
-    description:
-      "Heartbeat, Zeitraster, Inventurläufe und Scope-Ergebnisse kontrollieren.",
-    icon: "pi pi-wave-pulse",
-    actionLabel: "Betrieb öffnen",
-    actionTo: "/operations",
-  },
-];
+const store = useBackupOperationsStore();
+const dashboard = computed(() => store.dashboard);
+const { eventLabel, outcomeLabel } = useAdministration();
+const resourceEntries = [
+  ["systems", "Aktive Systeme"],
+  ["nodes", "Aktive Nodes"],
+  ["guests", "Aktive Gäste"],
+  ["targets", "Aktive Backup-Ziele"],
+  ["policies", "Aktive Policies"],
+] as const;
+const queueStates = [
+  "pending",
+  "retry_wait",
+  "leased",
+  "starting",
+  "running",
+  "reconcile_required",
+  "failed",
+  "unknown",
+] as const;
+const queueReasons = [
+  ["manual", "Manuell", 400],
+  ["never_backed_up", "Noch nie gesichert", 300],
+  ["max_age", "Maximales Alter", 200],
+  ["bytes_written", "Schreibvolumen", 100],
+] as const;
+const runHighlights = ["running", "failed", "unknown", "succeeded"] as const;
+onMounted(() => void store.loadDashboard());
 </script>
-
 <template>
-  <section class="dashboard">
+  <section class="dashboard" aria-labelledby="dashboard-title">
     <div class="dashboard-hero">
       <div>
         <span class="section-kicker">Betriebsübersicht</span>
-        <h2>Willkommen bei Hoddmímir</h2>
+        <h2 id="dashboard-title">Hoddmímir auf einen Blick</h2>
         <p>
-          Die WebApp zeigt das vom Collector erfasste Inventar und dessen
-          Betriebszustand. Die Inventarisierung läuft automatisch ohne manuellen
-          Scan.
+          Collector, Backup-Worker, Scheduler-Evidenz und Queue aus der
+          serverseitigen Operations-Projektion.
         </p>
       </div>
-      <span class="dashboard-hero__illustration" aria-hidden="true">
-        <i class="pi pi-cloud-upload" />
-      </span>
     </div>
-
-    <Message severity="info" :closable="false">
-      Version 2.0 arbeitet mit einer eigenständigen Konfiguration und Historie.
-      Daten aus dem Altsystem werden bewusst nicht übernommen.
-    </Message>
-
-    <div class="section-heading">
-      <div>
-        <span class="section-kicker">Read-only Einblick</span>
-        <h2>Inventar und Betrieb</h2>
+    <Message v-if="store.error" severity="error" :closable="false">{{
+      store.error
+    }}</Message>
+    <p v-if="store.loading" role="status">Betriebsdaten werden geladen …</p>
+    <template v-if="dashboard">
+      <div class="component-grid">
+        <article v-for="kind in ['collector', 'backup'] as const" :key="kind">
+          <i class="pi pi-wave-pulse" />
+          <div>
+            <h3>
+              {{ kind === "collector" ? "Collector Worker" : "Backup Worker" }}
+            </h3>
+            <template v-if="dashboard.workers[kind]"
+              ><Tag
+                :value="
+                  dashboard.workers[kind]!.fresh
+                    ? operationsWorkerStatusLabel(
+                        dashboard.workers[kind]!.status,
+                      )
+                    : 'Heartbeat veraltet'
+                "
+                :severity="
+                  dashboard.workers[kind]!.fresh
+                    ? operationsWorkerStatusSeverity(
+                        dashboard.workers[kind]!.status,
+                      )
+                    : 'danger'
+                "
+              />
+              <p>
+                Heartbeat
+                {{ formatUtc(dashboard.workers[kind]!.heartbeatAt) }} ·
+                {{ dashboard.workers[kind]!.buildVersion }}
+              </p></template
+            >
+            <p v-else>Kein Heartbeat vorhanden.</p>
+          </div>
+        </article>
       </div>
-    </div>
-
-    <div class="setup-grid">
-      <article
-        v-for="link in overviewLinks"
-        :key="link.actionTo"
-        class="setup-card"
-      >
-        <div class="setup-card__header">
-          <span class="setup-card__icon" aria-hidden="true">
-            <i :class="link.icon" />
-          </span>
-        </div>
-        <div>
-          <h3>{{ link.title }}</h3>
-          <p>{{ link.description }}</p>
-        </div>
-        <RouterLink class="setup-card__action" :to="link.actionTo">
-          {{ link.actionLabel }}
-          <i class="pi pi-arrow-right" aria-hidden="true" />
-        </RouterLink>
-      </article>
-    </div>
-
-    <section class="system-overview" aria-labelledby="architecture-title">
-      <div class="section-heading">
-        <div>
-          <span class="section-kicker">Architektur</span>
-          <h2 id="architecture-title">Drei getrennte Komponenten</h2>
-        </div>
+      <section v-if="dashboard.collectorSchedule" class="system-overview">
+        <h3>Collector-Zeitplan</h3>
+        <p>
+          Nächster Zyklus:
+          {{ formatUtc(dashboard.collectorSchedule.nextScanAt) }}
+        </p>
+        <p>
+          Letzter Versuch:
+          {{ formatUtc(dashboard.collectorSchedule.lastAttemptFinishedAt) }} ·
+          Letzter erfolgreicher Apply:
+          {{ formatUtc(dashboard.collectorSchedule.lastSuccessfulAppliedAt) }}
+        </p>
+      </section>
+      <div class="setup-grid">
+        <article
+          v-for="[key, label] in resourceEntries"
+          :key="key"
+          class="setup-card"
+        >
+          <h3>{{ label }}</h3>
+          <strong>{{ dashboard.resources[key] }}</strong>
+        </article>
       </div>
-
       <div class="component-grid">
         <article>
-          <i class="pi pi-search" aria-hidden="true" />
           <div>
-            <h3>Collector Worker</h3>
-            <p>
-              Liest Inventar und Laufzeitdaten kontinuierlich und standardmäßig
-              alle 120 Sekunden aus PVE und PBS.
-            </p>
+            <h3>Stale Evidenz</h3>
+            <strong>{{ dashboard.staleEvidence }}</strong>
           </div>
         </article>
         <article>
-          <i class="pi pi-play" aria-hidden="true" />
           <div>
-            <h3>Backup Worker</h3>
-            <p>Startet und überwacht freigegebene Backup-Anforderungen.</p>
+            <h3>Shadow-Blocker</h3>
+            <strong>{{ dashboard.shadowBlockers }}</strong>
           </div>
         </article>
         <article>
-          <i class="pi pi-desktop" aria-hidden="true" />
           <div>
-            <h3>WebApp</h3>
-            <p>
-              Stellt Inventar und Collector-Betrieb dar; weitere
-              Verwaltungsbereiche werden schrittweise ergänzt.
-            </p>
+            <h3>Offene Probleme</h3>
+            <strong>{{ dashboard.openProblems }}</strong>
           </div>
         </article>
       </div>
-    </section>
+      <section class="system-overview" aria-labelledby="queue-overview-title">
+        <div class="target-evidence__heading">
+          <h3 id="queue-overview-title">Queue nach Zustand und Priorität</h3>
+          <small
+            >Älteste fällige Anforderung:
+            {{ formatUtc(dashboard.oldestPendingAt) }}</small
+          >
+        </div>
+        <div class="setup-grid">
+          <article v-for="state in queueStates" :key="state" class="setup-card">
+            <Tag
+              :value="backupRequestStateLabel(state)"
+              :severity="backupRequestStateSeverity(state)"
+            />
+            <strong>{{ dashboard.requestsByState[state] }}</strong>
+          </article>
+        </div>
+        <div class="setup-grid">
+          <article
+            v-for="[reason, label, priority] in queueReasons"
+            :key="reason"
+            class="setup-card"
+          >
+            <h4>{{ label }}</h4>
+            <strong>{{ dashboard.requestsByReason[reason] }}</strong>
+            <small>Priorität {{ priority }}</small>
+          </article>
+        </div>
+      </section>
+      <section class="system-overview" aria-labelledby="run-overview-title">
+        <h3 id="run-overview-title">Backup-Läufe</h3>
+        <div class="setup-grid">
+          <article
+            v-for="state in runHighlights"
+            :key="state"
+            class="setup-card"
+          >
+            <Tag
+              :value="backupRunStateLabel(state)"
+              :severity="backupRunStateSeverity(state)"
+            />
+            <strong>{{ dashboard.runsByState[state] }}</strong>
+          </article>
+        </div>
+        <article v-if="dashboard.lastSuccessfulRun" class="shadow-evaluation">
+          <div>
+            <strong>Letztes erfolgreiches Backup</strong>
+            <span>
+              {{ dashboard.lastSuccessfulRun.guestName }} (VMID
+              {{ dashboard.lastSuccessfulRun.vmid }}) ·
+              {{ dashboard.lastSuccessfulRun.nodeName }} ·
+              {{ dashboard.lastSuccessfulRun.targetName }}
+            </span>
+          </div>
+          <Tag value="Erfolgreich" severity="success" />
+          <small>{{ formatUtc(dashboard.lastSuccessfulRun.finishedAt) }}</small>
+        </article>
+        <Message v-else severity="secondary" :closable="false">
+          Noch kein erfolgreiches V2-Backup vorhanden.
+        </Message>
+      </section>
+      <section class="system-overview" aria-labelledby="delivery-title">
+        <h3 id="delivery-title">Matrix-Zustellung</h3>
+        <p>
+          Ausstehend {{ dashboard.notifications.byState.pending }} · in
+          Zustellung {{ dashboard.notifications.byState.claimed }} · zugestellt
+          {{ dashboard.notifications.byState.sent }}
+        </p>
+        <p>
+          Älteste offene Meldung:
+          {{ formatUtc(dashboard.notifications.oldestUnsentAt) }} · nächster
+          Zustellversuch:
+          {{ formatUtc(dashboard.notifications.nextDeliveryAttemptAt) }}
+        </p>
+        <Message
+          v-if="dashboard.notifications.lastErrorCode"
+          severity="warn"
+          :closable="false"
+        >
+          Letzter sicherer Zustellfehlercode:
+          {{ dashboard.notifications.lastErrorCode }}
+        </Message>
+      </section>
+      <section v-if="dashboard.auditVisible">
+        <h3>Letzte Audit-Ereignisse</h3>
+        <ul>
+          <li v-for="event in dashboard.recentAuditEvents" :key="event.id">
+            {{ formatUtc(event.occurredAt) }} ·
+            {{ eventLabel(event.eventType) }} ·
+            {{ outcomeLabel(event.outcome) }}
+          </li>
+        </ul>
+      </section>
+    </template>
+    <Message
+      v-else-if="!store.loading && !store.error"
+      severity="secondary"
+      :closable="false"
+    >
+      Keine Betriebsprojektion verfügbar.
+    </Message>
   </section>
 </template>

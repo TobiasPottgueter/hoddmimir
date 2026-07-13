@@ -21,7 +21,7 @@ final readonly class PbsBackupTargetEvidence
         public int $port,
         public string $datastore,
         public ?string $namespace,
-        public string $mappingObservedAt,
+        public ?string $mappingObservedAt,
         public PbsEndpointMatchStatus $endpointMatch,
         public ?string $pbsConnectionId,
         public ?string $pbsServerId,
@@ -37,7 +37,9 @@ final readonly class PbsBackupTargetEvidence
         if ('' === $server || $port < 1 || $port > 65535 || '' === $datastore) {
             throw new InvalidArgumentException('PBS target mapping evidence is invalid.');
         }
-        self::utc($mappingObservedAt);
+        if (null !== $mappingObservedAt) {
+            self::utc($mappingObservedAt);
+        }
         foreach ([$pbsConnectionId, $pbsServerId, $pbsDatastoreId, $pbsNamespaceId] as $id) {
             if (null !== $id) {
                 new ReadModelIdentifier($id);

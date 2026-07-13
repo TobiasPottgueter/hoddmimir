@@ -19,6 +19,8 @@
       "capabilities": [
         "GET /version",
         "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
         "GET /cluster/status",
         "GET /cluster/resources",
         "GET /storage",
@@ -82,6 +84,73 @@
           },
           "returns": {
             "type": "object"
+          }
+        },
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
           }
         },
         "GET /cluster/status": {
@@ -843,6 +912,8 @@
       "capabilities": [
         "GET /version",
         "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
         "GET /cluster/status",
         "GET /cluster/resources",
         "GET /storage",
@@ -856,6 +927,74 @@
       ],
       "openResponseEnums": [],
       "contracts": {
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+
         "GET /version": {
           "allowtoken": 1,
           "method": "GET",
@@ -1752,6 +1891,8 @@
       "capabilities": [
         "GET /version",
         "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
         "GET /cluster/status",
         "GET /cluster/resources",
         "GET /storage",
@@ -1765,6 +1906,74 @@
       ],
       "openResponseEnums": [],
       "contracts": {
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+
         "GET /version": {
           "allowtoken": 1,
           "method": "GET",

@@ -7,10 +7,12 @@ credential identities, encrypted secret envelopes, lease owners, or lease
 tokens. A PVE storage's non-secret PBS mapping is inventory data and may contain
 its configured server name, port, datastore, and namespace.
 
-Until authentication and RBAC arrive in Phase 6, the API has a deliberately
-hard deployment boundary: the WebApp port is bound to `127.0.0.1` in both the
-development Compose file and the Ansible-generated production Compose file.
-It must not be exposed through a reverse proxy or on an external interface.
+The Phase-3 inventory routes remain GET-only. Phase 6 subsequently added
+session authentication and RBAC to the shared versioned API; inventory reads
+require `inventory.read`. The WebApp port nevertheless remains bound to
+`127.0.0.1` in both the development Compose file and the Ansible-generated
+production Compose file until a production reverse-proxy and TLS boundary is
+explicitly deployed and accepted in Phase 7.
 
 ## Resources
 
@@ -53,6 +55,6 @@ positive reads and denial of credentials, lease/cycle/fencing fields, raw PBS
 content metadata, and all mutations.
 
 `php tools/check-openapi.php ../docs/openapi-v1.json` is part of
-`composer verify`. It compares the six `/api/v1` operations with Symfony's
-actual router, rejects unversioned or write operations, and requires exact,
-closed successful response schemas.
+`composer verify`. It compares the complete documented `/api/v1` operation
+set with Symfony's actual router and requires exact, closed successful
+response schemas. The inventory subset itself still rejects write operations.

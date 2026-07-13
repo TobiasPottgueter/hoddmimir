@@ -37,7 +37,7 @@ final class ShadowEvaluationPrivilegeTest extends DatabaseTestCase
         }
     }
 
-    public function testCollectorIsAppendOnlyAndOtherRuntimeUsersCannotReadShadowTables(): void
+    public function testCollectorIsAppendOnlyWebIsReadOnlyAndBackupWorkerIsDenied(): void
     {
         $collector = $this->runtimeConnection('collector');
         $web = $this->runtimeConnection('web');
@@ -53,8 +53,11 @@ final class ShadowEvaluationPrivilegeTest extends DatabaseTestCase
                     $identityColumn,
                 )));
                 $this->assertDenied(static fn () => $collector->executeStatement(sprintf('DELETE FROM %s WHERE 1 = 0', $table)));
+                self::assertSame([], $web->fetchAllAssociative(sprintf('SELECT * FROM %s LIMIT 0', $table)));
                 foreach ([$web, $backup] as $deniedConnection) {
-                    $this->assertDenied(static fn () => $deniedConnection->fetchAllAssociative(sprintf('SELECT * FROM %s LIMIT 0', $table)));
+                    if ($deniedConnection === $backup) {
+                        $this->assertDenied(static fn () => $deniedConnection->fetchAllAssociative(sprintf('SELECT * FROM %s LIMIT 0', $table)));
+                    }
                     $this->assertDenied(static fn () => $deniedConnection->executeStatement(sprintf(
                         'INSERT INTO %s (%s) SELECT :id WHERE 1 = 0',
                         $table,

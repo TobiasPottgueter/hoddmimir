@@ -41,6 +41,12 @@ use RuntimeException;
 #[AllowMockObjectsWithoutExpectations]
 final class DbalShadowEvaluationStoreTest extends TestCase
 {
+    public function testRejectsPolicyRevisionChangedBetweenSourceReadAndPersist(): void
+    {
+        $this->expectException(ShadowEvaluationConflict::class);
+        $this->expectExceptionMessage('policy or target changed');
+        (new DbalShadowEvaluationStore($this->database(['policy' => ['revision' => 4, 'status' => 'enabled']])))->persist($this->lease(), $this->batch());
+    }
     private const string NOW = '2026-07-12 10:05:00.000000';
 
     public function testPersistsRunDecisionsAndOrderedGatesWithExactSqlMapping(): void
@@ -272,6 +278,8 @@ final class DbalShadowEvaluationStoreTest extends TestCase
             'existing' => false,
             'clock' => self::NOW,
             'lose_final_fence' => false,
+            'policy' => ['revision' => 3, 'status' => 'enabled'],
+            'target' => ['revision' => 4, 'status' => 'enabled'],
         ];
         $schedule = false === $options['schedule'] ? false : array_replace([
             'lease_owner' => $lease->ownerId->bytes,
@@ -306,6 +314,12 @@ final class DbalShadowEvaluationStoreTest extends TestCase
                 }
                 if (str_contains($sql, 'FROM scheduler_evaluation_runs')) {
                     return is_array($options['existing']) ? $options['existing'] : false;
+                }
+                if (str_contains($sql, 'FROM backup_policies')) {
+                    return is_array($options['policy']) ? $options['policy'] : false;
+                }
+                if (str_contains($sql, 'FROM backup_targets')) {
+                    return is_array($options['target']) ? $options['target'] : false;
                 }
 
                 return false;

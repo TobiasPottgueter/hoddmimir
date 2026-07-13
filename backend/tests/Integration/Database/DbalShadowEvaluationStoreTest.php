@@ -358,6 +358,56 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             'first_seen_at' => $formattedNow,
             'last_seen_at' => $formattedNow,
         ]);
+        $storageId = self::id('storage');
+        $this->connection()->insert('pve_storages', [
+            'id' => $storageId->binary(),
+            'connection_id' => $this->connectionId->binary(),
+            'cluster_id' => $this->clusterId->binary(),
+            'storage_name' => 'backup-a',
+            'storage_type' => 'dir',
+            'supports_backup' => 1,
+            'disabled' => 0,
+            'content_json' => '["backup"]',
+            'shared' => 1,
+            'inventory_state' => 'active',
+            'first_seen_run_id' => $runId->binary(),
+            'last_seen_run_id' => $runId->binary(),
+            'first_seen_at' => $formattedNow,
+            'last_seen_at' => $formattedNow,
+        ]);
+        $this->connection()->insert('backup_targets', [
+            'id' => self::bytes('target'),
+            'connection_id' => $this->connectionId->binary(),
+            'cluster_id' => $this->clusterId->binary(),
+            'storage_id' => $storageId->binary(),
+            'display_name' => 'Shadow target',
+            'status' => 'enabled',
+            'revision' => 1,
+            'minimum_free_bytes' => '0',
+            'fixed_parallel_limit' => 1,
+            'created_at' => $formattedNow,
+            'updated_at' => $formattedNow,
+            'disabled_at' => null,
+        ]);
+        $this->connection()->insert('backup_policies', [
+            'id' => self::bytes('policy'),
+            'connection_id' => $this->connectionId->binary(),
+            'cluster_id' => $this->clusterId->binary(),
+            'target_id' => self::bytes('target'),
+            'display_name' => 'Shadow policy',
+            'status' => 'enabled',
+            'revision' => 1,
+            'policy_priority' => 100,
+            'backup_mode' => 'snapshot',
+            'compression' => 'zstd',
+            'maximum_age_seconds' => 3600,
+            'schedule' => 'collector_cycle',
+            'keep_last' => 1,
+            'retention_execution_enabled' => 0,
+            'created_at' => $formattedNow,
+            'updated_at' => $formattedNow,
+            'disabled_at' => null,
+        ]);
         $this->connection()->insert('guests', [
             'id' => $this->guestId->binary(),
             'connection_id' => $this->connectionId->binary(),
@@ -438,6 +488,8 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
     {
         foreach ([
             'scheduler_decision_gates', 'scheduler_decisions', 'scheduler_evaluation_runs',
+            'backup_policy_guest_overrides', 'backup_policy_assignments', 'backup_policies',
+            'backup_target_allowed_nodes', 'backup_targets', 'pve_storages',
             'guests', 'pve_nodes', 'pve_clusters', 'inventory_sync_runs',
             'proxmox_connections', 'collector_cycles', 'collector_schedule', 'worker_heartbeats',
         ] as $table) {

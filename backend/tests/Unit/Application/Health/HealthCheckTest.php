@@ -21,7 +21,7 @@ final class HealthCheckTest extends TestCase
         self::assertSame(
             [
                 'status' => 'ok',
-                'checkedAt' => '2026-07-09T09:10:11.123+00:00',
+                'checkedAt' => '2026-07-09T09:10:11.123000Z',
                 'checks' => [
                     'database_schema' => ['status' => 'ready'],
                 ],

@@ -9,6 +9,8 @@ import type {
 import {
   backupTargetBlockerLabel,
   backupTargetCapacityLabel,
+  backupTargetExecutorStatusLabel,
+  evidenceFreshnessLabel,
   formatDecimalBytes,
   pbsEndpointMatchLabel,
 } from "@/composables/useBackupTargetCandidates";
@@ -133,6 +135,61 @@ function blockerKey(
           </ul>
         </article>
       </div>
+    </section>
+
+    <section class="target-evidence" aria-label="Executor-Evidenz">
+      <div class="target-evidence__heading">
+        <h4>Executor-Berechtigungen</h4>
+        <Tag
+          :value="backupTargetExecutorStatusLabel(candidate.executor.status)"
+          :severity="
+            candidate.executor.status === 'authorized'
+              ? 'success'
+              : candidate.executor.status === 'unauthorized'
+                ? 'danger'
+                : 'warn'
+          "
+        />
+      </div>
+      <dl class="target-facts">
+        <div>
+          <dt>Zielkontexte</dt>
+          <dd>{{ candidate.executor.targetCount }}</dd>
+        </div>
+        <div>
+          <dt>Node-Nachweise</dt>
+          <dd>
+            {{ candidate.executor.observedNodeCount }} /
+            {{ candidate.executor.expectedNodeCount }}
+          </dd>
+        </div>
+        <div>
+          <dt>VM.Backup</dt>
+          <dd>{{ booleanLabel(candidate.executor.vmBackupAuthorized) }}</dd>
+        </div>
+        <div>
+          <dt>Datastore.AllocateSpace</dt>
+          <dd>
+            {{ booleanLabel(candidate.executor.datastoreAllocateAuthorized) }}
+          </dd>
+        </div>
+        <div>
+          <dt>Gesamtfreigabe</dt>
+          <dd>{{ booleanLabel(candidate.executor.authorized) }}</dd>
+        </div>
+        <div>
+          <dt>Freshness / Messung</dt>
+          <dd>
+            {{ evidenceFreshnessLabel(candidate.executor.freshness) }} ·
+            {{ formatUtc(candidate.executor.observedAt) }}
+          </dd>
+        </div>
+      </dl>
+      <ul v-if="candidate.executor.blockers.length" class="evidence-blockers">
+        <li v-for="blocker in candidate.executor.blockers" :key="blocker">
+          {{ backupTargetBlockerLabel(blocker) }}
+        </li>
+      </ul>
     </section>
 
     <section

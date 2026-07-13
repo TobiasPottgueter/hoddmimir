@@ -21,7 +21,7 @@ final readonly class ReasonSelector
         $byteEvidence = $inputs->byteReasonEvidence;
         if (null !== $byteEvidence
             && $inputs->now > $byteEvidence->cooldownBoundary
-            && $byteEvidence->currentBytes - $byteEvidence->baselineBytes > $byteEvidence->bytesThreshold) {
+            && $byteEvidence->thresholdExceeded()) {
             return BackupReason::BytesWritten;
         }
 

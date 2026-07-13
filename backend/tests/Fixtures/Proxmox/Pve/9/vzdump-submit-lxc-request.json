@@ -1,0 +1,1 @@
+{"data":{"vmid":402,"storage":"pbs-primary","mode":"snapshot","compress":"zstd","prune-backups":"keep-last=2,keep-daily=7,keep-weekly=4","mailto":"backup-alerts@example.invalid,platform@example.invalid","mailnotification":"failure"}}

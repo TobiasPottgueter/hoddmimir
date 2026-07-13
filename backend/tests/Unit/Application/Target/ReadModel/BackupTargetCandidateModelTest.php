@@ -12,6 +12,9 @@ use App\Application\Target\ReadModel\BackupTargetCandidate;
 use App\Application\Target\ReadModel\BackupTargetCandidatePage;
 use App\Application\Target\ReadModel\BackupTargetCandidateQuery;
 use App\Application\Target\ReadModel\BackupTargetCapacityStatus;
+use App\Application\Target\ReadModel\BackupTargetExecutorEvidence;
+use App\Application\Target\ReadModel\BackupTargetExecutorStatus;
+use App\Application\Target\ReadModel\EvidenceFreshness;
 use App\Application\Target\ReadModel\BackupTargetNodeEvidence;
 use App\Application\Target\ReadModel\PbsBackupTargetEvidence;
 use App\Application\Target\ReadModel\PbsEndpointMatchStatus;
@@ -26,17 +29,26 @@ final class BackupTargetCandidateModelTest extends TestCase
     public function testBlockerAndEvidenceEnumsAreClosed(): void
     {
         self::assertSame([
-            'freshness_policy_unconfigured', 'connection_disabled', 'connection_not_pve', 'cluster_archived',
+            'storage_inventory_evidence_missing', 'storage_inventory_evidence_stale',
+            'storage_inventory_evidence_future', 'executor_evidence_missing',
+            'executor_evidence_partial', 'executor_evidence_stale', 'executor_evidence_future',
+            'executor_unauthorized',
+            'connection_disabled', 'connection_not_pve', 'cluster_archived',
             'storage_archived', 'storage_disabled', 'backup_content_unsupported',
             'no_active_node', 'no_usable_node', 'storage_not_configured_on_node',
-            'node_state_missing', 'node_offline', 'node_storage_disabled', 'node_storage_inactive',
-            'capacity_unavailable', 'capacity_invalid', 'pbs_mapping_missing',
+            'node_state_missing', 'node_state_evidence_missing', 'node_state_evidence_stale',
+            'node_state_evidence_future', 'node_offline', 'node_storage_disabled', 'node_storage_inactive',
+            'capacity_unavailable', 'capacity_invalid', 'capacity_evidence_missing',
+            'capacity_evidence_stale', 'capacity_evidence_future', 'pbs_mapping_missing',
+            'pbs_mapping_evidence_missing', 'pbs_mapping_evidence_stale', 'pbs_mapping_evidence_future',
             'pbs_endpoint_unresolved', 'pbs_endpoint_ambiguous', 'pbs_connection_disabled',
             'pbs_server_missing', 'pbs_datastore_missing', 'pbs_datastore_archived',
             'pbs_datastore_read_only', 'pbs_namespace_missing', 'pbs_namespace_archived',
-            'pbs_capacity_missing', 'pbs_remote_capacity_unproven',
+            'pbs_capacity_missing', 'pbs_capacity_evidence_missing', 'pbs_capacity_evidence_stale',
+            'pbs_capacity_evidence_future', 'pbs_remote_capacity_unproven',
         ], array_column(BackupTargetBlockerCode::cases(), 'value'));
         self::assertSame(['missing', 'measured', 'unavailable', 'invalid'], array_column(BackupTargetCapacityStatus::cases(), 'value'));
+        self::assertSame(['requires_target_configuration', 'missing', 'partial', 'authorized', 'unauthorized'], array_column(BackupTargetExecutorStatus::cases(), 'value'));
         self::assertSame(['matched', 'unresolved', 'ambiguous'], array_column(PbsEndpointMatchStatus::cases(), 'value'));
     }
 
@@ -108,21 +120,37 @@ final class BackupTargetCandidateModelTest extends TestCase
         $candidate = new BackupTargetCandidate(
             self::UUID, self::UUID, 'PVE', self::UUID, 'cluster-a', 'backup', 'pbs', true,
             'active', '2026-07-12T10:00:00.000000Z', [$node], $pbs,
-            [BackupTargetBlockerCode::FreshnessPolicyUnconfigured, BackupTargetBlockerCode::FreshnessPolicyUnconfigured],
+            [BackupTargetBlockerCode::ExecutorEvidenceMissing, BackupTargetBlockerCode::ExecutorEvidenceMissing],
         );
         self::assertFalse($candidate->canEnable());
-        self::assertSame(['freshness_policy_unconfigured'], $candidate->toArray()['blockers']);
+        self::assertSame(['executor_evidence_missing'], $candidate->toArray()['blockers']);
         $serializedPbs = $candidate->toArray()['pbs'];
-        self::assertIsArray($serializedPbs);
-        self::assertSame('matched', $serializedPbs['endpointMatch']);
+        self::assertSame([
+            'server' => 'pbs.example.test',
+            'port' => 8007,
+            'datastore' => 'primary',
+            'namespace' => null,
+            'mappingObservedAt' => '2026-07-12T10:00:00.000000Z',
+            'endpointMatch' => 'matched',
+            'pbsConnectionId' => self::UUID,
+            'pbsServerId' => self::UUID,
+            'pbsDatastoreId' => self::UUID,
+            'pbsNamespaceId' => self::UUID,
+            'capacitySemantics' => 'datastore_filesystem',
+            'totalBytes' => '100',
+            'usedBytes' => '10',
+            'availableBytes' => '90',
+            'capacityObservedAt' => '2026-07-12T10:00:00.000000Z',
+            'blockers' => [],
+        ], $serializedPbs);
         $enabledPbs = new BackupTargetCandidate(
             self::UUID, self::UUID, 'PVE', self::UUID, 'cluster-a', 'backup', 'pbs', true,
-            'active', '2026-07-12T10:00:00.000000Z', [$node], $pbs, [],
+            'active', '2026-07-12T10:00:00.000000Z', [$node], $pbs, [], self::authorizedExecutor(),
         );
         self::assertTrue($enabledPbs->canEnable());
         $enabled = new BackupTargetCandidate(
             self::UUID, self::UUID, 'PVE', self::UUID, 'cluster-a', 'backup', 'dir', true,
-            'active', '2026-07-12T10:00:00.000000Z', [$node], null, [],
+            'active', '2026-07-12T10:00:00.000000Z', [$node], null, [], self::authorizedExecutor(),
         );
         self::assertTrue($enabled->canEnable());
         $pbsBlocked = new PbsBackupTargetEvidence(
@@ -144,6 +172,48 @@ final class BackupTargetCandidateModelTest extends TestCase
         );
         self::assertFalse($blockedNode->usable());
         self::assertSame(['capacity_invalid'], $blockedNode->toArray()['blockers']);
+    }
+
+    private static function authorizedExecutor(): BackupTargetExecutorEvidence
+    {
+        return new BackupTargetExecutorEvidence(
+            BackupTargetExecutorStatus::Authorized,
+            1,
+            1,
+            1,
+            true,
+            true,
+            true,
+            EvidenceFreshness::Fresh,
+            '2026-07-12T10:00:00.000000Z',
+            [],
+        );
+    }
+
+    public function testExecutorEvidenceIsClosedAndFailClosed(): void
+    {
+        $requiresTarget = new BackupTargetExecutorEvidence(
+            BackupTargetExecutorStatus::RequiresTargetConfiguration,
+            0, 0, 0, null, null, null, EvidenceFreshness::Missing, null, [],
+        );
+        self::assertFalse($requiresTarget->usable());
+        self::assertSame('requires_target_configuration', $requiresTarget->toArray()['status']);
+        self::assertTrue(self::authorizedExecutor()->usable());
+
+        foreach ([
+            static fn () => new BackupTargetExecutorEvidence(BackupTargetExecutorStatus::Missing, 1, 1, 2, null, null, null, EvidenceFreshness::Missing, null, []),
+            static fn () => new BackupTargetExecutorEvidence(BackupTargetExecutorStatus::RequiresTargetConfiguration, 1, 0, 0, null, null, null, EvidenceFreshness::Missing, null, []),
+            static fn () => new BackupTargetExecutorEvidence(BackupTargetExecutorStatus::Authorized, 1, 1, 1, true, true, false, EvidenceFreshness::Fresh, '2026-07-12T10:00:00.000000Z', []),
+            static fn () => new BackupTargetExecutorEvidence(BackupTargetExecutorStatus::Unauthorized, 1, 1, 1, true, true, true, EvidenceFreshness::Fresh, '2026-07-12T10:00:00.000000Z', []),
+            static fn () => new BackupTargetExecutorEvidence(BackupTargetExecutorStatus::Missing, 1, 1, 0, null, null, null, EvidenceFreshness::Fresh, null, []),
+        ] as $invalid) {
+            try {
+                $invalid();
+                self::fail('Invalid executor evidence was accepted.');
+            } catch (InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
     }
 
     public function testNodeUsabilityRequiresPositiveFactsEvenWhenBlockersAreEmpty(): void

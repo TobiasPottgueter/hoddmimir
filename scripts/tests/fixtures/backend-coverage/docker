@@ -1,0 +1,82 @@
+#!/bin/sh
+
+set -eu
+
+IMAGE_ID='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
+
+case "${1:-}" in
+    build)
+        status=${FAKE_COVERAGE_BUILD_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            previous=''
+            for argument in "$@"; do
+                if [ "$previous" = '--iidfile' ]; then
+                    mkdir -p "$(dirname -- "$argument")"
+                    printf '%s\n' "$IMAGE_ID" > "$argument"
+                    break
+                fi
+                previous=$argument
+            done
+        fi
+        exit "$status"
+        ;;
+    image)
+        test "${2:-}" = inspect
+        inspect_count=$(grep -c '^image inspect --format {{.Id}} ' "$FAKE_DOCKER_CALL_LOG")
+        if [ "${FAKE_IMAGE_DRIFT_ON_INSPECT:-0}" -ne 0 ] \
+            && [ "${FAKE_IMAGE_DRIFT_ON_INSPECT:-0}" -eq "$inspect_count" ]; then
+            printf 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'
+        else
+            printf '%s\n' "$IMAGE_ID"
+        fi
+        ;;
+    run)
+        case " $* " in
+    *' tools/compose-owned-coverage.php manifest '*'coverage/core-manifest.json '* )
+        status=${FAKE_MANIFEST_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            mkdir -p backend/coverage
+            printf '{"image_id":"%s"}\n' "$IMAGE_ID" > backend/coverage/core-manifest.json
+        fi
+        exit "$status"
+        ;;
+    *' tools/compose-owned-coverage.php manifest '*'coverage/integration-manifest.json '* )
+        status=${FAKE_MANIFEST_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            mkdir -p backend/coverage
+            printf '{"image_id":"%s"}\n' "$IMAGE_ID" > backend/coverage/integration-manifest.json
+        fi
+        exit "$status"
+        ;;
+    *' vendor/bin/phpunit --configuration phpunit.coverage-core.xml.dist '*'--coverage-php coverage/core.cov '*'--coverage-clover coverage/core.clover.xml '* )
+        status=${FAKE_CORE_COVERAGE_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            mkdir -p backend/coverage
+            printf 'core coverage\n' > backend/coverage/core.cov
+            printf '<coverage/>\n' > backend/coverage/core.clover.xml
+        fi
+        exit "$status"
+        ;;
+    *' tools/compose-owned-coverage.php compose '*'coverage/core.clover.xml '*'coverage/integration.clover.xml '*'coverage/core-manifest.json '*'coverage/integration-manifest.json '*'coverage/clover.xml '* )
+        status=${FAKE_COMPOSE_COVERAGE_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            mkdir -p backend/coverage
+            printf '<coverage/>\n' > backend/coverage/clover.xml
+        fi
+        exit "$status"
+        ;;
+    *' tools/check-coverage.php coverage/clover.xml '* )
+        exit "${FAKE_COVERAGE_GATE_STATUS:-0}"
+        ;;
+    *)
+        printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+        exit 64
+        ;;
+        esac
+        ;;
+    *)
+        printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+        exit 64
+        ;;
+esac

@@ -13,4 +13,6 @@ interface PveBackupClient
     public function taskLog(PveUpid $upid, PveTaskLogQuery $query): PveTaskLogPage;
 
     public function stopTask(PveUpid $upid): PveTaskStopResult;
+
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage;
 }

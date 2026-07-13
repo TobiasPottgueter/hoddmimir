@@ -11,10 +11,15 @@ use App\Application\Target\ReadModel\BackupTargetCandidatePage;
 use App\Application\Target\ReadModel\BackupTargetCandidateQuery;
 use App\Application\Target\ReadModel\BackupTargetCandidateReadModel;
 use App\Application\Target\ReadModel\BackupTargetCapacityStatus;
+use App\Application\Target\ReadModel\BackupTargetExecutorEvidence;
+use App\Application\Target\ReadModel\BackupTargetExecutorStatus;
 use App\Application\Target\ReadModel\BackupTargetNodeEvidence;
+use App\Application\Target\ReadModel\EvidenceFreshness;
+use App\Application\Target\ReadModel\EvidenceFreshnessEvaluator;
 use App\Application\Target\ReadModel\PbsBackupTargetEvidence;
 use App\Application\Target\ReadModel\PbsEndpointMatchStatus;
 use App\Domain\Shared\UInt64Decimal;
+use App\Domain\Shared\Clock;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
@@ -26,12 +31,19 @@ use RuntimeException;
 
 final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetCandidateReadModel
 {
-    public function __construct(private Connection $connection)
-    {
+    private EvidenceFreshnessEvaluator $freshness;
+
+    public function __construct(
+        private Connection $connection,
+        private Clock $clock,
+        int $evidenceFreshnessSeconds,
+    ) {
+        $this->freshness = new EvidenceFreshnessEvaluator($evidenceFreshnessSeconds);
     }
 
     public function candidates(BackupTargetCandidateQuery $query): BackupTargetCandidatePage
     {
+        $now = $this->clock->now();
         $context = $query->cursorContext();
         $params = [];
         $where = [];
@@ -82,12 +94,19 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
         foreach ($rows as $row) {
             $allowlists[bin2hex($this->binary($row, 'id'))] = $this->allowlist($row['node_allowlist_json'] ?? null);
         }
-        $nodes = $this->nodes($storageIds, $allowlists);
-        $pbsEvidence = $this->pbsEvidence($rows, $storageIds);
+        $nodes = $this->nodes($storageIds, $allowlists, $now);
+        $executorEvidence = $this->executorEvidence($storageIds, $now);
+        $pbsEvidence = $this->pbsEvidence($rows, $storageIds, $now);
         $items = [];
         foreach ($rows as $row) {
             $key = bin2hex($this->binary($row, 'id'));
-            $items[] = $this->candidate($row, $nodes[$key] ?? [], $pbsEvidence[$key] ?? null);
+            $items[] = $this->candidate(
+                $row,
+                $nodes[$key] ?? [],
+                $executorEvidence[$key] ?? $this->requiresTargetConfiguration(),
+                $pbsEvidence[$key] ?? null,
+                $now,
+            );
         }
         $last = [] === $rows ? null : $rows[array_key_last($rows)];
         $next = $hasMore && null !== $last
@@ -100,9 +119,22 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
     /** @param array<string, mixed> $row
      *  @param list<BackupTargetNodeEvidence> $nodes
      */
-    private function candidate(array $row, array $nodes, ?PbsBackupTargetEvidence $pbs): BackupTargetCandidate
+    private function candidate(
+        array $row,
+        array $nodes,
+        BackupTargetExecutorEvidence $executor,
+        ?PbsBackupTargetEvidence $pbs,
+        DateTimeImmutable $now,
+    ): BackupTargetCandidate
     {
-        $blockers = [BackupTargetBlockerCode::FreshnessPolicyUnconfigured];
+        $observedAt = $this->nullableDate($row['last_seen_at'] ?? null);
+        $blockers = $this->freshnessBlocker(
+            $this->assessFreshness($now, $observedAt),
+            BackupTargetBlockerCode::StorageInventoryEvidenceMissing,
+            BackupTargetBlockerCode::StorageInventoryEvidenceStale,
+            BackupTargetBlockerCode::StorageInventoryEvidenceFuture,
+        );
+        array_push($blockers, ...$executor->blockers);
         if (!$this->boolean($row, 'connection_enabled')) {
             $blockers[] = BackupTargetBlockerCode::ConnectionDisabled;
         }
@@ -130,6 +162,8 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
         if ('pbs' === $storageType) {
             if (null === ($row['pbs_server'] ?? null)) {
                 $blockers[] = BackupTargetBlockerCode::PbsMappingMissing;
+                $blockers[] = BackupTargetBlockerCode::PbsMappingEvidenceMissing;
+                $blockers[] = BackupTargetBlockerCode::PbsCapacityEvidenceMissing;
             }
         }
 
@@ -143,10 +177,106 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
             $storageType,
             $this->boolean($row, 'shared'),
             $this->string($row, 'inventory_state'),
-            $this->date($row['last_seen_at'] ?? null),
+            $observedAt,
             $nodes,
             $pbs,
             $blockers,
+            $executor,
+        );
+    }
+
+    /** @param list<string> $storageIds
+     *  @return array<string, BackupTargetExecutorEvidence>
+     */
+    private function executorEvidence(array $storageIds, DateTimeImmutable $now): array
+    {
+        if ([] === $storageIds) {
+            return [];
+        }
+        $rows = $this->connection->fetchAllAssociative(<<<'SQL'
+SELECT storage.id AS storage_id,
+       COUNT(DISTINCT target.id) AS target_count,
+       COUNT(allowed.node_id) AS expected_count,
+       COUNT(evidence.id) AS observed_count,
+       MIN(evidence.vm_backup_authorized) AS vm_backup_authorized,
+       MIN(evidence.datastore_allocate_authorized) AS datastore_allocate_authorized,
+       MIN(evidence.authorized) AS authorized,
+       MIN(evidence.observed_at) AS observed_at
+FROM pve_storages storage
+LEFT JOIN backup_targets target
+  ON target.connection_id=storage.connection_id AND target.cluster_id=storage.cluster_id
+ AND target.storage_id=storage.id
+LEFT JOIN backup_target_allowed_nodes allowed ON allowed.target_id=target.id
+LEFT JOIN executor_permission_evidence evidence
+  ON evidence.connection_id=allowed.connection_id AND evidence.cluster_id=allowed.cluster_id
+ AND evidence.target_id=allowed.target_id AND evidence.node_id=allowed.node_id
+ AND evidence.storage_id=storage.id AND evidence.guest_id IS NULL
+WHERE storage.id IN (:storage_ids)
+GROUP BY storage.id
+SQL, ['storage_ids' => $storageIds], ['storage_ids' => ArrayParameterType::BINARY]);
+
+        $result = [];
+        foreach ($rows as $row) {
+            $key = bin2hex($this->binary($row, 'storage_id'));
+            $targets = $this->integer($row, 'target_count');
+            if (0 === $targets) {
+                $result[$key] = $this->requiresTargetConfiguration();
+                continue;
+            }
+            $expected = $this->integer($row, 'expected_count');
+            $observed = $this->integer($row, 'observed_count');
+            $observedAt = $this->nullableDate($row['observed_at'] ?? null);
+            $freshness = $this->assessFreshness($now, $observedAt);
+            $blockers = [];
+            $status = BackupTargetExecutorStatus::Missing;
+            if (0 === $observed || 0 === $expected) {
+                $blockers[] = BackupTargetBlockerCode::ExecutorEvidenceMissing;
+            } elseif ($observed < $expected) {
+                $status = BackupTargetExecutorStatus::Partial;
+                $blockers[] = BackupTargetBlockerCode::ExecutorEvidencePartial;
+            } else {
+                $authorized = $this->nullableBoolean($row['authorized'] ?? null);
+                $status = true === $authorized ? BackupTargetExecutorStatus::Authorized : BackupTargetExecutorStatus::Unauthorized;
+                if (true !== $authorized) {
+                    $blockers[] = BackupTargetBlockerCode::ExecutorUnauthorized;
+                }
+            }
+            array_push($blockers, ...$this->freshnessBlocker(
+                $freshness,
+                BackupTargetBlockerCode::ExecutorEvidenceMissing,
+                BackupTargetBlockerCode::ExecutorEvidenceStale,
+                BackupTargetBlockerCode::ExecutorEvidenceFuture,
+            ));
+            $complete = $observed === $expected && $expected > 0;
+            $result[$key] = new BackupTargetExecutorEvidence(
+                $status,
+                $targets,
+                $expected,
+                $observed,
+                $complete ? $this->nullableBoolean($row['vm_backup_authorized'] ?? null) : null,
+                $complete ? $this->nullableBoolean($row['datastore_allocate_authorized'] ?? null) : null,
+                $complete ? $this->nullableBoolean($row['authorized'] ?? null) : null,
+                $freshness,
+                $observedAt,
+                array_values(array_unique($blockers, SORT_REGULAR)),
+            );
+        }
+        return $result;
+    }
+
+    private function requiresTargetConfiguration(): BackupTargetExecutorEvidence
+    {
+        return new BackupTargetExecutorEvidence(
+            BackupTargetExecutorStatus::RequiresTargetConfiguration,
+            0,
+            0,
+            0,
+            null,
+            null,
+            null,
+            EvidenceFreshness::Missing,
+            null,
+            [],
         );
     }
 
@@ -154,7 +284,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
      *  @param array<string, null|list<string>> $allowlists
      *  @return array<string, list<BackupTargetNodeEvidence>>
      */
-    private function nodes(array $storageIds, array $allowlists): array
+    private function nodes(array $storageIds, array $allowlists, DateTimeImmutable $now): array
     {
         if ([] === $storageIds) {
             return [];
@@ -184,6 +314,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
                 ? BackupTargetCapacityStatus::Missing
                 : BackupTargetCapacityStatus::from($this->string($row, 'capacity_status'));
             $blockers = [];
+            $observedAt = $this->nullableDate($row['observed_at'] ?? null);
             if (!$configured) {
                 $blockers[] = BackupTargetBlockerCode::StorageNotConfiguredOnNode;
             }
@@ -205,6 +336,19 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
                     $blockers[] = BackupTargetBlockerCode::CapacityInvalid;
                 }
             }
+            $freshness = $this->assessFreshness($now, $observedAt);
+            array_push($blockers, ...$this->freshnessBlocker(
+                $freshness,
+                BackupTargetBlockerCode::NodeStateEvidenceMissing,
+                BackupTargetBlockerCode::NodeStateEvidenceStale,
+                BackupTargetBlockerCode::NodeStateEvidenceFuture,
+            ));
+            array_push($blockers, ...$this->freshnessBlocker(
+                $freshness,
+                BackupTargetBlockerCode::CapacityEvidenceMissing,
+                BackupTargetBlockerCode::CapacityEvidenceStale,
+                BackupTargetBlockerCode::CapacityEvidenceFuture,
+            ));
             $result[$key][] = new BackupTargetNodeEvidence(
                 $this->uuid($row, 'id'),
                 $name,
@@ -215,7 +359,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
                 $this->nullableDecimal($row['total_bytes'] ?? null),
                 $this->nullableDecimal($row['used_bytes'] ?? null),
                 $this->nullableDecimal($row['available_bytes'] ?? null),
-                $this->nullableDate($row['observed_at'] ?? null),
+                $observedAt,
                 $blockers,
             );
         }
@@ -226,7 +370,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
      *  @param list<string> $storageIds
      *  @return array<string, PbsBackupTargetEvidence>
      */
-    private function pbsEvidence(array $storageRows, array $storageIds): array
+    private function pbsEvidence(array $storageRows, array $storageIds, DateTimeImmutable $now): array
     {
         $mappingRows = array_filter(
             $storageRows,
@@ -272,7 +416,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
         $result = [];
         foreach ($mappingRows as $mapping) {
             $key = bin2hex($this->binary($mapping, 'id'));
-            $result[$key] = $this->pbsFromMatches($mapping, $matchesByStorage[$key] ?? []);
+            $result[$key] = $this->pbsFromMatches($mapping, $matchesByStorage[$key] ?? [], $now);
         }
         return $result;
     }
@@ -280,7 +424,11 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
     /** @param array<string, mixed> $mapping
      *  @param list<array<string, mixed>> $matches
      */
-    private function pbsFromMatches(array $mapping, array $matches): PbsBackupTargetEvidence
+    private function pbsFromMatches(
+        array $mapping,
+        array $matches,
+        DateTimeImmutable $now,
+    ): PbsBackupTargetEvidence
     {
         $server = $this->string($mapping, 'pbs_server');
         $port = $this->integer($mapping, 'pbs_port');
@@ -297,7 +445,13 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
             $connectionId = $this->binary($match, 'pbs_connection_id');
             $byConnection[bin2hex($connectionId)] = $match;
         }
-        $blockers = [];
+        $mappingObservedAt = $this->nullableDate($mapping['pbs_mapping_observed_at'] ?? null);
+        $blockers = $this->freshnessBlocker(
+            $this->assessFreshness($now, $mappingObservedAt),
+            BackupTargetBlockerCode::PbsMappingEvidenceMissing,
+            BackupTargetBlockerCode::PbsMappingEvidenceStale,
+            BackupTargetBlockerCode::PbsMappingEvidenceFuture,
+        );
         $status = PbsEndpointMatchStatus::Matched;
         $selected = null;
         if ([] === $byConnection) {
@@ -343,13 +497,22 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
             $blockers[] = BackupTargetBlockerCode::PbsEndpointUnresolved;
             $selected = null;
         }
+        $capacityObservedAt = null === $selected
+            ? null
+            : $this->nullableDate($selected['capacity_observed_at'] ?? null);
+        array_push($blockers, ...$this->freshnessBlocker(
+            $this->assessFreshness($now, $capacityObservedAt),
+            BackupTargetBlockerCode::PbsCapacityEvidenceMissing,
+            BackupTargetBlockerCode::PbsCapacityEvidenceStale,
+            BackupTargetBlockerCode::PbsCapacityEvidenceFuture,
+        ));
 
         return new PbsBackupTargetEvidence(
             $server,
             $port,
             $datastore,
             $namespace,
-            $this->date($mapping['pbs_mapping_observed_at'] ?? null),
+            $mappingObservedAt,
             $status,
             null === $selected ? null : $this->nullableUuid($selected['pbs_connection_id']),
             null === $selected ? null : $this->nullableUuid($selected['pbs_server_id']),
@@ -359,7 +522,7 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
             null === $selected ? null : $this->nullableDecimal($selected['total_bytes'] ?? null),
             null === $selected ? null : $this->nullableDecimal($selected['used_bytes'] ?? null),
             null === $selected ? null : $this->nullableDecimal($selected['available_bytes'] ?? null),
-            null === $selected ? null : $this->nullableDate($selected['capacity_observed_at'] ?? null),
+            $capacityObservedAt,
             $blockers,
         );
     }
@@ -493,13 +656,36 @@ final readonly class DbalBackupTargetCandidateReadModel implements BackupTargetC
         throw new RuntimeException('MariaDB returned invalid target-candidate bytes.');
     }
 
-    private function date(mixed $value): string
+    private function assessFreshness(DateTimeImmutable $now, ?string $observedAt): EvidenceFreshness
     {
-        $date = $this->nullableDate($value);
-        if (null === $date) {
-            throw new RuntimeException('MariaDB returned a missing target-candidate timestamp.');
+        if (null === $observedAt) {
+            return $this->freshness->assess($now, null);
         }
-        return $date;
+        $date = DateTimeImmutable::createFromFormat(
+            '!Y-m-d\TH:i:s.u\Z',
+            $observedAt,
+            new DateTimeZone('UTC'),
+        );
+        if (false === $date) {
+            throw new RuntimeException('MariaDB returned an invalid target-candidate timestamp.');
+        }
+
+        return $this->freshness->assess($now, $date);
+    }
+
+    /** @return list<BackupTargetBlockerCode> */
+    private function freshnessBlocker(
+        EvidenceFreshness $freshness,
+        BackupTargetBlockerCode $missing,
+        BackupTargetBlockerCode $stale,
+        BackupTargetBlockerCode $future,
+    ): array {
+        return match ($freshness) {
+            EvidenceFreshness::Fresh => [],
+            EvidenceFreshness::Missing => [$missing],
+            EvidenceFreshness::Stale => [$stale],
+            EvidenceFreshness::Future => [$future],
+        };
     }
 
     private function nullableDate(mixed $value): ?string

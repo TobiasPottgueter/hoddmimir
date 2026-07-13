@@ -75,7 +75,14 @@ services:
         DATABASE_USER=hoddmimir_collector \
         DATABASE_PASSWORD_FILE=/run/secrets/mariadb_collector_password \
         php bin/console hoddmimir:worker:health collector
-        vendor/bin/phpunit --configuration phpunit.integration.xml.dist
+        set -- php -d memory_limit=1G vendor/bin/phpunit --configuration "$${BACKEND_PHPUNIT_CONFIGURATION:-phpunit.integration.xml.dist}"
+        if [ -n "$${BACKEND_COVERAGE_PHP_FILE:-}" ]; then
+          set -- "$$@" --coverage-php "$$BACKEND_COVERAGE_PHP_FILE"
+        fi
+        if [ -n "$${BACKEND_COVERAGE_CLOVER_FILE:-}" ]; then
+          set -- "$$@" --coverage-clover "$$BACKEND_COVERAGE_CLOVER_FILE"
+        fi
+        "$$@"
     environment:
       APP_ENV: test
       APP_DEBUG: "0"

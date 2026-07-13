@@ -29,6 +29,7 @@ SECRET_NAMES = (
     "mariadb_web_password",
     "mariadb_collector_password",
     "mariadb_backup_worker_password",
+    "matrix_webhook_url",
 )
 DATABASE_SECRET_NAMES = (
     "mariadb_root_password",

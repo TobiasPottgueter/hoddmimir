@@ -1,0 +1,15 @@
+{
+  "version": {"data": {"version": "3.4.4", "release": "1", "repoid": "36ef1b1234567890abcdef1234567890abcdef12"}},
+  "permissionMatrix": {"data": {
+    "/system/status": {"Sys.Audit": true},
+    "/system/tasks": {"Sys.Audit": true},
+    "/datastore": {"Datastore.Audit": true},
+    "/remote": {"Remote.Audit": true}
+  }},
+  "permissions": {
+    "/system/status": {"data": {"/system/status": {"Sys.Audit": true}}},
+    "/system/tasks": {"data": {"/system/tasks": {"Sys.Audit": true}}},
+    "/datastore": {"data": {"/datastore": {"Datastore.Audit": true}}},
+    "/remote": {"data": {"/remote": {"Remote.Audit": true}}}
+  }
+}

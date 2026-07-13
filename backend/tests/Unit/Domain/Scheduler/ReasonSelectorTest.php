@@ -90,7 +90,7 @@ final class ReasonSelectorTest extends TestCase
         }
         self::assertSame($byteEvidence, $inputs->byteReasonEvidence);
         self::assertSame('+00:00', $byteEvidence->cooldownBoundary->format('P'));
-        self::assertSame([20, 10, 5], [
+        self::assertSame(['20', '10', '5'], [
             $byteEvidence->currentBytes,
             $byteEvidence->baselineBytes,
             $byteEvidence->bytesThreshold,
@@ -133,6 +133,32 @@ final class ReasonSelectorTest extends TestCase
                 ),
             ));
         }
+    }
+
+    public function testUInt64MaximumCountersRemainLossless(): void
+    {
+        $evidence = ByteReasonEvidence::fromCounters(
+            new DateTimeImmutable('2026-07-12T09:00:00Z'),
+            '18446744073709551615',
+            '18446744073709551500',
+            '114',
+        );
+        self::assertNotNull($evidence);
+        self::assertTrue($evidence->thresholdExceeded());
+        self::assertSame('18446744073709551615', $evidence->currentBytes);
+    }
+
+    public function testByteDifferenceBorrowsAcrossDecimalPlaces(): void
+    {
+        $evidence = ByteReasonEvidence::fromCounters(
+            new DateTimeImmutable('2026-07-12T09:00:00Z'),
+            100,
+            1,
+            98,
+        );
+
+        self::assertNotNull($evidence);
+        self::assertTrue($evidence->thresholdExceeded());
     }
 
     /** @return iterable<string, array{int, int, int}> */

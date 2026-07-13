@@ -31,7 +31,7 @@ final readonly class ReadConnectionWithFailover
         $lastEndpoint = $endpoints[0]->endpointId;
         $lastFailure = EndpointReadFailureCode::RootUnusable;
 
-        $endpointCount = count($endpoints);
+        $endpointCount = \count($endpoints);
         foreach ($endpoints as $index => $endpoint) {
             $lastEndpoint = $endpoint->endpointId;
             $attempt = null;
@@ -87,7 +87,7 @@ final readonly class ReadConnectionWithFailover
                 && InstallationBindingKind::PbsLegacyNode === $actualBinding->kind
                 && (null === $expectedBinding
                     || InstallationBindingKind::PbsLegacyNode === $expectedBinding->kind)
-                && count($target->endpoints) > 1) {
+                && \count($target->endpoints) > 1) {
                 $this->finishAttempt(
                     $attemptSink,
                     $checkpoint,
@@ -217,7 +217,7 @@ final readonly class ReadConnectionWithFailover
             && $snapshot->scope->installationWide
             && $snapshot->isComplete()
             && $expected->legacyEndpointId?->bytes === $endpointId->bytes
-            && hash_equals($expected->identity, $snapshot->node);
+            && \hash_equals($expected->identity, $snapshot->node);
     }
 
     private function matchesProduct(

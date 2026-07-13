@@ -7,6 +7,8 @@ import { useBackupTargetsStore } from "@/stores/backupTargets";
 import {
   backupTargetBlockerLabel,
   backupTargetCapacityLabel,
+  backupTargetExecutorStatusLabel,
+  evidenceFreshnessLabel,
   formatDecimalBytes,
   pbsEndpointMatchLabel,
   useBackupTargetCandidates,
@@ -24,9 +26,21 @@ const candidate = {
   inventoryState: "active",
   observedAt: "2026-07-12T10:00:00.000000Z",
   canEnable: false,
+  executor: {
+    status: "requires_target_configuration",
+    targetCount: 0,
+    expectedNodeCount: 0,
+    observedNodeCount: 0,
+    vmBackupAuthorized: null,
+    datastoreAllocateAuthorized: null,
+    authorized: null,
+    freshness: "missing",
+    observedAt: null,
+    blockers: ["executor_evidence_missing"],
+  },
   nodes: [],
   pbs: null,
-  blockers: ["freshness_policy_unconfigured"],
+  blockers: ["storage_inventory_evidence_stale"],
 } satisfies BackupTargetCandidate;
 
 describe("useBackupTargetCandidates", () => {
@@ -44,13 +58,51 @@ describe("useBackupTargetCandidates", () => {
     expect(backupTargetBlockerLabel("node_offline")).toContain("nicht online");
     expect(backupTargetCapacityLabel("measured")).toBe("Gemessen");
     expect(pbsEndpointMatchLabel("ambiguous")).toBe("Mehrdeutig");
+    expect(
+      backupTargetExecutorStatusLabel("requires_target_configuration"),
+    ).toContain("Zielkonfiguration");
+    expect(evidenceFreshnessLabel("future")).toContain("Zukunft");
   });
 
-  it("macht die ungelöste Freshness-Grenze reaktiv sichtbar", () => {
+  it("macht konkrete Freshness-Blocker reaktiv sichtbar", () => {
     const store = useBackupTargetsStore();
-    const { freshnessUnresolved } = useBackupTargetCandidates();
-    expect(freshnessUnresolved.value).toBe(false);
+    const { hasFreshnessBlocker } = useBackupTargetCandidates();
+    expect(hasFreshnessBlocker.value).toBe(false);
     store.items = [candidate];
-    expect(freshnessUnresolved.value).toBe(true);
+    expect(hasFreshnessBlocker.value).toBe(true);
+    store.items = [
+      {
+        ...candidate,
+        blockers: [],
+        executor: {
+          ...candidate.executor,
+          freshness: "stale",
+          blockers: ["executor_evidence_stale"],
+        },
+      },
+    ];
+    expect(hasFreshnessBlocker.value).toBe(true);
+    store.items = [
+      {
+        ...candidate,
+        blockers: [],
+        nodes: [
+          {
+            nodeId: UUID,
+            nodeName: "pve-a",
+            configuredForStorage: true,
+            enabled: true,
+            active: true,
+            capacityStatus: "missing",
+            totalBytes: null,
+            usedBytes: null,
+            availableBytes: null,
+            observedAt: null,
+            blockers: ["capacity_evidence_missing"],
+          },
+        ],
+      },
+    ];
+    expect(hasFreshnessBlocker.value).toBe(true);
   });
 });

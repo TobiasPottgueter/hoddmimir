@@ -10,6 +10,7 @@
         "doctrine/migrations": "^3.9",
         "php": "^8.5",
         "ext-ctype": "*",
+        "ext-curl": "*",
         "ext-iconv": "*",
         "ext-openssl": "*",
         "ext-sodium": "*",

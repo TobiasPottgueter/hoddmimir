@@ -14,6 +14,7 @@ use App\Application\Proxmox\Pve\PveBackupSubmissionStatus;
 use App\Application\Proxmox\Pve\PveGuestType;
 use App\Application\Proxmox\Pve\PveTaskLifecycle;
 use App\Application\Proxmox\Pve\PveTaskLogQuery;
+use App\Application\Proxmox\Pve\PveTaskQuery;
 use App\Application\Proxmox\Pve\PveTaskStopStatus;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Application\Proxmox\Pve\PveVersion;
@@ -23,6 +24,7 @@ use App\Infrastructure\Proxmox\PveBackup\PveBackupTaskLogReader;
 use App\Infrastructure\Proxmox\PveBackup\PveBackupWriteTransportResult;
 use App\Infrastructure\Proxmox\PveBackup\PveBackupWriteTransportStatus;
 use App\Infrastructure\Proxmox\PveBackup\PveHttpBackupClient;
+use App\Infrastructure\Proxmox\PveTaskPageReader;
 use App\Infrastructure\Proxmox\PveTaskStatusReader;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -131,6 +133,27 @@ final class PveHttpBackupClientTest extends TestCase
         );
     }
 
+    public function testTaskPageUsesTypedQueryAndMapsReaderFailure(): void
+    {
+        $upid = $this->upid();
+        $row = [
+            'upid' => $upid->raw, 'node' => $upid->node, 'pid' => $upid->pid,
+            'pstart' => $upid->processStart, 'starttime' => $upid->startTime,
+            'type' => $upid->type, 'id' => $upid->id, 'user' => $upid->user, 'status' => 'RUNNING',
+        ];
+        $query = PveTaskQuery::active(limit: 10);
+        $transport = new RecordingBackupTransport(reads: [[$row]]);
+        $page = $this->client($transport)->taskPage('pve-a', $query);
+        self::assertCount(1, $page->tasks);
+        self::assertSame(['nodes', 'pve-a', 'tasks'], $transport->getPaths[0]);
+        self::assertSame($query->parameters(), $transport->getQueries[0]);
+
+        $this->assertFailure(
+            PveBackupApiFailureCode::InvalidResponse,
+            fn () => $this->client(new RecordingBackupTransport(reads: ['bad']))->taskPage('pve-a', $query),
+        );
+    }
+
     public function testLogReaderRejectsNonListsOversizeRowsMalformedRowsEntriesAndOrdering(): void
     {
         $reader = new PveBackupTaskLogReader();
@@ -197,6 +220,7 @@ final class PveHttpBackupClientTest extends TestCase
             new PveBackupSubmissionReader(),
             new PveTaskStatusReader($version),
             new PveBackupTaskLogReader(),
+            new PveTaskPageReader(),
         );
     }
 

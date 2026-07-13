@@ -11,6 +11,8 @@
       - hoddmimir_web_port | int <= 65535
       - hoddmimir_collector_grid_width_seconds | int > 0
       - hoddmimir_collector_grid_width_seconds | int <= 31536000
+      - hoddmimir_evidence_freshness_seconds | int >= 1
+      - hoddmimir_evidence_freshness_seconds | int <= 86400
       - hoddmimir_pve_storage_max_node_fanout | int >= 1
       - hoddmimir_pve_storage_max_node_fanout | int <= 1024
       - hoddmimir_pbs_max_datastore_fanout | int >= 1
@@ -56,9 +58,25 @@
       - hoddmimir_pbs_monitor_history_window_seconds | int >= 1
       - hoddmimir_pbs_monitor_history_window_seconds | int <= 86400
       - hoddmimir_backup_worker_poll_interval_seconds | int > 0
+      - hoddmimir_matrix_webhook_channel is match('^[a-z0-9][a-z0-9._-]{0,63}$')
+      - hoddmimir_matrix_webhook_timeout_seconds | int >= 1
+      - hoddmimir_matrix_webhook_timeout_seconds | int <= 30
       - hoddmimir_compose_wait_timeout_seconds | int > 0
       - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack
+      - not (hoddmimir_backup_execution_enabled | bool) or (hoddmimir_matrix_notifications_enabled | bool)
     fail_msg: Image references, runtime values, database name, or backup activation acknowledgement are invalid.
+
+- name: Validate secret Matrix webhook configuration
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_matrix_webhook_url is defined
+      - hoddmimir_matrix_webhook_url | length >= 12
+      - hoddmimir_matrix_webhook_url | length <= 2048
+      - hoddmimir_matrix_webhook_url is match('^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s#]*)?$')
+      - not (hoddmimir_matrix_notifications_enabled | bool) or hoddmimir_matrix_webhook_url != 'https://matrix.invalid/disabled'
+      - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_matrix_webhook_url != 'https://matrix.invalid/disabled'
+    fail_msg: Supply a strict HTTPS Matrix webhook URL; production delivery may not use the disabled placeholder.
+  no_log: true
 
 - name: Require immutable image references
   ansible.builtin.assert:

@@ -22,6 +22,30 @@ for this fixture revision.
 
 ## Storage enrichment source boundary
 
+The onboarding fixtures additionally use the reviewed `GET /access/roles` and
+`GET /access/acl` schemas. Their API Viewer contracts are identical across the
+three pinned schema assets: roles hash
+`7d394f65157cfc1bbb2e137b0947845cb90c271336a1c865db835f46e317a6cc`,
+ACL hash `357788fb98390d65defd6d42059938c18ab2f308873219383abc8c7d044ac22d`.
+The official `GET /access/permissions` contract accepts the optional `path`
+parameter on all three lines; its map values are propagation flags for defined
+effective privileges, not grant booleans.
+
+The behavior behind those schemas was reviewed in the official
+`pve-access-control` source at these immutable refs:
+
+- PVE 7 `stable-7`: `f96a4de50d5120bbb42f57b972c886ce76a1643d`;
+- PVE 8 `stable-bookworm`: `0f258e710ec5a7dfd23d054a29cf0ba65fec2362`;
+- PVE 9 `master`: `5ccd07d9302562b73374d331b63d25b04b86766c`.
+
+`API2/AccessControl.pm` permits an API token to read its own effective matrix,
+including a path-scoped matrix. `API2/ACL.pm` permits token authentication and
+returns the complete ACL tree only when the caller has `Sys.Audit` on
+`/access`. Hoddmímir therefore first proves the scanner's propagated root
+`Sys.Audit` at the `/access` child sentinel, then reads ACL paths with the scan
+token. Each ACL path is compared separately with the scan and backup token's
+own effective matrix; the backup token never needs ACL-list permission.
+
 The Viewer return schema for `GET /storage` declares only a small part of the
 record that the official implementation returns. The `storage-config.json`
 and `storage-node-*.json` fixtures therefore also follow the official
@@ -69,14 +93,20 @@ then its exact `info.GET` member.
 |---|---|---|---|
 | 7 | `GET /version` | `7/version.json` | `8d992953d1db7f572a713f5e01b8ca2c58e312591acdf2b6bfb30219a4fc4d1d` |
 | 7 | `GET /access/permissions` | `7/access-permissions.json` | `a67e72f1f85b6f5ec1ff0837f28184e745e6f826defab6af274a0593cbdeca27` |
+| 7 | `GET /access/roles` | `7/onboarding-evidence.json` | `7d394f65157cfc1bbb2e137b0947845cb90c271336a1c865db835f46e317a6cc` |
+| 7 | `GET /access/acl` | `7/onboarding-evidence.json` | `357788fb98390d65defd6d42059938c18ab2f308873219383abc8c7d044ac22d` |
 | 7 | `GET /cluster/status` | `7/cluster-status-clustered.json`, `7/cluster-status-standalone.json` | `4e93e631920828645b5ebc44a21720b88b93affeec94d91d7b5d8188f5e6e96b` |
 | 7 | `GET /cluster/resources` | `7/cluster-resources.json`, `7/cluster-resources-standalone.json` | `7389aa80644355025d25df192c85dcd79099d1349884cb67fe6ac1fc559e930b` |
 | 8 | `GET /version` | `8/version.json` | `befcb6a8e5a93b96c046dbe3d34d9e9ecbfceda16dc09c42c107174267692a64` |
 | 8 | `GET /access/permissions` | `8/access-permissions.json` | `2d8354d03464e629d3c9f8fdebee5abf35720c2ff32235d0578c39c5319c76a8` |
+| 8 | `GET /access/roles` | `8/onboarding-evidence.json` | `7d394f65157cfc1bbb2e137b0947845cb90c271336a1c865db835f46e317a6cc` |
+| 8 | `GET /access/acl` | `8/onboarding-evidence.json` | `357788fb98390d65defd6d42059938c18ab2f308873219383abc8c7d044ac22d` |
 | 8 | `GET /cluster/status` | `8/cluster-status-clustered.json`, `8/cluster-status-standalone.json` | `4e93e631920828645b5ebc44a21720b88b93affeec94d91d7b5d8188f5e6e96b` |
 | 8 | `GET /cluster/resources` | `8/cluster-resources.json`, `8/cluster-resources-standalone.json` | `cc00af957d438103189eb450c6b8d9ba3eb8c597467a7ad515c9208fdeeb031c` |
 | 9 | `GET /version` | `9/version.json` | `befcb6a8e5a93b96c046dbe3d34d9e9ecbfceda16dc09c42c107174267692a64` |
 | 9 | `GET /access/permissions` | `9/access-permissions.json` | `2d8354d03464e629d3c9f8fdebee5abf35720c2ff32235d0578c39c5319c76a8` |
+| 9 | `GET /access/roles` | `9/onboarding-evidence.json` | `7d394f65157cfc1bbb2e137b0947845cb90c271336a1c865db835f46e317a6cc` |
+| 9 | `GET /access/acl` | `9/onboarding-evidence.json` | `357788fb98390d65defd6d42059938c18ab2f308873219383abc8c7d044ac22d` |
 | 9 | `GET /cluster/status` | `9/cluster-status-clustered.json`, `9/cluster-status-standalone.json` | `4e93e631920828645b5ebc44a21720b88b93affeec94d91d7b5d8188f5e6e96b` |
 | 9 | `GET /cluster/resources` | `9/cluster-resources.json`, `9/cluster-resources-standalone.json` | `ee572342048c90a7a91e49f54b6e2299d9c4f826eec1800a7409a5086e9caf4e` |
 

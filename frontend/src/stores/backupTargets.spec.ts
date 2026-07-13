@@ -22,9 +22,21 @@ const candidate = {
   inventoryState: "active",
   observedAt: "2026-07-12T10:00:00.000000Z",
   canEnable: false,
+  executor: {
+    status: "requires_target_configuration",
+    targetCount: 0,
+    expectedNodeCount: 0,
+    observedNodeCount: 0,
+    vmBackupAuthorized: null,
+    datastoreAllocateAuthorized: null,
+    authorized: null,
+    freshness: "missing",
+    observedAt: null,
+    blockers: ["executor_evidence_missing"],
+  },
   nodes: [],
   pbs: null,
-  blockers: ["freshness_policy_unconfigured"],
+  blockers: ["storage_inventory_evidence_missing"],
 } satisfies BackupTargetCandidate;
 
 function page(
@@ -46,6 +58,7 @@ function api(
   ...results: Array<CursorPage<BackupTargetCandidate>>
 ): ConfigurationApi {
   return {
+    getBackupTargets: vi.fn().mockResolvedValue(page([])),
     getBackupTargetCandidates: vi
       .fn()
       .mockImplementation(() => Promise.resolve(results.shift() ?? page([]))),
@@ -110,6 +123,7 @@ describe("BackupTargetsStore", () => {
     async (httpStatus, text) => {
       const store = useBackupTargetsStore();
       const client: ConfigurationApi = {
+        getBackupTargets: vi.fn().mockResolvedValue(page([])),
         getBackupTargetCandidates: vi.fn().mockRejectedValue({
           httpStatus,
           payload: { error: { message: "SQL secret" } },
@@ -135,6 +149,7 @@ describe("BackupTargetsStore", () => {
   it("verwirft verspätete Erfolge und Fehler vollständig", async () => {
     const oldSuccess = deferred<CursorPage<BackupTargetCandidate>>();
     const client: ConfigurationApi = {
+      getBackupTargets: vi.fn().mockResolvedValue(page([])),
       getBackupTargetCandidates: vi
         .fn()
         .mockReturnValueOnce(oldSuccess.promise)

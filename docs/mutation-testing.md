@@ -10,17 +10,19 @@ from the rewrite plan:
 
 | Gate | Source | Minimum MSI |
 | --- | --- | ---: |
-| Critical | `Domain`, collector scheduling, inventory orchestration and mapping, monitoring state, capability decisions, and PBS-content state | 90% |
+| Critical | complete `Domain`, collector scheduling, inventory orchestration and mapping, monitoring state, capability decisions, PBS-content state, and scheduler/shadow orchestration | 90% |
 | Global | all handwritten application source below `backend/src` | 80% |
 
 The critical source list is explicit in `backend/infection-critical.json5.dist`
 so new scheduler or state-machine modules must be added intentionally. The
 global configuration is `backend/infection.json5.dist`.
 
-The current inventory critical set explicitly covers `Connection`, `Pve`, and
-`Pbs` orchestration/mapping alongside `Capability` and `PbsContent`. Phase 4
-scheduler and backup state-machine directories must be appended to this list
-when they are introduced.
+The critical set explicitly covers the complete `Domain` tree, including the
+Phase-4 scheduler and Phase-5 backup state machines. Application-level
+scheduler/shadow orchestration is included through `src/Application/Scheduler`;
+collector `Connection`, `Pve`, `Pbs`, `Capability`, and `PbsContent` paths
+remain listed explicitly. Future state-machine or scheduler application
+directories must still be added intentionally.
 
 ## Allowlist
 
@@ -88,6 +90,10 @@ full mutation campaigns:
 
 The full gate is still release-blocking even though it is scheduled rather than
 attached to every push. A red nightly run must be fixed before a release.
+
+The complete critical and global result for the locally accepted Phase-6
+worktree is recorded in the
+[Phase-6 local acceptance](phase-6-local-acceptance.md).
 
 ## Design sources
 

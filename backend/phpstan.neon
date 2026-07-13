@@ -3,5 +3,7 @@ parameters:
     paths:
         - src
         - tests
+    scanFiles:
+        - tools/compose-owned-coverage.php
     tmpDir: var/phpstan
     treatPhpDocTypesAsCertain: true

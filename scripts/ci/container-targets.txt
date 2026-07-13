@@ -1,0 +1,4 @@
+# artifact|dockerfile|target
+worker|docker/php/Dockerfile|worker
+web|docker/web/Dockerfile|web
+mariadb|docker/mariadb/Dockerfile|

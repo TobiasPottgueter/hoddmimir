@@ -23,7 +23,7 @@ final readonly class PveGuestObservation
         if (!PveCoreTextValidator::isNodeName($this->node)) {
             throw new InvalidArgumentException('The PVE guest node name is invalid.');
         }
-        if (null !== $this->name && ('' === $this->name || strlen($this->name) > 255)) {
+        if (null !== $this->name && ('' === $this->name || \strlen($this->name) > 255)) {
             throw new InvalidArgumentException('The PVE guest name is invalid.');
         }
         if (null !== $this->diskWriteBytes && $this->diskWriteBytes < 0) {

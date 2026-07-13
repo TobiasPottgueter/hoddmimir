@@ -18,6 +18,7 @@ hoddmimir_mariadb_image: ""
 
 hoddmimir_database_name: hoddmimir
 hoddmimir_collector_grid_width_seconds: 120
+hoddmimir_evidence_freshness_seconds: 300
 hoddmimir_pve_storage_max_node_fanout: 128
 hoddmimir_pbs_max_datastore_fanout: 128
 hoddmimir_pbs_content_max_datastores: 128
@@ -41,9 +42,13 @@ hoddmimir_pbs_monitor_max_rows_per_stream: 4096
 hoddmimir_pbs_monitor_max_jobs_per_kind: 4096
 hoddmimir_pbs_monitor_history_window_seconds: 86400
 hoddmimir_backup_worker_poll_interval_seconds: 5
+hoddmimir_backup_worker_heartbeat_ttl_seconds: 150
 hoddmimir_backup_execution_enabled: false
 hoddmimir_backup_execution_activation_ack: ""
 hoddmimir_backup_execution_required_ack: ENABLE_PRODUCTION_BACKUPS
+hoddmimir_matrix_notifications_enabled: false
+hoddmimir_matrix_webhook_channel: proxmox-backup
+hoddmimir_matrix_webhook_timeout_seconds: 10
 hoddmimir_web_port: 8080
 hoddmimir_healthcheck_url: "http://127.0.0.1:{{ hoddmimir_web_port }}/api/health"
 hoddmimir_compose_wait_timeout_seconds: 180

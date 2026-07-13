@@ -5,13 +5,46 @@ set -eu
 SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$SCRIPT_DIRECTORY/.." && pwd)
 COMPOSE_FILE="$REPOSITORY_ROOT/compose.integration.yaml"
+COMPOSE_COVERAGE_FILE="$REPOSITORY_ROOT/compose.integration-coverage.yaml"
 PROJECT_NAME=${HODDMIMIR_INTEGRATION_PROJECT:-hoddmimir-integration-$$}
+COVERAGE_ENABLED=0
+COVERAGE_DIRECTORY="$REPOSITORY_ROOT/backend/coverage"
+COVERAGE_PHP_OUTPUT="$COVERAGE_DIRECTORY/integration.cov"
+COVERAGE_CLOVER_OUTPUT="$COVERAGE_DIRECTORY/integration.clover.xml"
+
+case $# in
+    0)
+        ;;
+    1)
+        if [ "$1" != "--coverage" ]; then
+            printf 'Usage: %s [--coverage]\n' "$0" >&2
+            exit 2
+        fi
+        COVERAGE_ENABLED=1
+        ;;
+    *)
+        printf 'Usage: %s [--coverage]\n' "$0" >&2
+        exit 2
+        ;;
+esac
+
+compose() {
+    if [ "$COVERAGE_ENABLED" -eq 1 ]; then
+        docker compose \
+            --project-name "$PROJECT_NAME" \
+            --file "$COMPOSE_FILE" \
+            --file "$COMPOSE_COVERAGE_FILE" \
+            "$@"
+    else
+        docker compose \
+            --project-name "$PROJECT_NAME" \
+            --file "$COMPOSE_FILE" \
+            "$@"
+    fi
+}
 
 cleanup() {
-    docker compose \
-        --project-name "$PROJECT_NAME" \
-        --file "$COMPOSE_FILE" \
-        down --volumes --remove-orphans >/dev/null
+    compose down --volumes --remove-orphans >/dev/null
 }
 
 finish() {
@@ -60,7 +93,39 @@ trap 'exit 143' TERM
 
 cd "$REPOSITORY_ROOT"
 
-docker compose \
-    --project-name "$PROJECT_NAME" \
-    --file "$COMPOSE_FILE" \
-    up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests
+if [ "$COVERAGE_ENABLED" -eq 1 ]; then
+    if [ -L "$COVERAGE_DIRECTORY" ]; then
+        printf 'Refusing to use a symlinked backend coverage directory: %s\n' "$COVERAGE_DIRECTORY" >&2
+        exit 2
+    fi
+    mkdir -p "$COVERAGE_DIRECTORY"
+    if [ ! -d "$COVERAGE_DIRECTORY" ] || [ -L "$COVERAGE_DIRECTORY" ]; then
+        printf 'Backend coverage path is not a safe directory: %s\n' "$COVERAGE_DIRECTORY" >&2
+        exit 2
+    fi
+    for artifact in "$COVERAGE_PHP_OUTPUT" "$COVERAGE_CLOVER_OUTPUT"; do
+        rm -f "$artifact"
+        if [ -e "$artifact" ] || [ -L "$artifact" ]; then
+            printf 'Could not safely clear integration coverage artifact: %s\n' "$artifact" >&2
+            exit 2
+        fi
+    done
+    COVERAGE_UID=$(id -u)
+    COVERAGE_GID=$(id -g)
+    export COVERAGE_UID COVERAGE_GID
+fi
+
+if [ "$COVERAGE_ENABLED" -eq 1 ]; then
+    compose up --abort-on-container-exit --exit-code-from backend-tests backend-tests
+else
+    compose up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests
+fi
+
+if [ "$COVERAGE_ENABLED" -eq 1 ]; then
+    for artifact in "$COVERAGE_PHP_OUTPUT" "$COVERAGE_CLOVER_OUTPUT"; do
+        if [ ! -f "$artifact" ] || [ -L "$artifact" ] || [ ! -s "$artifact" ]; then
+            printf 'Integration coverage artifact was not exported safely: %s\n' "$artifact" >&2
+            exit 2
+        fi
+    done
+fi

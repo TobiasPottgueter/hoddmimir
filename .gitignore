@@ -53,6 +53,7 @@ frontend/blob-report/
 coverage/
 .phpunit.cache/
 reports/
+artifacts/
 *.log
 
 # Runtime data

@@ -1,6 +1,6 @@
 # PVE-7/8/9-Vertrag für das Storage-Enrichment
 
-Stand: 10. Juli 2026
+Stand: 13. Juli 2026
 
 ## Zweck und Grenze
 
@@ -17,12 +17,12 @@ Node-Beobachtungen. Er umfasst exakt diese zusätzlichen API2-JSON-Aufrufe:
 Einzelendpunkt verlangt `Datastore.Allocate` und widerspricht dem
 Least-Privilege-Vertrag des Collectors.
 
-Der Slice erzeugt reine Application-DTOs, positive Beobachtungen und eine
-Autoritativitätsentscheidung. Er enthält noch keine MariaDB-Persistenz, keine
-Archivierung beziehungsweise negativen Diffs, keine Aktivierung von
-Backup-Zielen, keine direkte PBS-API-Verifikation und keine WebApp-Funktion.
-Er ist noch nicht in den Collector oder dessen Dependency Injection
-eingebunden.
+Der Reader-Slice erzeugt reine Application-DTOs, positive Beobachtungen und
+eine Autoritativitätsentscheidung. Er selbst enthält keine MariaDB-Persistenz,
+Archivierung beziehungsweise negativen Diffs, Aktivierung von Backup-Zielen,
+direkte PBS-API-Verifikation oder WebApp-Funktion. Die Collector-Orchestrierung
+und Dependency Injection binden ihn inzwischen ein; getrennte Application- und
+Persistenz-Slices übernehmen Mapping, gefenceten Apply und Darstellung.
 
 ## Operativer P0-Hinweis: der Status-GET kann Storages aktivieren
 

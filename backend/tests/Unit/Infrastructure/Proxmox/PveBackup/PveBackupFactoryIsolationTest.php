@@ -15,6 +15,7 @@ use App\Application\Security\SecretContext;
 use App\Application\Security\SecretPurpose;
 use App\Infrastructure\Proxmox\PveApiTokenIdentity;
 use App\Infrastructure\Proxmox\PveBackup\PveBackupEndpointConfiguration;
+use App\Infrastructure\Proxmox\PveBackup\PveBackupClientFactory;
 use App\Infrastructure\Proxmox\PveBackup\PveBackupTokenAuthenticator;
 use App\Infrastructure\Proxmox\PveBackup\PveNativeBackupClientFactory;
 use App\Infrastructure\Proxmox\PveHttpClientFactory;
@@ -115,13 +116,18 @@ final class PveBackupFactoryIsolationTest extends TestCase
         $this->assertFactoryFailure($factory, $this->version(10), PveBackupApiFailureCode::UnsupportedVersion);
     }
 
-    public function testBackupWorkerHasNoWriteClientDependency(): void
+    public function testBackupWorkerCommandDependsOnlyOnTheApplicationRuntimeBoundary(): void
     {
         $constructor = (new ReflectionClass(BackupWorkerCommand::class))->getConstructor();
 
         self::assertNotNull($constructor);
-        self::assertCount(1, $constructor->getParameters());
-        self::assertSame('workerLoop', $constructor->getParameters()[0]->getName());
+        $types = array_map(
+            static fn (\ReflectionParameter $parameter): string => (string) $parameter->getType(),
+            $constructor->getParameters(),
+        );
+        self::assertContains('App\\Application\\Backup\\Worker\\BackupWorkerRuntime', $types);
+        self::assertNotContains(PveBackupClient::class, $types);
+        self::assertNotContains(PveBackupClientFactory::class, $types);
     }
 
     private function assertFactoryFailure(

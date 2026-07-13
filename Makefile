@@ -1,14 +1,18 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test api-schema-drift-test test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets config build up down logs ps migration-wrapper-test migrate backend-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
+ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
 ANSIBLE_EXAMPLE_INVENTORY := inventories/production/hosts.example.yml
 ANSIBLE_PRODUCTION_INVENTORY := inventories/production/hosts.yml
 ANSIBLE_VAULT_ARGS ?= --ask-vault-pass
 INFECTION_THREADS ?= max
 REUSE_MUTATION_COVERAGE ?= 0
 MUTATION_IMAGE := hoddmimir-backend-mutation:local
+GITLEAKS_IMAGE := zricethezav/gitleaks:v8.24.3@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055
+TRIVY_IMAGE := aquasec/trivy:0.64.1@sha256:a8ca29078522f30393bdb34225e4c0994d38f37083be81a42da3a2a7e1488e9e
+SUPPLY_CHAIN_DIRECTORY ?= $(CURDIR)/artifacts/supply-chain
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -49,12 +53,11 @@ backend-integration-wrapper-test: ## Test integration cleanup and exit semantics
 backend-integration: migration-wrapper-test backend-integration-wrapper-test ## Run the isolated MariaDB 11.4 integration suite
 	./scripts/test-backend-integration.sh
 
-backend-coverage: ## Generate the backend coverage foundation report
-	docker build --target backend-coverage-runtime --tag hoddmimir-backend-coverage:local --file docker/php/Dockerfile .
-	mkdir -p backend/coverage
-	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --env XDEBUG_MODE=coverage --volume "$(CURDIR)/backend/coverage:/app/coverage" hoddmimir-backend-coverage:local php -d memory_limit=1G vendor/bin/phpunit --configuration phpunit.xml.dist --coverage-clover coverage/clover.xml --coverage-text
-	test -s backend/coverage/clover.xml
-	docker run --rm --user "$$(id -u):$$(id -g)" --env HOME=/tmp --volume "$(CURDIR)/backend/coverage:/app/coverage:ro" hoddmimir-backend-coverage:local php tools/check-coverage.php coverage/clover.xml
+backend-coverage-wrapper-test: ## Test owned split coverage cleanup and failure propagation without Docker
+	sh scripts/tests/test-backend-coverage.sh
+
+backend-coverage: backend-coverage-wrapper-test backend-integration-wrapper-test ## Compose disjoint core and MariaDB coverage, then enforce gates
+	./scripts/run-backend-coverage.sh
 
 mutation-image: ## Build the pinned PHP 8.5 Infection runtime
 	docker build --target backend-mutation-runtime --tag $(MUTATION_IMAGE) --file docker/php/Dockerfile .
@@ -78,8 +81,25 @@ mutation: mutation-image ## Enforce both mutation gates with one reusable covera
 frontend-test: ## Build and run the frontend validation target
 	docker build --target frontend-test --file docker/web/Dockerfile .
 
+e2e: ## Run isolated MariaDB-seeded Playwright browser flows
+	./scripts/test-e2e.sh
+
 api-schema-drift-test: ## Test the official Proxmox schema drift policy offline
 	python3 -m unittest scripts/tests/test_proxmox_api_schema_drift.py -v
+
+supply-chain-contract-test: ## Verify pinned CI supply-chain gates without running scanners
+	python3 -m unittest scripts/tests/test_supply_chain_gates.py -v
+
+secret-scan: ## Scan the complete Git history with the digest-pinned Gitleaks image
+	docker run --rm --volume "$(CURDIR):/repo:ro" --workdir /repo $(GITLEAKS_IMAGE) git --gitleaks-ignore-path /repo/.gitleaksignore --redact --verbose --no-banner /repo
+
+container-multiarch: ## Build production images for amd64 and arm64 without pushing them
+	SUPPLY_CHAIN_DIRECTORY="$(SUPPLY_CHAIN_DIRECTORY)" ./scripts/ci/build-container-images.sh
+
+container-security: ## Scan the exact six platform images and generate CycloneDX SBOMs
+	TRIVY_IMAGE="$(TRIVY_IMAGE)" SUPPLY_CHAIN_DIRECTORY="$(SUPPLY_CHAIN_DIRECTORY)" ./scripts/ci/scan-container-images.sh
+
+supply-chain: supply-chain-contract-test secret-scan container-multiarch container-security ## Run all local supply-chain acceptance gates
 
 test: backend-test frontend-test ## Run backend and frontend validation
 
@@ -93,26 +113,26 @@ inventory: ## Generate the ignored production Ansible inventory
 	./scripts/init-ansible-inventory.sh
 
 lint: ## Lint the Ansible deployment files
-	cd $(ANSIBLE_DIRECTORY) && yamllint .
-	cd $(ANSIBLE_DIRECTORY) && ansible-lint .
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" yamllint .
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-lint .
 
 syntax: ## Check all Ansible playbooks without remote access
-	cd $(ANSIBLE_DIRECTORY) && ansible-inventory --inventory $(ANSIBLE_EXAMPLE_INVENTORY) --list >/dev/null
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_EXAMPLE_INVENTORY) --list >/dev/null
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check
 
 deployment-test: ## Run isolated deployment contract and rollback tests
 	cd $(ANSIBLE_DIRECTORY) && python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ping: inventory ## Test Ansible connectivity to the configured deployment host
-	cd $(ANSIBLE_DIRECTORY) && ansible --inventory $(ANSIBLE_PRODUCTION_INVENTORY) hoddmimir_hosts --module-name ansible.builtin.ping $(ANSIBLE_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible --inventory $(ANSIBLE_PRODUCTION_INVENTORY) hoddmimir_hosts --module-name ansible.builtin.ping $(ANSIBLE_VAULT_ARGS)
 
 bootstrap: inventory ## Bootstrap Alpine, Python, Docker, and OpenRC on the deployment host
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/bootstrap.yml $(ANSIBLE_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/bootstrap.yml $(ANSIBLE_VAULT_ARGS)
 
 deploy: inventory ## Deploy the pinned production images to the deployment host
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/deploy.yml $(ANSIBLE_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/deploy.yml $(ANSIBLE_VAULT_ARGS)
 
 verify: inventory ## Verify the deployed services and API health
-	cd $(ANSIBLE_DIRECTORY) && ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/verify.yml $(ANSIBLE_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/verify.yml $(ANSIBLE_VAULT_ARGS)

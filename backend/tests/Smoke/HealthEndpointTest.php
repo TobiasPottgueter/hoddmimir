@@ -7,6 +7,7 @@ namespace App\Tests\Smoke;
 use App\Application\Readiness\ReadinessAggregator;
 use App\Application\Readiness\ReadinessCheckResult;
 use App\Tests\Fakes\FixedReadinessCheck;
+use App\Tests\Fakes\TestHttpRequestAuthenticator;
 use JsonException;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
@@ -16,6 +17,7 @@ final class HealthEndpointTest extends WebTestCase
     public function testHealthEndpointIsAvailable(): void
     {
         $client = self::createClient();
+        $client->disableReboot();
         self::getContainer()->set(
             ReadinessAggregator::class,
             new ReadinessAggregator([
@@ -39,6 +41,12 @@ final class HealthEndpointTest extends WebTestCase
         self::assertSame('ok', $payload['status'] ?? null);
         self::assertIsString($payload['checkedAt'] ?? null);
         self::assertSame(['database_schema' => ['status' => 'ready']], $payload['checks'] ?? null);
+
+        $client->request('GET', '/api/v1/admin/health');
+        self::assertResponseIsSuccessful();
+        $administration = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($administration);
+        self::assertSame($payload['checks'], $administration['checks'] ?? null);
     }
 
     public function testHealthEndpointReturnsServiceUnavailableWhenSchemaIsNotReady(): void
@@ -71,5 +79,17 @@ final class HealthEndpointTest extends WebTestCase
                 'reason' => 'migration_version_mismatch',
             ],
         ], $payload['checks'] ?? null);
+    }
+
+    public function testVersionedAdministrationHealthRequiresInventoryRead(): void
+    {
+        $client = self::createClient();
+        $auth = self::getContainer()->get(TestHttpRequestAuthenticator::class);
+        self::assertInstanceOf(TestHttpRequestAuthenticator::class, $auth);
+        $auth->usePermissions([]);
+
+        $client->request('GET', '/api/v1/admin/health');
+
+        self::assertResponseStatusCodeSame(403);
     }
 }

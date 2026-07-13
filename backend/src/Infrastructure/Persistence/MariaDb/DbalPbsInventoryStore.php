@@ -123,6 +123,15 @@ final readonly class DbalPbsInventoryStore implements PbsInventoryStore
             if (1 !== $updated) {
                 throw new PbsInventoryConflict('The PBS inventory run could not be finished exactly once.');
             }
+            if (!$changed) {
+                $this->recordOnboardingInventoryState(
+                    $connection,
+                    $failure->connectionId->binary(),
+                    $failure->runId->binary(),
+                    'inventory_failed',
+                    $at,
+                );
+            }
             $this->assertFenceBeforeCommit($connection, $lease);
         });
     }
@@ -215,6 +224,17 @@ final readonly class DbalPbsInventoryStore implements PbsInventoryStore
             if (1 !== $runUpdated) {
                 throw new PbsInventoryConflict('The PBS inventory run could not be applied exactly once.');
             }
+            $this->recordOnboardingInventoryState(
+                $connection,
+                $inventory->connectionId->binary(),
+                $inventory->runId->binary(),
+                match ($status) {
+                    'succeeded' => 'inventory_verified',
+                    'partial' => 'inventory_partial',
+                    default => 'inventory_failed',
+                },
+                $at,
+            );
             $this->assertFenceBeforeCommit($connection, $lease);
 
             return new PbsInventoryApplyResult(
@@ -225,6 +245,20 @@ final readonly class DbalPbsInventoryStore implements PbsInventoryStore
                 $diagnosticOnly,
             );
         });
+    }
+
+    private function recordOnboardingInventoryState(
+        Connection $connection,
+        string $connectionId,
+        string $runId,
+        string $state,
+        string $changedAt,
+    ): void {
+        $connection->update('proxmox_connection_onboarding_state', [
+            'state' => $state,
+            'inventory_status_changed_at' => $changedAt,
+            'last_inventory_run_id' => $runId,
+        ], ['connection_id' => $connectionId]);
     }
 
     /** @return array{InventoryIdentifier, bool} */

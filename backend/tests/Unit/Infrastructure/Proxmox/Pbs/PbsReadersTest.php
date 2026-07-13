@@ -94,6 +94,11 @@ final class PbsReadersTest extends TestCase
             '/path' => (object) ['Sys.Modify' => false, 'Datastore.Audit' => true],
         ], null), '/path');
         self::assertSame(['Datastore.Audit', 'Sys.Modify'], array_keys($permission->privileges));
+        $matrix = $reader->readAll(new PbsApiEnvelope((object) [
+            '/z' => (object) ['Sys.Audit' => true],
+            '/a' => (object) ['Datastore.Audit' => false],
+        ], null));
+        self::assertSame(['/a', '/z'], array_map(static fn ($entry): string => $entry->path, $matrix));
     }
 
     #[DataProvider('invalidVersionProvider')]
@@ -145,9 +150,43 @@ final class PbsReadersTest extends TestCase
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope((object) ['/x' => []], null), '/x'));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope((object) ['/x' => (object) ['bad key' => true]], null), '/x'));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope((object) ['/x' => (object) ['Sys.Audit' => 1]], null), '/x'));
+        $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->readAll(new PbsApiEnvelope([], null)));
+        $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->readAll(new PbsApiEnvelope((object) ['relative' => (object) []], null)));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsInstanceIdentityReader())->read(new PbsApiEnvelope((object) [], null)));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsInstanceIdentityReader())->read(new PbsApiEnvelope([], null)));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsInstanceIdentityReader())->read(new PbsApiEnvelope((object) ['pbs-instance-id' => str_repeat('A', 32)], null)));
+    }
+
+    public function testPermissionMatrixBoundsPathsAndPrivileges(): void
+    {
+        $reader = new PbsPermissionReader();
+        $paths = [];
+        for ($index = 0; $index < 4097; ++$index) {
+            $paths['/p'.$index] = (object) [];
+        }
+        $this->assertFailure(
+            PbsReadFailureCode::InvalidResponse,
+            static fn () => $reader->readAll(new PbsApiEnvelope((object) $paths, null)),
+        );
+
+        $privileges = [];
+        for ($index = 0; $index < 257; ++$index) {
+            $privileges['P.'.str_repeat('A', $index + 1)] = true;
+        }
+        $this->assertFailure(
+            PbsReadFailureCode::InvalidResponse,
+            static fn () => $reader->read(new PbsApiEnvelope((object) ['/x' => (object) $privileges], null), '/x'),
+        );
+
+        array_pop($privileges);
+        $many = [];
+        for ($index = 0; $index < 257; ++$index) {
+            $many['/p'.$index] = (object) $privileges;
+        }
+        $this->assertFailure(
+            PbsReadFailureCode::InvalidResponse,
+            static fn () => $reader->readAll(new PbsApiEnvelope((object) $many, null)),
+        );
     }
 
     public function testNodeStatusRejectsMissingNegativeAndContradictoryCounters(): void

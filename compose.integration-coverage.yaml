@@ -1,0 +1,13 @@
+---
+services:
+  backend-tests:
+    image: "${HODDMIMIR_BACKEND_COVERAGE_IMAGE:-hoddmimir-backend-coverage:local}"
+    build: !reset null
+    environment:
+      BACKEND_PHPUNIT_CONFIGURATION: phpunit.coverage-mariadb.xml.dist
+      BACKEND_COVERAGE_PHP_FILE: /app/coverage/integration.cov
+      BACKEND_COVERAGE_CLOVER_FILE: /app/coverage/integration.clover.xml
+      XDEBUG_MODE: coverage
+    user: "${COVERAGE_UID:-10001}:${COVERAGE_GID:-10001}"
+    volumes:
+      - ./backend/coverage:/app/coverage

@@ -31,3 +31,6 @@ services:
       - /app/var:uid=10001,gid=10001,mode=0770
     init: true
     restart: "no"
+    cpus: ${APP_CPU_LIMIT:-1.0}
+    mem_limit: ${APP_MEMORY_LIMIT:-512m}
+    pids_limit: ${APP_PIDS_LIMIT:-128}

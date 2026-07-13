@@ -36,12 +36,14 @@ final class ClosedDecisionTypesTest extends TestCase
             'target_enabled',
             'explicit_exclusion_absent',
             'guest_active',
+            'inventory_fresh',
             'placement_present',
             'placement_fresh',
             'active_request_absent',
             'target_node_allowed',
             'target_storage_enabled',
             'target_storage_active',
+            'executor_authorization_fresh',
             'executor_authorized',
             'capacity_fresh',
             'minimum_free_space',
@@ -51,8 +53,8 @@ final class ClosedDecisionTypesTest extends TestCase
         ], array_column(GateCode::cases(), 'value'));
 
         self::assertSame([
-            'connection', 'cluster', 'node', 'guest', 'policy', 'target', 'placement',
-            'capacity', 'concurrency', 'request', 'pbs_mapping',
+            'connection', 'cluster', 'node', 'guest', 'policy', 'target', 'inventory',
+            'placement', 'authorization', 'capacity', 'concurrency', 'request', 'pbs_mapping',
         ], array_column(GateScope::cases(), 'value'));
         self::assertSame([
             'passed', 'disabled', 'explicitly_excluded', 'archived', 'missing', 'stale',

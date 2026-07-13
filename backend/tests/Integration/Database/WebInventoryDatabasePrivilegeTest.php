@@ -10,7 +10,7 @@ use Doctrine\DBAL\Exception;
 
 final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
 {
-    public function testWebUserHasOnlyThePublishedInventorySelectSurface(): void
+    public function testWebUserHasOnlyThePublishedInventoryAndConnectionAdministrationSurface(): void
     {
         $web = $this->webConnection();
         try {
@@ -22,12 +22,14 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'SELECT sync_run_id, scope_type, scope_key FROM inventory_sync_scope_results LIMIT 0',
                 'SELECT id, connection_id, topology FROM pve_clusters LIMIT 0',
                 'SELECT id, cluster_id, node_name FROM pve_nodes LIMIT 0',
-                'SELECT id, guest_type, vmid FROM guests LIMIT 0',
-                'SELECT guest_id, node_id, observed_at FROM guest_placements LIMIT 0',
+                'SELECT id, guest_type, vmid, provisioned_size_bytes FROM guests LIMIT 0',
+                'SELECT guest_id, node_id, placement_revision, observed_at FROM guest_placements LIMIT 0',
                 'SELECT id, storage_name, content_json FROM pve_storages LIMIT 0',
                 'SELECT node_allowlist_json FROM pve_storages LIMIT 0',
                 'SELECT node_id, storage_id, enabled, active, capacity_status, total_bytes, used_bytes, available_bytes, observed_at FROM pve_node_storage_state LIMIT 0',
                 'SELECT id, connection_id, host, port, enabled FROM proxmox_connection_endpoints LIMIT 0',
+                'SELECT priority, tls_mode, custom_ca_pem, sha256_fingerprint, last_attempted_at, last_success_at, last_error_code FROM proxmox_connection_endpoints LIMIT 0',
+                'SELECT id, connection_id, purpose, principal, token_name, revision, rotated_at, updated_at FROM proxmox_credentials LIMIT 0',
                 'SELECT storage_id, server, datastore, namespace FROM pve_storage_pbs_mappings LIMIT 0',
                 'SELECT id, connection_id, node_name FROM pbs_servers LIMIT 0',
                 'SELECT server_id, observed_at, uptime_seconds FROM pbs_server_status LIMIT 0',
@@ -40,6 +42,7 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'SELECT id, group_id, backup_time, verification_state FROM pbs_snapshots LIMIT 0',
                 'SELECT id, parent_sync_run_id, product FROM proxmox_monitoring_runs LIMIT 0',
                 'SELECT monitoring_run_id, scope_type, error_code FROM proxmox_monitoring_scope_results LIMIT 0',
+                'SELECT connection_id, product, version_major, version_minor, version_patch, raw_version, last_observed_at, id FROM proxmox_capability_snapshots LIMIT 0',
             ] as $sql) {
                 self::assertSame([], $web->fetchAllAssociative($sql));
             }
@@ -58,9 +61,8 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'SELECT error_summary FROM inventory_sync_runs',
                 'SELECT * FROM pve_node_storage_state',
                 'SELECT connection_id FROM pve_node_storage_state',
-                'SELECT tls_mode FROM proxmox_connection_endpoints',
                 'SELECT * FROM guest_write_states',
-                'SELECT placement_revision FROM guest_placements',
+                'SELECT sync_run_id FROM guest_placements',
                 'SELECT owner_auth_id FROM pbs_backup_groups',
                 'SELECT comment FROM pbs_snapshots',
                 'SELECT encryption_fingerprint FROM pbs_snapshots',
@@ -74,9 +76,35 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
             ] as $sql) {
                 $this->assertDenied(static fn () => $web->fetchAllAssociative($sql));
             }
-            $this->assertDenied(static fn () => $web->executeStatement(
-                'UPDATE proxmox_connections SET enabled = enabled',
+            self::assertSame(0, $web->executeStatement(
+                "UPDATE proxmox_connections SET display_name = 'test', enabled = 0, revision = 1, updated_at = '2026-07-13 00:00:00.000000' WHERE 1 = 0",
             ));
+            self::assertSame(0, $web->executeStatement(
+                "UPDATE proxmox_connection_endpoints SET host = 'pve.example.test', port = 8006, priority = 100, tls_mode = 'system_ca', custom_ca_pem = NULL, sha256_fingerprint = NULL, enabled = 0, updated_at = '2026-07-13 00:00:00.000000' WHERE 1 = 0",
+            ));
+            self::assertSame(0, $web->executeStatement(
+                "UPDATE proxmox_credentials SET principal = 'reader@pve', token_name = 'collector', secret_envelope = 'opaque', envelope_version = 1, key_id = 'key', revision = 1, rotated_at = '2026-07-13 00:00:00.000000', updated_at = '2026-07-13 00:00:00.000000' WHERE 1 = 0",
+            ));
+            self::assertSame(0, $web->executeStatement(
+                "UPDATE backup_policies SET failure_notification_recipients_json = '[]' WHERE 1 = 0",
+            ));
+            foreach ([
+                'UPDATE proxmox_connections SET id = id WHERE 1 = 0',
+                'UPDATE proxmox_connections SET product = product WHERE 1 = 0',
+                'UPDATE proxmox_connection_endpoints SET id = id WHERE 1 = 0',
+                'UPDATE proxmox_connection_endpoints SET connection_id = connection_id WHERE 1 = 0',
+                'UPDATE proxmox_credentials SET id = id WHERE 1 = 0',
+                'UPDATE proxmox_credentials SET connection_id = connection_id WHERE 1 = 0',
+                'UPDATE proxmox_credentials SET purpose = purpose WHERE 1 = 0',
+                'UPDATE proxmox_credentials SET enabled = enabled WHERE 1 = 0',
+            ] as $sql) {
+                $this->assertDenied(static fn () => $web->executeStatement($sql));
+            }
+            foreach (['proxmox_connections', 'proxmox_connection_endpoints', 'proxmox_credentials'] as $table) {
+                $this->assertDenied(static fn () => $web->executeStatement(
+                    sprintf('DELETE FROM %s WHERE 1 = 0', $table),
+                ));
+            }
             $this->assertDenied(static fn () => $web->executeStatement(
                 'DELETE FROM guests WHERE 1 = 0',
             ));

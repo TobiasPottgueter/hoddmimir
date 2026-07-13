@@ -14,12 +14,14 @@ enum GateCode: string
     case TargetEnabled = 'target_enabled';
     case ExplicitExclusionAbsent = 'explicit_exclusion_absent';
     case GuestActive = 'guest_active';
+    case InventoryFresh = 'inventory_fresh';
     case PlacementPresent = 'placement_present';
     case PlacementFresh = 'placement_fresh';
     case ActiveRequestAbsent = 'active_request_absent';
     case TargetNodeAllowed = 'target_node_allowed';
     case TargetStorageEnabled = 'target_storage_enabled';
     case TargetStorageActive = 'target_storage_active';
+    case ExecutorAuthorizationFresh = 'executor_authorization_fresh';
     case ExecutorAuthorized = 'executor_authorized';
     case CapacityFresh = 'capacity_fresh';
     case MinimumFreeSpace = 'minimum_free_space';

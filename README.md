@@ -12,15 +12,19 @@ The user-facing product name is **Hoddmímir**. Technical identifiers use the AS
 
 ## Status
 
-The repository foundation from Phase 1 and substantial local implementation
-work for the Phase 2 API layer and Phase 3 collector/inventory slice are
-present. Production backup execution remains disabled.
+The local implementation through Phase 6 is present, including the
+authenticated Vue/PrimeVue administration and operations WebApp and the
+binding verified-only PVE/PBS onboarding workflow. It was locally accepted on
+13 July 2026; the reproducible evidence and its explicit limits are recorded
+in the [Phase-6 local acceptance](docs/phase-6-local-acceptance.md). Production
+backup execution remains disabled by default.
 
-Phase 2 and Phase 3 are not yet formally accepted. Their remaining acceptance
-work includes the supported PVE/PBS live matrix, real TLS handshakes and a
-documented, reproducible way to create the new V2 connections and credentials.
-Repository quality gates must be rerun on the exact release candidate; local
-fixtures and tests are not a substitute for the outstanding live evidence.
+Phase 7 has not begun. No production-like deployment, live PVE 7/8/9 or PBS
+3/4 acceptance matrix, or real QEMU/LXC backup lab is claimed by this local
+status. The complete quality-gate set must be rerun on every frozen release
+candidate; sanitized contract fixtures, disposable MariaDB integration tests,
+and local Playwright flows do not replace the outstanding environment-backed
+evidence.
 
 ## Architecture
 
@@ -28,6 +32,7 @@ fixtures and tests are not a substitute for the outstanding live evidence.
 - Framework-independent PHP domain and application logic.
 - Vue 3, TypeScript, PrimeVue 4, Pinia, and Vue Router.
 - MariaDB 11.4 LTS with a new V2 schema.
+- Explicit CPU, memory, and PID ceilings for every runtime service; MariaDB also runs with a read-only root filesystem, a minimal capability allowlist, and writable state only on its data volume and dedicated tmpfs mounts.
 - Alpine-based application containers.
 
 The complete scope, architecture, compatibility strategy, test matrix, and delivery phases are documented in [the rewrite plan](docs/rewrite-plan.md).
@@ -65,6 +70,11 @@ If port `8080` is already in use, set `WEB_PORT=18080` in the local `.env` befor
 
 Use `make help` to list the test, build, start, stop, log, and cleanup commands.
 
+`make e2e` builds an isolated, disposable MariaDB/WebApp/Playwright stack,
+loads deterministic QA fixtures through a test-only CLI command, and exercises
+the critical authenticated configuration paths. See the
+[browser QA guide](docs/e2e-testing.md) for its isolation and security model.
+
 `make migrate` is available when only the idempotent schema operation is needed. A local migration failure exits nonzero and does not stop containers or delete volumes. MariaDB may remain running, and forward-only DDL may already be fully or partially applied; inspect the migration error before retrying.
 
 The standard Compose model contains exactly four services: `data-worker`, `backup-worker`, `webapp`, and `mariadb`. Schema changes run through the separate `compose.migration.yaml` one-shot overlay and never add a fifth long-running service. Web and worker readiness remain unavailable until every migration expected by the application image is present. The data worker runs the collector command continuously with a default inventory cadence of 120 seconds. Scans are not triggered through the WebApp or its API. The Vue application is compiled into the webapp image rather than running as a separate service.
@@ -78,7 +88,7 @@ The standard Compose model contains exactly four services: `data-worker`, `backu
 - The collector is read-only against PVE/PBS.
 - A `vzdump` start request is never retried blindly after an ambiguous response.
 
-Backup execution is disabled in the initial scaffold through `BACKUP_EXECUTION_ENABLED=false`.
+Backup execution remains disabled by default through `BACKUP_EXECUTION_ENABLED=false`.
 
 ## Production deployment
 

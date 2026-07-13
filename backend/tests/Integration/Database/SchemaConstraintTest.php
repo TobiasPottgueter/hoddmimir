@@ -38,6 +38,7 @@ final class SchemaConstraintTest extends DatabaseTestCase
             'chk_proxmox_connections_product',
             'chk_proxmox_endpoints_tls_mode',
             'chk_proxmox_credentials_envelope',
+            'chk_proxmox_credentials_verification_hash',
             'chk_collector_schedule_lease',
             'chk_collector_cycles_time',
             'chk_collector_cycles_worker_kind',
@@ -324,6 +325,25 @@ final class SchemaConstraintTest extends DatabaseTestCase
                 'principal' => 'collector@pve',
                 'token_name' => 'hoddmimir',
                 'secret_envelope' => '',
+                'envelope_version' => 1,
+                'key_id' => 'test-key',
+                'revision' => 1,
+                'created_at' => self::NOW,
+                'updated_at' => self::NOW,
+            ]),
+        );
+
+        $this->assertConstraintRejects(
+            'chk_proxmox_credentials_verification_hash',
+            fn () => $this->connection()->insert('proxmox_credentials', [
+                'id' => random_bytes(16),
+                'connection_id' => $connectionId,
+                'purpose' => 'collector',
+                'auth_scheme' => 'api_token',
+                'principal' => 'collector@pve',
+                'token_name' => 'hoddmimir',
+                'secret_envelope' => 'opaque-ciphertext',
+                'secret_verification_hash' => 'not-an-argon2id-verifier',
                 'envelope_version' => 1,
                 'key_id' => 'test-key',
                 'revision' => 1,

@@ -1,6 +1,6 @@
 # Rewrite-Plan: Hoddmímir 2.0
 
-Stand: 10. Juli 2026
+Stand: 13. Juli 2026
 
 ## 1. Ziel und verbindlicher Scope
 
@@ -330,10 +330,14 @@ Bekannte Unterschiede, die explizit getestet werden:
 
 Separate technische Identitäten:
 
-1. PVE Collector Token: `Sys.Audit`, `VM.Audit`, `Datastore.Audit` auf den benötigten Pfaden.
-2. PVE Backup Token: `VM.Backup` auf den Zielgästen/-Pools und `Datastore.AllocateSpace` auf Zielstorages; optional `Datastore.Audit`.
+1. PVE Collector Token: installationsweit propagiertes `Sys.Audit`, `VM.Audit`, `Pool.Audit` und `Datastore.Audit`, damit immer alle aktuellen und zukünftigen Nodes, VMs, CTs, Pools und Storages sichtbar sind.
+2. PVE Backup Token: installationsweit propagiertes `VM.Backup` und `Datastore.AllocateSpace`, damit immer alle aktuellen und zukünftigen Gäste, Pools und Storages ausführbar sind. Proxmox-ACLs begrenzen den Executor bewusst nicht auf die aktuelle Hoddmímir-Auswahl; Auswahl, Enable-Gates, Zielzuordnung und Policy bleiben fachliche Hoddmímir-Regeln.
 3. PBS Collector Token: System-Audit und `DatastoreAudit` auf den ausgewählten Datastores/Namespaces reichen für positive Datastore-Sicht. Vollständige Prune-/Verify-/Sync-Job-Scope-Evidenz erfordert propagiertes `DatastoreAudit` am Root `/datastore`; vollständige Sync-Job-Evidenz zusätzlich propagiertes `RemoteAudit` am Root `/remote`. Fehlt diese breite Evidenz, werden sichtbare Beobachtungen weiterhin positive-only persistiert und nur die betroffenen Scopes bleiben `partial`.
 4. PVE-zu-PBS Storage Token: liegt ausschließlich in der PVE-Storage-Konfiguration und hat nur `DatastoreBackup` auf dem engsten PBS-Namespace.
+
+Das bootstrap-freie Anlegen und Prüfen dieser Identitäten über die WebApp ist
+im [`proxmox-connection-onboarding-plan.md`](proxmox-connection-onboarding-plan.md)
+festgelegt.
 
 Produktionsverbindungen erlauben keine deaktivierte TLS-Prüfung. Unterstützt werden eine vertrauenswürdige CA oder explizites SHA-256-Fingerprint-Pinning. Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem Logeintrag redigiert.
 
@@ -548,8 +552,9 @@ Abnahme: Plan ist reviewt; es wurde noch kein produktiver Code ausgeführt.
 
 ### Phase 1 – Repository- und Laufzeitfundament
 
-Status: **im Repository implementiert, formale Abschlussprüfung auf einem
-gefrorenen Kandidaten offen.**
+Status: **im Repository implementiert und auf dem lokalen Phase-6-Kandidaten
+abgenommen.** Der Nachweis steht in
+[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md).
 
 Lokal nachvollziehbar sind Monorepo, Anwendungsgrundgerüste, Alpine-basierte
 Application-Images, MariaDB-Compose, Migrationen, Health-/Readiness-Pfade,
@@ -563,12 +568,13 @@ auf exakt dem zu veröffentlichenden Commit.
 - initiales V2-Schema, interne Schema-Versionierung, strukturierte Logs sowie Clock/ID/Encryption Interfaces.
 - CI mit Unit-, Coverage-, Static-Analysis-, Frontend- und Container-Gates.
 
-Abnahme: alle drei Applikationscontainer plus MariaDB starten, sind gesund und besitzen noch keine PVE-Schreibfunktion.
+Abnahme: alle drei Applikationscontainer plus MariaDB starten und sind gesund;
+die Backupausführung bleibt im abgenommenen Stack explizit deaktiviert.
 
 ### Phase 2 – Eigene PVE-/PBS-API-Schicht
 
-Status: **lokale Implementierung und bereinigte Contract-Fixtures vorhanden,
-Live-Abnahme offen.**
+Status: **lokale Implementierung und bereinigte Contract-Fixtures vorhanden;
+Live-Abnahme in Phase 7 offen.**
 
 Im Repository liegen eigene typisierte Transport-, Auth-, TLS-, Envelope-,
 Fehler- und Capability-Verträge sowie lokale Unit-/Contract-Tests für die fünf
@@ -592,17 +598,18 @@ Abnahme: keine alte Proxmox-Bibliothek im Dependency Tree; alle fünf Versionsli
 
 ### Phase 3 – Collector und Inventarmodell
 
-Status: **Collector-, Persistenz- und read-only Darstellungs-Slices im
-Repository implementiert, Betriebsabnahme offen.**
+Status: **Collector-, Persistenz- und Darstellungs-Slices im Repository
+implementiert; Betriebsabnahme in Phase 7 offen.**
 
 Lokal vorhanden sind das startzeitbasierte Collector-Raster, Lease/Fencing und
 Heartbeat, PVE-/PBS-Inventarpersistenz einschließlich QEMU/LXC, Storage,
 Datastore, Namespace/Snapshot, Monitoring und Capability-Snapshots sowie eine
-GET-only-Inventar-/Health-API mit Vue-Sichten. Für die formale Abnahme fehlen
-weiterhin ein dokumentierter und reproduzierbarer Einrichtungsweg für neue
-V2-Verbindungen/Credentials, die vollständige unterstützte Live-Matrix und die
-TLS-Nachweise. Sämtliche lokalen Quality Gates müssen anschließend auf dem
-identischen, gefrorenen Kandidaten erneut ausgeführt werden.
+GET-only-Inventar-/Health-API mit Vue-Sichten. Der verbindliche Einrichtungs-
+und Prüfvertrag für neue V2-Verbindungen und Credentials ist in der Phase-6-
+WebApp als verified-only Onboarding umgesetzt. Für die externe Abnahme fehlen
+weiterhin die vollständige unterstützte Live-Matrix und die realen TLS-
+Nachweise. Sämtliche lokalen Quality Gates werden auf dem identischen,
+gefrorenen Kandidaten erneut ausgeführt.
 
 - Schema für Verbindungen, Cluster, Nodes, Gäste, Storages und PBS-Datastores.
 - read-only Sync, Placement-Reconciliation, Freshness und Heartbeats.
@@ -620,8 +627,9 @@ erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
 
-Status: **begonnen.** Der detaillierte, schrittweise Vertrag einschließlich
-Sicherheitsgrenzen und noch offener Fachentscheidungen steht in
+Status: **lokal implementiert und abgenommen; Live-/Betriebsnachweise bleiben
+Phase 7.** Der detaillierte Vertrag einschließlich Sicherheitsgrenzen und
+festgelegter Fachentscheidungen steht in
 [`phase-4-policy-shadow-plan.md`](phase-4-policy-shadow-plan.md).
 
 - reine Domain-Services für Eligibility, Gründe, Priorität, Vererbung und Limits.
@@ -634,14 +642,26 @@ Abnahme: Die vier Funktionen aus Abschnitt 1.1 sind vollständig bedienbar; säm
 
 ### Phase 5 – Backup Worker und UPID-Monitoring
 
+Status: **lokal implementiert und abgenommen; reale PVE-Labtests bleiben Phase
+7.** Der lokale Abschluss und der At-most-once-Vertrag stehen in
+[`phase-5-backup-worker-plan.md`](phase-5-backup-worker-plan.md).
+
 - Claim, Start, UPID-Persistierung, Polling, Log, Cancel und Recovery.
 - Reconciliation nach Neustart und unklarem POST-Ergebnis.
 - Concurrency, Kapazitätsgate und kontrollierte Retries.
-- Lab-Backups für QEMU/LXC und jede unterstützte Version.
+- bereinigte QEMU-/LXC-Contracts für PVE 7/8/9 und Planung der realen
+  Lab-Abnahme in Phase 7.
 
 Abnahme: kein Doppelbackup in Race-/Timeout-Tests; jeder Start besitzt einen nachvollziehbaren Endzustand oder `unknown` mit Auditspur.
 
 ### Phase 6 – Vollständige WebApp
+
+Status: **lokal implementiert und am 13. Juli 2026 abgenommen.** Die
+Kernoberflächen und das verbindliche verified-only
+PVE-/PBS-Verbindungs-Onboarding sind umgesetzt. Der Abschlussnachweis steht in
+[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md). Deployment und
+reale Systemabnahme bleiben Phase 7. Der detaillierte Vertrag steht in
+[`phase-6-webapp-plan.md`](phase-6-webapp-plan.md).
 
 - Dashboard, Administration, Queue, Historie, Logs, Health und Audit.
 - lokale RBAC-Basis; OIDC kann über denselben User-/Rollenvertrag ergänzt werden.
@@ -652,11 +672,18 @@ Abnahme: alle kritischen Bedienabläufe sind component- und end-to-end-getestet.
 
 ### Phase 7 – Neueinrichtung und produktionsnaher Parallelbetrieb
 
+Status: **nicht begonnen.**
+
 - leere V2-Datenbank installieren.
+- produktionsnahes Deployment über die vorbereitete Ansible-Automation
+  durchführen und verifizieren.
 - Benutzer, PVE-/PBS-Verbindungen, Ziele und Policies vollständig neu konfigurieren.
+- Read-only-Live-Matrix gegen PVE 7/8/9 und PBS 3/4 einschließlich realer
+  TLS-/ACL-Nachweise ausführen.
 - vollständigen Inventar-Sync durchführen.
 - mindestens einen vollständigen Shadow-Zyklus ohne Backup-Starts betreiben.
-- Lab- und Abnahmebackups ausführen; V2-Historie beginnt ausschließlich mit diesen neuen Läufen.
+- QEMU-/LXC-Lab- und Abnahmebackups gegen die unterstützten PVE-Versionen
+  ausführen; V2-Historie beginnt ausschließlich mit diesen neuen Läufen.
 
 Abnahme: Die neue Konfiguration ist vollständig geprüft; die Queue wird allein aus dem neuen Inventar und den neuen Policies gebildet.
 

@@ -6,7 +6,7 @@ describe("Formatierer", () => {
   it("formatiert UTC-Zeitwerte und fängt leere oder ungültige Werte ab", () => {
     expect(formatUtc(null)).toBe("Keine Messung");
     expect(formatUtc("unbrauchbar")).toBe("Ungültiger Zeitwert");
-    expect(formatUtc("2026-07-12T10:00:00Z")).toContain("2026");
+    expect(formatUtc("2026-07-12T10:00:00Z")).toContain("10:00:00");
   });
 
   it("formatiert Bytes über alle relevanten Grenzen", () => {

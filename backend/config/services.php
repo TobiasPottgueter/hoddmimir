@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Shared\Clock;
+use App\Application\Backup\Notification\BackupNotificationConfiguration;
 use App\Application\Readiness\ReadinessAggregator;
 use App\Application\Collector\CollectorHeartbeatStore;
 use App\Application\Collector\CollectorCycleCoordinator;
@@ -24,6 +25,16 @@ use App\Application\Inventory\InventoryIdentifierGenerator;
 use App\Application\Inventory\ReadModel\CollectorReadModel;
 use App\Application\Inventory\ReadModel\InventoryReadModel;
 use App\Application\Target\ReadModel\BackupTargetCandidateReadModel;
+use App\Application\Target\ReadModel\ConfiguredBackupTargetReadModel;
+use App\Application\Policy\ReadModel\PolicyReadModel;
+use App\Application\Configuration\Target\TargetCommandRepository;
+use App\Application\Configuration\Target\TargetCandidateEvidenceProvider;
+use App\Application\Configuration\Target\TargetExecutorEvidenceProvider;
+use App\Application\Configuration\Policy\PolicyCommandRepository;
+use App\Application\Configuration\Policy\PolicyActivationEvidenceProvider;
+use App\Application\Configuration\Selection\SelectionCommandRepository;
+use App\Application\Administration\ReadModel\AdministrationReadModel;
+use App\Application\Administration\SecurityCommandRepository;
 use App\Application\Inventory\Pve\PveCoreInventoryMapper;
 use App\Application\Inventory\Pve\PveCoreInventoryStore;
 use App\Application\Inventory\Pve\PveInventoryMapper;
@@ -46,7 +57,72 @@ use App\Application\Proxmox\Pbs\PbsContentLimits;
 use App\Application\Proxmox\Pve\PveBackupInventoryLimits;
 use App\Application\Security\ReferencedCredentialKeyIds;
 use App\Application\Security\SecretCipher;
+use App\Application\Security\Audit\AuditEventStore;
+use App\Application\Security\Audit\SecurityAuditRecorder;
+use App\Application\Security\Auth\AuthenticateSession;
+use App\Application\Security\Auth\AuthenticationStore;
+use App\Application\Security\Auth\CsrfTokenDeriver;
+use App\Application\Security\Auth\CreateFirstAdmin;
+use App\Application\Security\Auth\FirstAdminStore;
+use App\Application\Security\Auth\FirstAdminCreator;
+use App\Application\Security\Auth\LocalLogin;
+use App\Application\Security\Auth\LoginThrottleStore;
+use App\Application\Security\Auth\LogoutSession;
+use App\Application\Security\Auth\OpaqueSecretHasher;
+use App\Application\Security\Auth\OpaqueTokenGenerator;
+use App\Application\Security\Auth\PasswordHasher;
+use App\Application\Security\Auth\PermissionAuthorizer;
+use App\Application\Security\Auth\SecurityIdentifierGenerator;
+use App\Application\Security\Auth\SecurityTransaction;
+use App\Application\Security\Auth\WebSessionStore;
 use App\Application\Scheduler\Shadow\ShadowEvaluationStore;
+use App\Application\Scheduler\Shadow\AutomaticShadowEvaluationSource;
+use App\Application\Scheduler\Shadow\RunAutomaticShadowEvaluation;
+use App\Application\Scheduler\Shadow\AutomaticShadowEvaluator;
+use App\Application\Scheduler\Shadow\ReadModel\ShadowReadModel;
+use App\Application\Backup\Queue\BackupQueueStore;
+use App\Application\Backup\Queue\QueueClaimTokenSource;
+use App\Application\Backup\Execution\BackupExecutionGate;
+use App\Application\Backup\Execution\BackupSubmissionTransaction;
+use App\Application\Backup\Monitoring\BackupMonitoringTransaction;
+use App\Application\Backup\Monitoring\AmbiguousSubmissionReconciliationStore;
+use App\Application\Backup\Monitoring\AmbiguousSubmissionTaskSource;
+use App\Application\Backup\Worker\BackupRunIdentifierSource;
+use App\Application\Backup\Worker\BackupNotificationDeliveryHook;
+use App\Application\Backup\Worker\BackupWorkerRuntime;
+use App\Application\Backup\Worker\BackupWorkerRunner;
+use App\Application\Backup\Worker\BackupWorkerHeartbeatStore;
+use App\Application\Proxmox\Pve\PveBackupClientProvider;
+use App\Application\Backup\Notification\BackupNotificationDeliveryGate;
+use App\Application\Backup\Notification\BackupNotificationDeliveryStore;
+use App\Application\Backup\Notification\MatrixWebhook;
+use App\Application\Backup\Operations\OperationsReadModel;
+use App\Application\Backup\Operations\BackupOperationCommandRepository;
+use App\Application\Qa\QaFixtureSeeder;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupWorkerHeartbeatStore;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupSubmissionStore;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupMonitoringStore;
+use App\Infrastructure\Persistence\MariaDb\DbalAmbiguousSubmissionReconciliationStore;
+use App\Infrastructure\Persistence\MariaDb\DbalPveBackupClientProvider;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupNotificationDeliveryStore;
+use App\Infrastructure\Persistence\MariaDb\DbalOperationsReadModel;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupOperationCommandRepository;
+use App\Infrastructure\Notification\ConfiguredBackupNotificationDeliveryGate;
+use App\Infrastructure\Notification\SecretFileMatrixWebhook;
+use App\Infrastructure\Process\SystemQueueClaimTokenSource;
+use App\Infrastructure\Process\SystemBackupRunIdentifierSource;
+use App\Infrastructure\Notification\ApplicationBackupNotificationDeliveryHook;
+use App\Infrastructure\Process\EnvironmentBackupExecutionGate;
+use App\Infrastructure\Proxmox\PveBackup\PveBackupClientFactory;
+use App\Infrastructure\Proxmox\PveBackup\PveNativeBackupClientFactory;
+use App\Infrastructure\Proxmox\PveBackup\PveAmbiguousSubmissionTaskSource;
+use App\Domain\Backup\ControlledRetryPolicy;
+use App\Domain\Policy\PolicyResolver;
+use App\Domain\Scheduler\EligibilityEvaluator;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
+use App\Domain\Scheduler\PriorityResolver;
+use App\Domain\Scheduler\ReasonSelector;
 use App\Application\Worker\Sleeper;
 use App\Application\Worker\MonotonicClock;
 use App\Infrastructure\Logging\MonologRedactionProcessor;
@@ -67,6 +143,21 @@ use App\Infrastructure\Persistence\MariaDb\DbalConnectionScanCatalog;
 use App\Infrastructure\Persistence\MariaDb\DbalInstallationBindingCatalog;
 use App\Infrastructure\Persistence\MariaDb\DbalInventoryReadModel;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupTargetCandidateReadModel;
+use App\Infrastructure\Persistence\MariaDb\DbalConfiguredBackupTargetReadModel;
+use App\Infrastructure\Persistence\MariaDb\DbalPolicyReadModel;
+use App\Infrastructure\Persistence\MariaDb\DbalConfigurationCommandRepository;
+use App\Infrastructure\Persistence\MariaDb\DbalSecurityAdministration;
+use App\Infrastructure\Persistence\MariaDb\DbalConnectionAdministration;
+use App\Application\Configuration\Connection\ConnectionCommandRepository;
+use App\Application\Configuration\Connection\ConnectionReadModel;
+use App\Application\Configuration\Connection\Onboarding\OnboardingActivationRepository;
+use App\Application\Configuration\Connection\Onboarding\OnboardingCustomCaValidator;
+use App\Application\Configuration\Connection\Onboarding\OnboardingRemoteGateway;
+use App\Infrastructure\Persistence\MariaDb\DbalOnboardingActivationRepository;
+use App\Infrastructure\Proxmox\Onboarding\NativeOnboardingRemoteGateway;
+use App\Infrastructure\Proxmox\Onboarding\NativeOnboardingCustomCaValidator;
+use App\Infrastructure\Persistence\MariaDb\DbalActivationEvidenceProvider;
+use App\Infrastructure\Persistence\MariaDb\DbalLocalAuthStore;
 use App\Infrastructure\Persistence\MariaDb\DbalPveCoreInventoryStore;
 use App\Infrastructure\Persistence\MariaDb\DbalPveEndpointReadConfigurationSource;
 use App\Infrastructure\Persistence\MariaDb\DbalPbsEndpointReadConfigurationSource;
@@ -75,6 +166,9 @@ use App\Infrastructure\Persistence\MariaDb\DbalPbsContentStore;
 use App\Infrastructure\Persistence\MariaDb\DbalMonitoringCursorCatalog;
 use App\Infrastructure\Persistence\MariaDb\DbalMonitoringRunStore;
 use App\Infrastructure\Persistence\MariaDb\DbalShadowEvaluationStore;
+use App\Infrastructure\Persistence\MariaDb\DbalAutomaticShadowEvaluationSource;
+use App\Infrastructure\Persistence\MariaDb\MariaDbQaFixtureSeeder;
+use App\Infrastructure\Persistence\MariaDb\DbalShadowReadModel;
 use App\Infrastructure\Persistence\MariaDb\SystemUuidV7InventoryIdentifierGenerator;
 use App\Infrastructure\Proxmox\PveCoreEndpointInstallationReader;
 use App\Infrastructure\Proxmox\NativeSelectedEndpointMonitoringReader;
@@ -109,9 +203,15 @@ use App\Infrastructure\Security\EncryptionKeyRingProvider;
 use App\Infrastructure\Security\NonceSource;
 use App\Infrastructure\Security\SodiumSecretCipher;
 use App\Infrastructure\Security\SystemNonceSource;
+use App\Infrastructure\Security\HmacCsrfTokenDeriver;
+use App\Infrastructure\Security\NativeArgon2idPasswordHasher;
+use App\Infrastructure\Security\Sha256OpaqueSecretHasher;
+use App\Infrastructure\Security\SystemOpaqueTokenGenerator;
+use App\Infrastructure\Security\SystemSecurityIdentifierGenerator;
 use App\Infrastructure\Time\SystemClock;
 use App\Infrastructure\Time\SystemMonotonicClock;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\HttpClient\CurlHttpClient;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_iterator;
 
@@ -127,10 +227,16 @@ return static function (ContainerConfigurator $container): void {
         ->set('env(PBS_CONTENT_NAMESPACE_BODY_BYTES)', '8388608')
         ->set('env(PBS_CONTENT_SNAPSHOT_BODY_BYTES)', '67108864')
         ->set('env(MONITOR_HISTORY_OVERLAP_SECONDS)', '300')
+        ->set('env(EVIDENCE_FRESHNESS_SECONDS)', '300')
+        ->set('env(BACKUP_QUEUE_DEFER_SECONDS)', '120')
+        ->set('env(BACKUP_EXECUTION_ENABLED)', '0')
+        ->set('env(BACKUP_WORKER_HEARTBEAT_TTL_SECONDS)', '150')
         ->set('env(PVE_MONITOR_PAGE_SIZE)', '100')
         ->set('env(PVE_MONITOR_MAX_NODES)', '128')
         ->set('env(PVE_MONITOR_ACTIVE_PAGE_CAP)', '2')
         ->set('env(PVE_MONITOR_ARCHIVE_PAGE_CAP)', '10')
+        ->set('env(PVE_RECONCILIATION_TOTAL_PAGE_CAP)', '12')
+        ->set('env(PVE_RECONCILIATION_MAX_ELAPSED_SECONDS)', '1200')
         ->set('env(PVE_MONITOR_REQUEST_LIMIT)', '512')
         ->set('env(PVE_MONITOR_RAW_ROW_LIMIT)', '25000')
         ->set('env(PVE_MONITOR_DISTINCT_TASK_LIMIT)', '25000')
@@ -140,7 +246,11 @@ return static function (ContainerConfigurator $container): void {
         ->set('env(PBS_MONITOR_MAX_ROWS_PER_STREAM)', '4096')
         ->set('env(PBS_MONITOR_MAX_JOBS_PER_KIND)', '4096')
         ->set('env(PBS_MONITOR_HISTORY_WINDOW_SECONDS)', '86400')
-        ->set('env(APP_BUILD_VERSION)', 'development');
+        ->set('env(APP_BUILD_VERSION)', 'development')
+        ->set('env(MATRIX_NOTIFICATION_ENABLED)', '0')
+        ->set('env(MATRIX_WEBHOOK_URL_FILE)', '/run/secrets/matrix_webhook_url')
+        ->set('env(MATRIX_WEBHOOK_CHANNEL)', 'proxmox-backup')
+        ->set('env(MATRIX_WEBHOOK_TIMEOUT_SECONDS)', '10');
 
     $services = $container->services();
 
@@ -160,6 +270,7 @@ return static function (ContainerConfigurator $container): void {
         ]);
 
     $services->set(Clock::class, SystemClock::class);
+    $services->set(QaFixtureSeeder::class, MariaDbQaFixtureSeeder::class);
     $services->set(MonotonicClock::class, SystemMonotonicClock::class);
     $services->set(Sleeper::class, NativeSleeper::class);
     $services->set(NativeAtomicFileMaterializer::class);
@@ -192,10 +303,108 @@ return static function (ContainerConfigurator $container): void {
     $services->set(DbalInventoryReadModel::class);
     $services->alias(InventoryReadModel::class, DbalInventoryReadModel::class);
     $services->alias(CollectorReadModel::class, DbalInventoryReadModel::class);
-    $services->set(DbalBackupTargetCandidateReadModel::class);
+    $services
+        ->set(DbalBackupTargetCandidateReadModel::class)
+        ->arg('$evidenceFreshnessSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
     $services->alias(BackupTargetCandidateReadModel::class, DbalBackupTargetCandidateReadModel::class);
+    $services->set(DbalConfiguredBackupTargetReadModel::class);
+    $services->alias(ConfiguredBackupTargetReadModel::class, DbalConfiguredBackupTargetReadModel::class);
+    $services->set(DbalPolicyReadModel::class);
+    $services->alias(PolicyReadModel::class, DbalPolicyReadModel::class);
+    $services->set(DbalConfigurationCommandRepository::class);
+    $services->alias(TargetCommandRepository::class, DbalConfigurationCommandRepository::class);
+    $services->alias(PolicyCommandRepository::class, DbalConfigurationCommandRepository::class);
+    $services->alias(SelectionCommandRepository::class, DbalConfigurationCommandRepository::class);
+    $services->set(DbalSecurityAdministration::class);
+    $services->alias(SecurityCommandRepository::class, DbalSecurityAdministration::class);
+    $services->alias(AdministrationReadModel::class, DbalSecurityAdministration::class);
+    $services->set(DbalConnectionAdministration::class);
+    $services->alias(ConnectionCommandRepository::class, DbalConnectionAdministration::class);
+    $services->alias(ConnectionReadModel::class, DbalConnectionAdministration::class);
+    $services->set(DbalOnboardingActivationRepository::class);
+    $services->alias(OnboardingActivationRepository::class, DbalOnboardingActivationRepository::class);
+    $services->set(NativeOnboardingRemoteGateway::class);
+    $services->alias(OnboardingRemoteGateway::class, NativeOnboardingRemoteGateway::class);
+    $services->alias(OnboardingCustomCaValidator::class, NativeOnboardingCustomCaValidator::class);
+    $services->set(DbalActivationEvidenceProvider::class);
+    $services->alias(TargetCandidateEvidenceProvider::class, DbalActivationEvidenceProvider::class);
+    $services->alias(TargetExecutorEvidenceProvider::class, DbalActivationEvidenceProvider::class);
+    $services->alias(PolicyActivationEvidenceProvider::class, DbalActivationEvidenceProvider::class);
     $services->set(DbalShadowEvaluationStore::class);
     $services->alias(ShadowEvaluationStore::class, DbalShadowEvaluationStore::class);
+    $services->set(DbalAutomaticShadowEvaluationSource::class);
+    $services->alias(AutomaticShadowEvaluationSource::class, DbalAutomaticShadowEvaluationSource::class);
+    $services->set(EligibilityEvaluator::class);
+    $services
+        ->set(EvidenceFreshnessPolicy::class)
+        ->arg('$maximumAgeSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
+    $services->set(ReasonSelector::class);
+    $services->set(PriorityResolver::class);
+    $services->set(RunAutomaticShadowEvaluation::class);
+    $services->alias(AutomaticShadowEvaluator::class, RunAutomaticShadowEvaluation::class);
+    $services->set(DbalShadowReadModel::class);
+    $services->alias(ShadowReadModel::class, DbalShadowReadModel::class);
+    $services
+        ->set(DbalBackupQueueStore::class)
+        ->arg('$deferSeconds', '%env(int:BACKUP_QUEUE_DEFER_SECONDS)%');
+    $services->alias(BackupQueueStore::class, DbalBackupQueueStore::class);
+    $services->set(SystemQueueClaimTokenSource::class);
+    $services->alias(QueueClaimTokenSource::class, SystemQueueClaimTokenSource::class);
+    $services->set(ControlledRetryPolicy::class);
+    $services->set(PolicyResolver::class);
+    $services->set(EnvironmentBackupExecutionGate::class)->arg('$executionEnabled', '%env(bool:BACKUP_EXECUTION_ENABLED)%');
+    $services->alias(BackupExecutionGate::class, EnvironmentBackupExecutionGate::class);
+    $services->set(SystemBackupRunIdentifierSource::class);
+    $services->alias(BackupRunIdentifierSource::class, SystemBackupRunIdentifierSource::class);
+    $services->set(BackupWorkerRunner::class);
+    $services->alias(BackupWorkerRuntime::class, BackupWorkerRunner::class);
+    $services->set(DbalBackupWorkerHeartbeatStore::class)
+        ->arg('$ttlSeconds', '%env(int:BACKUP_WORKER_HEARTBEAT_TTL_SECONDS)%')
+        ->arg('$buildVersion', '%env(APP_BUILD_VERSION)%');
+    $services->alias(BackupWorkerHeartbeatStore::class, DbalBackupWorkerHeartbeatStore::class);
+    $services->set(ApplicationBackupNotificationDeliveryHook::class);
+    $services->alias(BackupNotificationDeliveryHook::class, ApplicationBackupNotificationDeliveryHook::class);
+    $services->set(PveNativeBackupClientFactory::class);
+    $services->alias(PveBackupClientFactory::class, PveNativeBackupClientFactory::class);
+    $services->set(DbalPveBackupClientProvider::class);
+    $services->alias(PveBackupClientProvider::class, DbalPveBackupClientProvider::class);
+    $services->set(DbalBackupSubmissionStore::class)->arg('$freshnessSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
+    $services->alias(BackupSubmissionTransaction::class, DbalBackupSubmissionStore::class);
+    $services->set(DbalBackupMonitoringStore::class)
+        ->arg('$heartbeats', service(BackupWorkerHeartbeatStore::class));
+    $services->alias(BackupMonitoringTransaction::class, DbalBackupMonitoringStore::class);
+    $services->set(DbalAmbiguousSubmissionReconciliationStore::class)
+        ->arg('$heartbeats', service(BackupWorkerHeartbeatStore::class));
+    $services->alias(AmbiguousSubmissionReconciliationStore::class, DbalAmbiguousSubmissionReconciliationStore::class);
+    $services
+        ->set(PveAmbiguousSubmissionTaskSource::class)
+        ->arg('$pageSize', '%env(int:PVE_MONITOR_PAGE_SIZE)%')
+        ->arg('$activePageCap', '%env(int:PVE_MONITOR_ACTIVE_PAGE_CAP)%')
+        ->arg('$archivePageCap', '%env(int:PVE_MONITOR_ARCHIVE_PAGE_CAP)%')
+        ->arg('$totalPageCap', '%env(int:PVE_RECONCILIATION_TOTAL_PAGE_CAP)%')
+        ->arg('$maximumElapsedSeconds', '%env(int:PVE_RECONCILIATION_MAX_ELAPSED_SECONDS)%');
+    $services->alias(AmbiguousSubmissionTaskSource::class, PveAmbiguousSubmissionTaskSource::class);
+    $services->set(DbalBackupNotificationDeliveryStore::class);
+    $services->alias(BackupNotificationDeliveryStore::class, DbalBackupNotificationDeliveryStore::class);
+    $services->set(DbalOperationsReadModel::class)->arg('$evidenceFreshnessSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
+    $services->alias(OperationsReadModel::class, DbalOperationsReadModel::class);
+    $services->set(DbalBackupOperationCommandRepository::class);
+    $services->alias(BackupOperationCommandRepository::class, DbalBackupOperationCommandRepository::class);
+    $services->set(CurlHttpClient::class);
+    $services
+        ->set(SecretFileMatrixWebhook::class)
+        ->args([
+            service(CurlHttpClient::class),
+            '%env(MATRIX_WEBHOOK_URL_FILE)%',
+            '%env(MATRIX_WEBHOOK_CHANNEL)%',
+            '%env(float:MATRIX_WEBHOOK_TIMEOUT_SECONDS)%',
+        ]);
+    $services->alias(MatrixWebhook::class, SecretFileMatrixWebhook::class);
+    $services->alias(BackupNotificationConfiguration::class, SecretFileMatrixWebhook::class);
+    $services
+        ->set(ConfiguredBackupNotificationDeliveryGate::class)
+        ->arg('$value', '%env(bool:MATRIX_NOTIFICATION_ENABLED)%');
+    $services->alias(BackupNotificationDeliveryGate::class, ConfiguredBackupNotificationDeliveryGate::class);
     $services->set(DbalPveCoreInventoryStore::class);
     $services->alias(PveCoreInventoryStore::class, DbalPveCoreInventoryStore::class);
     $services->set(DbalPbsInventoryStore::class);
@@ -334,6 +543,34 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(NonceSource::class, SystemNonceSource::class);
     $services->set(SodiumSecretCipher::class);
     $services->alias(SecretCipher::class, SodiumSecretCipher::class);
+
+    $services->set(NativeArgon2idPasswordHasher::class);
+    $services->alias(PasswordHasher::class, NativeArgon2idPasswordHasher::class);
+    $services->set(Sha256OpaqueSecretHasher::class);
+    $services->alias(OpaqueSecretHasher::class, Sha256OpaqueSecretHasher::class);
+    $services->set(SystemOpaqueTokenGenerator::class);
+    $services->alias(OpaqueTokenGenerator::class, SystemOpaqueTokenGenerator::class);
+    $services->set(SystemSecurityIdentifierGenerator::class);
+    $services->alias(SecurityIdentifierGenerator::class, SystemSecurityIdentifierGenerator::class);
+    $services->set(HmacCsrfTokenDeriver::class)->arg('$applicationSecret', '%kernel.secret%');
+    $services->alias(CsrfTokenDeriver::class, HmacCsrfTokenDeriver::class);
+    $services->set(DbalLocalAuthStore::class);
+    $services->alias(AuthenticationStore::class, DbalLocalAuthStore::class);
+    $services->alias(LoginThrottleStore::class, DbalLocalAuthStore::class);
+    $services->alias(WebSessionStore::class, DbalLocalAuthStore::class);
+    $services->alias(AuditEventStore::class, DbalLocalAuthStore::class);
+    $services->alias(SecurityTransaction::class, DbalLocalAuthStore::class);
+    $services->alias(FirstAdminStore::class, DbalLocalAuthStore::class);
+    $services->set(SecurityAuditRecorder::class);
+    $services->set(LocalLogin::class);
+    $services->set(AuthenticateSession::class);
+    $services->set(LogoutSession::class);
+    $services->set(PermissionAuthorizer::class);
+    $services->alias(\App\Presentation\Http\Auth\HttpRequestAuthenticator::class, \App\Presentation\Http\Auth\RequestAuthenticator::class);
+    $services->set(CreateFirstAdmin::class);
+    $services->alias(FirstAdminCreator::class, CreateFirstAdmin::class);
+    $services->set(\App\Presentation\Http\Controller\AuthController::class)
+        ->arg('$environment', '%kernel.environment%');
 
     $services
         ->set(MonologRedactionProcessor::class)

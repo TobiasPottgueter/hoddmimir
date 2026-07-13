@@ -61,6 +61,7 @@
         - { name: mariadb_web_password, value: "{{ hoddmimir_mariadb_web_password }}" }
         - { name: mariadb_collector_password, value: "{{ hoddmimir_mariadb_collector_password }}" }
         - { name: mariadb_backup_worker_password, value: "{{ hoddmimir_mariadb_backup_worker_password }}" }
+        - { name: matrix_webhook_url, value: "{{ hoddmimir_matrix_webhook_url }}" }
       loop_control:
         label: "{{ item.name }}"
       changed_when: false

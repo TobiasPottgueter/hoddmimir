@@ -1,6 +1,8 @@
 # Phase 4: Policies, Scheduler und Shadow Mode
 
-Status: begonnen am 12. Juli 2026
+Status: **lokale Implementierung am 13. Juli 2026 abgeschlossen.** Die
+Umgebungsabnahme gegen reale PVE-/PBS-Systeme ist Bestandteil der noch nicht
+begonnenen Phase 7.
 
 Dieses Dokument konkretisiert Phase 4 aus dem
 [`rewrite-plan.md`](rewrite-plan.md). Es ist dem Rewrite-Plan untergeordnet und
@@ -21,6 +23,29 @@ Phase 4 startet, stoppt oder löscht keine Backups. Der Collector bleibt gegen
 PVE und PBS read-only. Claimbare `backup_requests`, Backup-Worker-Leases, UPID
 und Ausführung gehören zu Phase 5. Es gibt weiterhin weder einen manuellen
 Scan-Endpunkt noch eine Aktion „Jetzt scannen“.
+
+## Lokaler Abschlussstand
+
+Der lokale Phase-4-Umfang ist implementiert:
+
+- reine, geschlossene Domainregeln für Auswahl, Eligibility, Freshness,
+  Gründe, Priorität, Policy-Auflösung, Kandidatengewinn und Explainability;
+- revisionierte Ziele, Policies, Auswahl und Gast-Overrides ohne Legacy-Import;
+- serverseitige Zielkandidaten mit Node-, Kapazitäts-, PBS- und
+  Executor-Evidenz sowie fail-closed Aktivierungsblockern;
+- automatische, gefencete Shadow-Auswertung nach einem autoritativen
+  Collector-Apply einschließlich Duplicate-, Kapazitäts- und
+  Node-/Ziel-Concurrency-Gates;
+- append-only Evaluation-Runs, Decisions und geordnete Gates sowie
+  cursor-paginierte API-/WebApp-Projektionen;
+- authentifizierte, autorisierte, revisionierte und auditierte
+  Konfigurationscommands.
+
+Unit-/Contract-, echte MariaDB-11.4-, OpenAPI-, Frontend- und Playwright-Tests
+decken diese lokalen Verträge ab. Der vollständige Gate-Satz muss auf jedem
+eingefrorenen Releasekandidaten erneut ausgeführt werden; bereinigte Fixtures
+und die lokale QA-Datenbank ersetzen keine Live-PVE-/PBS-Evidenz. Phase 4 hat
+keinen PVE-Schreibzugriff aktiviert und Phase 7 wurde nicht begonnen.
 
 ## Verbindliche Regeln
 
@@ -85,10 +110,8 @@ separaten Rechte-, Capability- und E2E-Abnahme deaktiviert.
 
 ## Sicherheitsgrenzen
 
-Die bestehende Loopback-Bindung ist für die aktuelle GET-only-API ausreichend,
-aber keine Autorisierung für administrative Schreibzugriffe. Bevor POST/PUT
-aktiviert werden, wird eine minimale fail-closed Sicherheitsgrenze aus Phase 6
-vorgezogen:
+Administrative Schreibzugriffe verwenden die aus Phase 6 vorgezogene
+fail-closed Sicherheitsgrenze:
 
 - authentifizierter Principal;
 - explizite Permission `backup_configuration.manage`;
@@ -96,9 +119,10 @@ vorgezogen:
 - sichere 401/403/409/422-Fehler ohne Interna oder Secrets;
 - Audit-Event und Optimistic-Concurrency-Revision je Änderung.
 
-Bis diese Grenze steht, bleiben neue HTTP-Sichten GET-only und der
-`hoddmimir_web`-Datenbankbenutzer read-only. Ein Frontend-Flag oder ein
-`LOCAL_ADMIN`-Schalter ist keine Produktionsautorisierung.
+Ein Frontend-Flag oder ein `LOCAL_ADMIN`-Schalter ist keine
+Produktionsautorisierung. Der `hoddmimir_web`-Datenbankbenutzer besitzt nur die
+für die versionierten Read- und Command-Repositories erforderlichen Rechte;
+direkter PVE-/PBS-Zugriff bleibt ausgeschlossen.
 
 ## Architektur
 
@@ -221,11 +245,15 @@ Permission fehlt.
 
 ### 4.0 – Vertrag und Entscheidungen
 
+Status: lokal abgeschlossen.
+
 - dieses Dokument reviewen;
 - offene Fachentscheidungen einzeln festlegen;
 - Mutation-Allowlist um neue Scheduler-/State-Machine-Pfade erweitern.
 
 ### 4.1 – Inventarvoraussetzungen
+
+Status: lokal abgeschlossen.
 
 - `placement_revision` nur bei Nodewechsel;
 - roher, frischer Guest-Write-State;
@@ -234,6 +262,8 @@ Permission fehlt.
 
 ### 4.2 – Reine Regelprimitive
 
+Status: lokal abgeschlossen.
+
 - Auswahl, Explainability, bekannte Gründe und Prioritäten;
 - strikte Alters-/Cooldown-/Byte-Grenzen;
 - Retry-Inheritance und klassenstabile FIFO-/Fairness-Grenze;
@@ -241,23 +271,24 @@ Permission fehlt.
 
 ### 4.3 – Shadow-Persistenz
 
+Status: lokal abgeschlossen.
+
 - Evaluation-Run, Decision und Gates;
 - idempotente, gefencete Transaktion;
 - keinerlei claimbare Queue-Daten oder Backup-Worker-Grants;
 - MariaDB-Concurrency- und Least-Privilege-Tests.
 
-Stand 12. Juli 2026: Die append-only Persistenzgrundlage ist umgesetzt. Ein
-kanonischer Payload-Hash macht exakte Wiederholungen idempotent; abweichende
-Wiederholungen sowie verlorene Collector-Fences schlagen geschlossen fehl.
-Collector-Zugriffe sind auf `SELECT, INSERT` begrenzt, WebApp und Backup-Worker
-haben keine Rechte auf die drei Shadow-Tabellen. Policy- und Target-Identitäten
-werden bis Welle 4.4 nur als unveränderliche Snapshot-Evidenz gespeichert, weil
-die referenzierten Aggregate noch nicht existieren. Vor der automatischen
-Aktivierung in Welle 4.6 werden dort die echten Fremdschlüssel und
-Revisionsprüfungen ergänzt. Es gibt weiterhin weder Collector-Wiring noch API,
-WebApp oder ausführbare Queue-Daten für Shadow-Auswertungen.
+Ein kanonischer Payload-Hash macht exakte Wiederholungen idempotent;
+abweichende Wiederholungen sowie verlorene Collector-Fences schlagen
+geschlossen fehl. Collector-Zugriffe sind auf die erforderlichen
+`SELECT`-/`INSERT`-Pfade begrenzt; der Backup-Worker besitzt keine Rechte auf
+die Shadow-Tabellen. Policy- und Target-Revisionen werden gegen die inzwischen
+vorhandenen Aggregate gebunden. Shadow-Auswertungen erzeugen weiterhin keine
+ausführbaren Queue-Daten.
 
 ### 4.4 – Ziele und Policies
+
+Status: lokal abgeschlossen.
 
 - Aggregate, Revisionen, FKs und serverseitige Aktivierungsvalidierung;
 - GET-Projektionen;
@@ -265,11 +296,15 @@ WebApp oder ausführbare Queue-Daten für Shadow-Auswertungen.
 
 ### 4.5 – Minimale Security und Commands
 
+Status: lokal abgeschlossen.
+
 - Principal, Permission, Authorizer und Audit;
 - Targets, Policies und bounded Selection-Commands;
 - OpenAPI-Client und negative Permission-/DML-Tests.
 
 ### 4.6 – Automatischer Shadow-Zyklus und WebApp
+
+Status: lokal abgeschlossen.
 
 - automatische Auswertung nach autoritativem Collector-Apply;
 - erklärbare Views und Cursor-Pagination;
@@ -290,34 +325,94 @@ WebApp oder ausführbare Queue-Daten für Shadow-Auswertungen.
   erklärbare `never_backed_up`-Shadow-Entscheidung;
 - negative E2E-Assertions: kein Scan, kein Backupstart/-stopp/-cancel.
 
-## Offene fachliche Entscheidungen
+## Festgelegte fachliche Entscheidungen
 
-Vor der jeweils betroffenen Welle werden festgelegt und in diesem Dokument
-ersetzt:
+### Freshness von Ausführungsnachweisen
 
-1. Verhalten bei fallendem/resettem PVE-`diskwrite`-Counter.
-2. Cooldown-Anker: letzter Erfolg, Versuch, Planung oder Byte-Planung.
-3. Defaults und erlaubte Bereiche für Alter, Bytes, Cooldown und Freshness.
-4. Default-Auswahl und exakte Hierarchie von global/Connection/Cluster/Node/Gast.
-5. Umfang der Gast-Overrides über Modus, Kompression und Retention hinaus.
-6. Fairnessalgorithmus und persistierter Fairnesszustand.
-7. Bedeutung dynamischer Zielparallelität „ein Slot je Node“.
-8. Ob `available == minimum_free_bytes` ausreichend ist.
-9. Freiplatzreservierung beziehungsweise erwartete Backupgröße bei parallelen Starts.
-10. PBS-Ziele: Zusammenspiel von PVE- und PBS-Kapazität; S3-Local-Cache ist
-    niemals allein Remote-Kapazitätsnachweis.
-11. Quelle und Freshness des Executor-Berechtigungsnachweises.
-12. Relationale Identität und Eindeutigkeit der PVE-zu-PBS-Zuordnung.
-13. Externe beobachtete Tasks/Snapshots zählen nicht automatisch als V2-Historie;
-    eine spätere abweichende Regel wäre explizit zu entscheiden.
-14. Schedule-Modell, Zeitzone, verpasste Policy-Ticks und Bildung von
-    `scheduled_at`.
-15. Welche Gates nur zur Shadow-Entscheidung führen und welche erst unmittelbar
-    vor Phase-5-Start erneut blockieren.
-16. Zulässigkeit von Templates und weiteren Guest-States.
-17. Trennung gewünschter Retention von freigegebener Ausführungswirkung.
-18. Ob eine Auswertung exakt eine Entscheidung je Gast oder mehrere
-    Ziel-/Policy-Kandidaten je Gast persistiert; bis dahin erzwingt nur die
-    Decision-ID Eindeutigkeit und es gibt keinen versteckten Gast-Unique-Key.
+- Inventar-, Placement-, Kapazitäts- und Executor-Berechtigungsnachweise sind
+  standardmäßig höchstens 300 Sekunden alt. Der Wert ist als gemeinsame
+  Deployment-Konfiguration änderbar; ein abweichender Wert verändert keine
+  Collector-Taktung.
+- Die Altersgrenze ist inklusiv: `now <= observed_at + freshness_window` ist
+  frisch, die erste Mikrosekunde danach ist stale.
+- Jeder benötigte Nachweis wird einzeln geprüft. Ein fehlender oder stale
+  Nachweis blockiert fail-closed sowohl die Shadow-Eligibility als auch die
+  unmittelbare Startfreigabe im Backup-Worker.
+- Der Backup-Worker prüft alle Nachweise nach dem Claim und unmittelbar vor
+  einem PVE-Schreibaufruf erneut. Bereits laufende PVE-Tasks werden bei stale
+  Evidenz nicht abgebrochen, sondern weiterhin überwacht.
+- Blockierte Requests bleiben nachvollziehbar und dürfen nach einem späteren
+  erfolgreichen Collector-Apply erneut bewertet werden; es entsteht weder ein
+  automatischer Backupstart mit stale Daten noch ein Catch-up-Burst.
 
-Bis zur Klärung werden keine vermeintlichen Defaults im Code versteckt.
+### Auswahlhierarchie
+
+- Die anwendbaren Ebenen sind global, Connection, Cluster, Node und Gast.
+- Ohne explizites Include bleibt ein Gast fail-closed ausgeschlossen.
+- `inherit` enthält keine eigene Entscheidung. Liegt mindestens ein explizites
+  Exclude auf einer anwendbaren Ebene vor, gewinnt es gegen jedes Include.
+- Ohne Exclude genügt mindestens ein Include; für die Explainability wird die
+  spezifischste explizite Entscheidung ausgewiesen.
+
+### Automatische Auswertung und Trigger
+
+- V2.0 besitzt kein Cron-Modell. Jede aktivierte Policy wird nach jedem
+  autoritativen Collector-Apply ausgewertet. `scheduled_at` ist der
+  UTC-Startzeitpunkt dieses Collector-Zyklus.
+- Ausgefallene, übersprungene oder überlange Collector-Zyklen erzeugen keine
+  nachträglichen Policy-Ticks und keinen Catch-up-Burst.
+- Maximalalter, Byte-Schwelle und Byte-Cooldown haben keine versteckten
+  Defaults. Sie werden explizit konfiguriert; zur Aktivierung muss mindestens
+  ein automatischer Trigger vollständig konfiguriert sein.
+- Der Byte-Cooldown beginnt mit dem letzten erfolgreichen V2-Backup. Fällt der
+  PVE-`diskwrite`-Counter, wird die Baseline auf den neuen beobachteten Wert
+  gesetzt, der Reset auditiert und aus dem Reset allein kein Backup abgeleitet.
+- Fairness verändert die dokumentierte Prioritäts-/FIFO-Reihenfolge in V2.0
+  nicht. Innerhalb einer Prioritätsklasse gilt strikt `scheduled_at`, danach
+  stabile Request-ID.
+
+### Ziel-, Kapazitäts- und Executor-Regeln
+
+- `available_bytes == minimum_free_bytes` besteht das Mindestfreiplatz-Gate.
+- Ein Ziel besitzt ein explizites festes Parallelitätslimit. Zusätzlich gilt
+  pro PVE-Node genau ein Startslot; die wirksame Zielparallelität ist höchstens
+  die Zahl der aktuell zulässigen, online Nodes. Reservierung und Freigabe
+  erfolgen transaktional unter Row Locks.
+- Vor einem parallelen Start wird Kapazität reserviert. Grundlage ist die
+  letzte erfolgreiche V2-Backupgröße plus zehn Prozent Sicherheitsaufschlag;
+  fehlt sie, wird fail-closed die provisionierte Gastgröße verwendet. Fehlen
+  beide Werte, erfolgt kein Start.
+- Bei PBS-Zielen müssen PVE-Storage- und echte PBS-Datastore-Kapazität frisch
+  sein. Die kleinere nachweisbare verfügbare Kapazität ist maßgeblich;
+  `local_cache` allein beweist keine Remote-Kapazität.
+- Die ausführbare PBS-Zuordnung referenziert explizit PVE-Storage,
+  PBS-Connection, Datastore und optionalen Namespace. Host-/Port-Matching ist
+  nur Kandidatenevidenz und keine dauerhafte Identität.
+- Der Backup-Worker erhebt mit seinem eigenen Executor-Credential read-only
+  `VM.Backup` für den konkreten Gast und `Datastore.AllocateSpace` für das
+  konkrete Ziel. Nur dieser Prozess besitzt das Credential; die Evidenz folgt
+  dem gemeinsamen 300-Sekunden-Freshness-Vertrag.
+
+### Gast-, Retention- und Entscheidungsregeln
+
+- Templates und unbekannte oder nicht aktive Gastzustände sind in V2.0 nicht
+  backupfähig. QEMU und LXC im aktiven Inventar sind gleichberechtigt.
+- Extern beobachtete Tasks und Snapshots werden niemals automatisch als
+  erfolgreiche V2-Historie gewertet.
+- Gast-Overrides umfassen in V2.0 Auswahl, Modus, Kompression und gewünschte
+  Retention. Schwellwerte, Schedule und Zielzuordnung bleiben Policy-Regeln.
+- Gewünschte Retention erzeugt ohne separates
+  `retention_execution_enabled`, passende Permission, Capability und E2E-Gate
+  keinerlei löschwirksame VZDump-/Prune-Parameter.
+- Die Shadow-Auswertung persistiert eine Entscheidung je anwendbarem
+  Gast-/Policy-/Ziel-Tupel. Für die spätere Queue gewinnt je Gast der höchste
+  fachliche Grund, danach explizite Policy-Priorität und schließlich stabile
+  Policy-/Target-ID; alle verworfenen Kandidaten bleiben erklärbar.
+- Direkt vor einem Phase-5-Start werden Auswahl, Gastzustand, Placement,
+  Target/Node, Inventar-, Kapazitäts- und Executor-Freshness, Mindestfreiplatz,
+  Reservation, Duplicate- und Concurrency-Gates erneut geprüft. Grund und
+  Priorität werden nicht neu erfunden, sondern vom Request übernommen.
+
+Die für Phase 4 bis 6 benötigten Fachentscheidungen sind damit festgelegt.
+Abweichungen werden als explizite Vertragsänderung mit Tests dokumentiert und
+nicht als versteckter Default eingeführt.

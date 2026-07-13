@@ -8,6 +8,8 @@ use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Target\ReadModel\BackupTargetCandidate;
 use App\Application\Target\ReadModel\BackupTargetCandidateQuery;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupTargetCandidateReadModel;
+use App\Tests\Fakes\FrozenClock;
+use DateTimeImmutable;
 
 final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
 {
@@ -16,7 +18,7 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
     public function testItProjectsBoundedNodeAndValidatedPbsEvidenceWithoutActivationDefaults(): void
     {
         $this->seed();
-        $model = new DbalBackupTargetCandidateReadModel($this->connection());
+        $model = $this->model();
 
         $first = $model->candidates(new BackupTargetCandidateQuery(new PageRequest(1)));
         self::assertCount(1, $first->items);
@@ -24,14 +26,20 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         $local = $first->items[0]->toArray();
         self::assertSame('local-a', $local['storageName']);
         self::assertFalse($local['canEnable']);
-        self::assertSame(['freshness_policy_unconfigured'], $local['blockers']);
+        self::assertSame([], $local['blockers']);
+        $localExecutor = $local['executor'];
+        self::assertIsArray($localExecutor);
+        self::assertSame('requires_target_configuration', $localExecutor['status'] ?? null);
         $localNodes = $local['nodes'];
         self::assertIsArray($localNodes);
         self::assertIsArray($localNodes[0]);
         self::assertIsArray($localNodes[1]);
         self::assertSame('1000', $localNodes[0]['totalBytes']);
         self::assertSame([], $localNodes[0]['blockers']);
-        self::assertSame(['node_state_missing'], $localNodes[1]['blockers']);
+        self::assertSame(
+            ['node_state_missing', 'node_state_evidence_missing', 'capacity_evidence_missing'],
+            $localNodes[1]['blockers'],
+        );
 
         $second = $model->candidates(new BackupTargetCandidateQuery(
             new PageRequest(1, $first->nextCursor),
@@ -46,7 +54,49 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         self::assertSame([], $pbsEvidence['blockers']);
         self::assertSame('datastore_filesystem', $pbsEvidence['capacitySemantics']);
         self::assertSame('9000', $pbsEvidence['availableBytes']);
-        self::assertFalse($pbs['canEnable'], 'No freshness contract means fail-closed even with complete raw evidence.');
+        self::assertSame([], $pbs['blockers']);
+        $pbsExecutor = $pbs['executor'];
+        self::assertIsArray($pbsExecutor);
+        self::assertSame('requires_target_configuration', $pbsExecutor['status'] ?? null);
+        self::assertFalse($pbs['canEnable'], 'A target must exist before executor authorization can be proven.');
+    }
+
+    public function testConfiguredTargetExecutorEvidenceIsAggregatedFailClosed(): void
+    {
+        $this->seed();
+        $storage = $this->connection()->fetchAssociative("SELECT id,connection_id,cluster_id FROM pve_storages WHERE storage_name='local-a'");
+        self::assertIsArray($storage);
+        $node = $this->connection()->fetchOne("SELECT id FROM pve_nodes WHERE node_name='node-a'");
+        self::assertIsString($node);
+        $target = random_bytes(16);
+        $this->connection()->insert('backup_targets', [
+            'id'=>$target,'connection_id'=>$storage['connection_id'],'cluster_id'=>$storage['cluster_id'],'storage_id'=>$storage['id'],
+            'display_name'=>'Executor target','status'=>'disabled','revision'=>1,'minimum_free_bytes'=>'1','fixed_parallel_limit'=>1,
+            'created_at'=>self::NOW,'updated_at'=>self::NOW,'disabled_at'=>self::NOW,
+        ]);
+        $this->connection()->insert('backup_target_allowed_nodes', [
+            'target_id'=>$target,'connection_id'=>$storage['connection_id'],'cluster_id'=>$storage['cluster_id'],'node_id'=>$node,'created_at'=>self::NOW,
+        ]);
+        $missing = $this->candidate('local-a')->executor;
+        self::assertSame('missing', $missing->status->value);
+        self::assertSame(1, $missing->expectedNodeCount);
+
+        $evidence = random_bytes(16);
+        $this->connection()->insert('executor_permission_evidence', [
+            'id'=>$evidence,'connection_id'=>$storage['connection_id'],'cluster_id'=>$storage['cluster_id'],'target_id'=>$target,
+            'node_id'=>$node,'storage_id'=>$storage['id'],'guest_id'=>null,'vm_backup_authorized'=>1,
+            'datastore_allocate_authorized'=>1,'authorized'=>1,'observed_at'=>self::NOW,'revision'=>1,
+        ]);
+        $authorized = $this->candidate('local-a')->executor;
+        self::assertSame('authorized', $authorized->status->value);
+        self::assertTrue($authorized->usable());
+
+        $this->connection()->update('executor_permission_evidence', [
+            'datastore_allocate_authorized'=>0,'authorized'=>0,
+        ], ['id'=>$evidence]);
+        $unauthorized = $this->candidate('local-a')->executor;
+        self::assertSame('unauthorized', $unauthorized->status->value);
+        self::assertContains('executor_unauthorized', array_column($unauthorized->blockers, 'value'));
     }
 
     public function testHostAndPortEvidenceFailsClosedWhenUnresolvedOrAmbiguous(): void
@@ -60,7 +110,10 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         $unresolved = $this->pbsCandidate()->pbs;
         self::assertNotNull($unresolved);
         self::assertSame('unresolved', $unresolved->endpointMatch->value);
-        self::assertSame(['pbs_endpoint_unresolved'], array_column($unresolved->blockers, 'value'));
+        self::assertSame(
+            ['pbs_endpoint_unresolved', 'pbs_capacity_evidence_missing'],
+            array_column($unresolved->blockers, 'value'),
+        );
 
         $this->connection()->update(
             'proxmox_connection_endpoints',
@@ -80,7 +133,10 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         $ambiguous = $this->pbsCandidate()->pbs;
         self::assertNotNull($ambiguous);
         self::assertSame('ambiguous', $ambiguous->endpointMatch->value);
-        self::assertSame(['pbs_endpoint_ambiguous'], array_column($ambiguous->blockers, 'value'));
+        self::assertSame(
+            ['pbs_endpoint_ambiguous', 'pbs_capacity_evidence_missing'],
+            array_column($ambiguous->blockers, 'value'),
+        );
     }
 
     public function testNonPbsEndpointAtMappedHostAndPortIsNotAConnectionMatch(): void
@@ -105,7 +161,10 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         $onlyNonPbs = $this->pbsCandidate()->pbs;
         self::assertNotNull($onlyNonPbs);
         self::assertSame('unresolved', $onlyNonPbs->endpointMatch->value);
-        self::assertSame(['pbs_endpoint_unresolved'], array_column($onlyNonPbs->blockers, 'value'));
+        self::assertSame(
+            ['pbs_endpoint_unresolved', 'pbs_capacity_evidence_missing'],
+            array_column($onlyNonPbs->blockers, 'value'),
+        );
 
         $this->connection()->executeStatement(
             "UPDATE proxmox_connection_endpoints AS endpoint
@@ -127,7 +186,7 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         $this->connection()->executeStatement("UPDATE pve_storages SET content_json = '[\"iso\"]' WHERE storage_name = 'local-a'");
         $this->connection()->executeStatement("UPDATE pve_nodes SET api_status = 'offline' WHERE node_name = 'node-a'");
 
-        $page = (new DbalBackupTargetCandidateReadModel($this->connection()))->candidates(
+        $page = $this->model()->candidates(
             new BackupTargetCandidateQuery(new PageRequest(10)),
         );
         $local = array_values(array_filter(
@@ -140,17 +199,99 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
         self::assertContains('node_offline', array_column($local->nodes[0]->blockers, 'value'));
     }
 
+    public function testEveryEvidenceFamilyUsesInclusiveBoundaryAndRejectsStaleAndFuture(): void
+    {
+        $this->seed();
+        $local = $this->candidate('local-a');
+        self::assertNotContains('storage_inventory_evidence_stale', array_column($local->blockers, 'value'));
+        self::assertNotContains('node_state_evidence_stale', array_column($local->nodes[0]->blockers, 'value'));
+        self::assertNotContains('capacity_evidence_stale', array_column($local->nodes[0]->blockers, 'value'));
+        $pbs = $this->candidate('pbs-b');
+        self::assertNotNull($pbs->pbs);
+        self::assertSame([], $pbs->pbs->blockers);
+
+        $this->connection()->executeStatement(
+            "UPDATE pve_storages
+             SET first_seen_at = '2026-07-12 09:59:59.999999', last_seen_at = '2026-07-12 09:59:59.999999'
+             WHERE storage_name = 'local-a'",
+        );
+        self::assertContains('storage_inventory_evidence_stale', array_column($this->candidate('local-a')->blockers, 'value'));
+        $this->connection()->executeStatement(
+            "UPDATE pve_storages SET last_seen_at = '2026-07-12 10:05:00.000001' WHERE storage_name = 'local-a'",
+        );
+        self::assertContains('storage_inventory_evidence_future', array_column($this->candidate('local-a')->blockers, 'value'));
+
+        $this->connection()->executeStatement(
+            "UPDATE pve_node_storage_state AS state
+             INNER JOIN pve_storages AS storage ON storage.id = state.storage_id
+             SET state.observed_at = '2026-07-12 09:59:59.999999'
+             WHERE storage.storage_name = 'local-a'",
+        );
+        $staleNode = $this->candidate('local-a')->nodes[0];
+        self::assertContains('node_state_evidence_stale', array_column($staleNode->blockers, 'value'));
+        self::assertContains('capacity_evidence_stale', array_column($staleNode->blockers, 'value'));
+        $this->connection()->executeStatement(
+            "UPDATE pve_node_storage_state AS state
+             INNER JOIN pve_storages AS storage ON storage.id = state.storage_id
+             SET state.observed_at = '2026-07-12 10:05:00.000001'
+             WHERE storage.storage_name = 'local-a'",
+        );
+        $futureNode = $this->candidate('local-a')->nodes[0];
+        self::assertContains('node_state_evidence_future', array_column($futureNode->blockers, 'value'));
+        self::assertContains('capacity_evidence_future', array_column($futureNode->blockers, 'value'));
+
+        $this->connection()->executeStatement(
+            "UPDATE pve_storage_pbs_mappings SET observed_at = '2026-07-12 09:59:59.999999'",
+        );
+        $staleMapping = $this->candidate('pbs-b')->pbs;
+        self::assertNotNull($staleMapping);
+        self::assertContains('pbs_mapping_evidence_stale', array_column($staleMapping->blockers, 'value'));
+        $this->connection()->executeStatement(
+            "UPDATE pve_storage_pbs_mappings SET observed_at = '2026-07-12 10:05:00.000001'",
+        );
+        $futureMapping = $this->candidate('pbs-b')->pbs;
+        self::assertNotNull($futureMapping);
+        self::assertContains('pbs_mapping_evidence_future', array_column($futureMapping->blockers, 'value'));
+
+        $this->connection()->executeStatement(
+            "UPDATE pbs_datastore_capacity_state SET observed_at = '2026-07-12 09:59:59.999999'",
+        );
+        $staleCapacity = $this->candidate('pbs-b')->pbs;
+        self::assertNotNull($staleCapacity);
+        self::assertContains('pbs_capacity_evidence_stale', array_column($staleCapacity->blockers, 'value'));
+        $this->connection()->executeStatement(
+            "UPDATE pbs_datastore_capacity_state SET observed_at = '2026-07-12 10:05:00.000001'",
+        );
+        $futureCapacity = $this->candidate('pbs-b')->pbs;
+        self::assertNotNull($futureCapacity);
+        self::assertContains('pbs_capacity_evidence_future', array_column($futureCapacity->blockers, 'value'));
+    }
+
     private function pbsCandidate(): BackupTargetCandidate
     {
-        $items = (new DbalBackupTargetCandidateReadModel($this->connection()))->candidates(
+        return $this->candidate('pbs-b');
+    }
+
+    private function candidate(string $storageName): BackupTargetCandidate
+    {
+        $items = $this->model()->candidates(
             new BackupTargetCandidateQuery(new PageRequest(10)),
         )->items;
         $matches = array_values(array_filter(
             $items,
-            static fn (BackupTargetCandidate $item): bool => 'pbs-b' === $item->storageName,
+            static fn (BackupTargetCandidate $item): bool => $storageName === $item->storageName,
         ));
         self::assertCount(1, $matches);
         return $matches[0];
+    }
+
+    private function model(): DbalBackupTargetCandidateReadModel
+    {
+        return new DbalBackupTargetCandidateReadModel(
+            $this->connection(),
+            new FrozenClock(new DateTimeImmutable('2026-07-12T10:05:00.000000Z')),
+            300,
+        );
     }
 
     private function seed(): void

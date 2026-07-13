@@ -84,8 +84,14 @@ curl --fail http://localhost:8080/api/health
 docker compose down --volumes
 
 docker build --target backend-test --file docker/php/Dockerfile .
+make backend-integration
+make backend-coverage
+make mutation
 docker build --target frontend-test --file docker/web/Dockerfile .
 docker build --target frontend-build --file docker/web/Dockerfile .
+make e2e
+make api-schema-drift-test
+make supply-chain
 
 make inventory
 make lint

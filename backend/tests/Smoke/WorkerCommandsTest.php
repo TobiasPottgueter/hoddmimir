@@ -7,6 +7,10 @@ namespace App\Tests\Smoke;
 use App\Application\Collector\CollectorWorkerRunCode;
 use App\Application\Collector\CollectorWorkerRunResult;
 use App\Application\Collector\CollectorWorkerRunner;
+use App\Application\Backup\Worker\BackupWorkerRuntimeSafety;
+use App\Application\Backup\Execution\BackupExecutionGate;
+use App\Application\Backup\Notification\BackupNotificationConfiguration;
+use App\Application\Backup\Notification\BackupNotificationDeliveryGate;
 use App\Application\Readiness\ReadinessAggregator;
 use App\Application\Readiness\ReadinessCheckResult;
 use App\Kernel;
@@ -20,6 +24,25 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 final class WorkerCommandsTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        if (\function_exists('pcntl_alarm')) {
+            \pcntl_async_signals(true);
+            \pcntl_signal(\SIGALRM, static function (): never {
+                throw new \RuntimeException('The worker command did not terminate.');
+            });
+            \pcntl_alarm(5);
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        if (\function_exists('pcntl_alarm')) {
+            \pcntl_alarm(0);
+            \pcntl_signal(\SIGALRM, \SIG_DFL);
+        }
+    }
+
     /** @return iterable<string, array{string}> */
     public static function workerKinds(): iterable
     {
@@ -43,6 +66,26 @@ final class WorkerCommandsTest extends TestCase
         self::assertSame('ready', $payload['status'] ?? null);
 
         $kernel->shutdown();
+    }
+
+    public function testBackupWorkerRefusesExecutionWithoutProblemDelivery(): void
+    {
+        $kernel = $this->readyKernel();
+        try {
+            $testContainer = $kernel->getContainer()->get('test.service_container');
+            self::assertInstanceOf(TestContainer::class, $testContainer);
+            $testContainer->set(BackupWorkerRuntimeSafety::class, new BackupWorkerRuntimeSafety(
+                new SmokeSafetyFlag(true),
+                new SmokeSafetyFlag(false),
+                new SmokeSafetyFlag(false),
+            ));
+            $application = new Application($kernel);
+            $tester = new CommandTester($application->find('hoddmimir:worker:backup'));
+            self::assertSame(1, $tester->execute(['--once' => true]));
+            self::assertStringContainsString('requires enabled and valid problem notification delivery', $tester->getDisplay());
+        } finally {
+            $kernel->shutdown();
+        }
     }
 
     public function testCollectorCommandUsesInjectedRuntimeAndHasNoIntervalOption(): void
@@ -137,6 +180,13 @@ final class WorkerCommandsTest extends TestCase
 
         return $kernel;
     }
+}
+
+final readonly class SmokeSafetyFlag implements BackupExecutionGate, BackupNotificationDeliveryGate, BackupNotificationConfiguration
+{
+    public function __construct(private bool $value) {}
+    public function enabled(): bool { return $this->value; }
+    public function isValid(): bool { return $this->value; }
 }
 
 final class SmokeCollectorRunner implements CollectorWorkerRunner

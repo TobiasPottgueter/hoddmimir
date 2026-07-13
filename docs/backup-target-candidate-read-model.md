@@ -1,6 +1,7 @@
 # Backupziel-Kandidatenprojektion
 
-Status: Backend-Projektionskern und GET-only HTTP-Projektion aus Phase 4.1
+Status: lokal implementierte, authentifizierte GET-Projektion aus Phase 4/6;
+reale PVE-/PBS-Abnahme bleibt Phase 7
 
 Ein Kandidat ist genau ein beobachtetes PVE-Storage innerhalb seines
 PVE-Clusters. Die Projektion ist read-only, cursor-paginiert und auf höchstens
@@ -15,10 +16,27 @@ null Byte oder anderweitiger Default gedeutet. Die geschlossenen Blocker
 unterscheiden unter anderem fehlende Evidenz, disabled/inactive und
 unavailable/invalid Capacity.
 
-Es existiert noch kein fachlich festgelegter Freshness-Grenzwert. Deshalb
-liefert die Projektion rohe UTC-Beobachtungszeiten und blockiert `canEnable`
-mit `freshness_policy_unconfigured`. Ein HTTP-Parameter darf diese
-serverseitige Fachentscheidung später nicht ersetzen.
+Der gemeinsame Freshness-Grenzwert beträgt standardmäßig 300 Sekunden und ist
+als Deployment-Konfiguration änderbar. Die Grenze ist inklusiv; die erste
+Mikrosekunde danach ist stale. Inventar-, Node-/Kapazitäts-, PBS-Mapping- und
+Executor-Nachweise werden einzeln und fail-closed geprüft. Ein HTTP-Parameter
+darf diese serverseitige Fachentscheidung nicht ersetzen.
+
+Die Projektion unterscheidet für Storage-Inventar, Node-State, Kapazität,
+PBS-Mapping und PBS-Kapazität jeweils `missing`, `stale` und `future` über
+eigene geschlossene Blockercodes. Ein Beobachtungszeitpunkt exakt 300 Sekunden
+vor `now` ist frisch; die erste Mikrosekunde davor ist stale. Ein
+Beobachtungszeitpunkt nach `now` ist niemals frisch. Die Uhr wird einmal pro
+Projektionsseite gelesen, sodass alle Evidenzen einer Antwort dieselbe Grenze
+verwenden.
+
+Für konfigurierte Ziele projiziert der Readmodel-Adapter die erwarteten und
+beobachteten Node-Evidenzen aus `executor_permission_evidence`. Nur eine
+vollständige, frische Evidenz mit `VM.Backup` und
+`Datastore.AllocateSpace` gilt als autorisiert; fehlende, partielle, veraltete,
+zukünftige oder negative Evidenz bleibt über geschlossene Blockercodes
+fail-closed sichtbar. Ein noch nicht konfigurierter Storage-Kandidat trägt den
+Status `requires_target_configuration` und erfindet keine Executor-Evidenz.
 
 ## PBS-Grenze
 
@@ -34,9 +52,10 @@ typisierte Evidenz `matched`, `unresolved` oder `ambiguous`:
 - S3-`local_cache` ist kein Remote-Kapazitätsnachweis und blockiert mit
   `pbs_remote_capacity_unproven`.
 
-Eine spätere aktivierbare PBS-Bindung benötigt eine explizite relationale
-Identität und einen abgenommenen TLS-/Connection-Vertrag. Diese Projektion
-erfindet beides nicht.
+Ein konfiguriertes PBS-Ziel persistiert eine explizite relationale Bindung an
+Connection, Datastore und optionalen Namespace. Der beobachtete Host-/Port-
+Match der Kandidatenprojektion bleibt davon getrennte Evidenz und erfindet
+weder eine relationale Identität noch einen TLS-Nachweis.
 
 ## HTTP-Vertrag
 
@@ -52,7 +71,9 @@ Endpoint-, TLS- oder Secretdetails als `503 read_model_unavailable`
 veröffentlicht. Der Endpoint bleibt GET-only; insbesondere existiert hier kein
 Command zum Aktivieren eines Ziels.
 
-Bis Authentifizierung und RBAC vorhanden sind, bleibt auch diese Route auf die
-bestehende Host-Loopback-Bindung begrenzt. Der Datenbankbenutzer
-`hoddmimir_web` besitzt nur die expliziten Spalten-SELECTs der Projektion und
-keine DML-, Secret-, Sync-Run-, TLS- oder vollständigen Endpoint-Rechte.
+Die gemeinsame Phase-6-API schützt auch diese Route durch Session-
+Authentifizierung und `inventory.read`. Die WebApp-Bindung bleibt bis zur
+expliziten Reverse-Proxy-/TLS-Abnahme in Phase 7 auf Host-Loopback begrenzt.
+Der Datenbankbenutzer `hoddmimir_web` besitzt nur die expliziten Spalten-
+SELECTs der Projektion und keine DML-, Secret-, Sync-Run-, TLS- oder
+vollständigen Endpoint-Rechte.

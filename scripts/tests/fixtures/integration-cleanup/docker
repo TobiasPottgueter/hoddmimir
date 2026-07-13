@@ -5,11 +5,18 @@ set -eu
 printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
 
 case " $* " in
-    *' up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
+    *' up --build --abort-on-container-exit --exit-code-from backend-tests backend-tests '*|*' up --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
         status=${FAKE_DOCKER_UP_STATUS:-0}
 
         if [ "$status" -ne 0 ]; then
             printf 'simulated docker compose up failure\n' >&2
+        elif [ "${FAKE_DOCKER_CREATE_COVERAGE:-0}" -eq 1 ]; then
+            test -n "${COVERAGE_UID:-}"
+            test -n "${COVERAGE_GID:-}"
+            mkdir -p backend/coverage
+            printf 'fake integration coverage\n' > backend/coverage/integration.cov
+            printf '<coverage/>\n' > backend/coverage/integration.clover.xml
+            chmod 0600 backend/coverage/integration.cov backend/coverage/integration.clover.xml
         fi
 
         exit "$status"

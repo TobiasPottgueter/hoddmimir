@@ -57,6 +57,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
         $this->endpointId = self::id('pbs-endpoint');
         $this->store = new DbalPbsInventoryStore($this->connection(), new PbsSequentialIdentifierGenerator());
         $this->insertConnection();
+        $this->insertOnboardingState();
     }
 
     protected function tearDown(): void
@@ -91,6 +92,10 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
         ));
 
         self::assertSame('succeeded', $result->status);
+        self::assertSame(
+            ['state' => 'inventory_verified', 'last_inventory_run_id' => $run->binary()],
+            $this->connection()->fetchAssociative('SELECT state, last_inventory_run_id FROM proxmox_connection_onboarding_state'),
+        );
         self::assertSame(
             ['identity_kind' => 'pbs_legacy_node', 'identity_value' => 'pbs-a', 'legacy_endpoint_id' => $this->endpointId->binary()],
             $this->connection()->fetchAssociative(
@@ -149,6 +154,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
         self::assertTrue($result->diagnosticOnly);
         self::assertSame(0, $this->countRows('pbs_servers'));
         self::assertSame(0, $this->countRows('proxmox_installation_bindings'));
+        self::assertSame('inventory_partial', $this->connection()->fetchOne('SELECT state FROM proxmox_connection_onboarding_state'));
 
         [$seedLease, $seedRun] = $this->startRun('seed');
         $this->store->apply($seedLease, $this->commit(
@@ -565,6 +571,24 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
         ]);
     }
 
+    private function insertOnboardingState(): void
+    {
+        $this->connection()->insert('proxmox_connection_onboarding_state', [
+            'connection_id' => $this->connectionId->binary(),
+            'state' => 'first_automatic_scan_pending',
+            'tls_verified' => 1,
+            'product_supported' => 1,
+            'scan_permissions_verified' => 1,
+            'backup_permissions_verified' => null,
+            'detected_product' => 'pbs',
+            'detected_version' => '4.0.2',
+            'warnings_json' => '[]',
+            'verified_at' => '2026-07-11 00:00:00.000000',
+            'inventory_status_changed_at' => '2026-07-11 00:00:00.000000',
+            'last_inventory_run_id' => null,
+        ]);
+    }
+
     private function insertEndpoint(InventoryIdentifier $endpoint, string $host): void
     {
         $at = $this->format(self::at(0));
@@ -789,7 +813,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
             'proxmox_installation_bindings',
             'inventory_sync_runs',
             'proxmox_capability_snapshots',
-            'collector_credentials',
+            'proxmox_connection_onboarding_state',
             'proxmox_credentials',
             'proxmox_connection_endpoints',
             'proxmox_connections',

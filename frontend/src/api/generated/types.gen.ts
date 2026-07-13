@@ -5,6 +5,669 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type BackupRequestState =
+  | "pending"
+  | "retry_wait"
+  | "leased"
+  | "starting"
+  | "running"
+  | "reconcile_required"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+
+export type BackupRunState =
+  | "awaiting_submission"
+  | "reconcile_required"
+  | "running"
+  | "cancel_requested"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+
+export type ManualBackupRequest = {
+  guestId: CanonicalUuid;
+  policyId: CanonicalUuid;
+  expectedRevision: number;
+};
+
+export type RevisionRequest = {
+  expectedRevision: number;
+};
+
+export type BackupOperationResult = {
+  status: "applied" | "replayed";
+  requestId: CanonicalUuid;
+  revision: number;
+};
+
+export type BackupRequest = {
+  id: CanonicalUuid;
+  rootRequestId: CanonicalUuid;
+  runId: CanonicalUuid | null;
+  state: BackupRequestState;
+  origin: "automatic" | "manual" | "retry";
+  reason: "manual" | "never_backed_up" | "max_age" | "bytes_written" | "retry";
+  priority: number;
+  attempt: number;
+  revision: number;
+  guestId: CanonicalUuid;
+  guestName: string | null;
+  guestType: "qemu" | "lxc";
+  vmid: number;
+  nodeName: string;
+  policyName: string;
+  targetName: string;
+  scheduledAt: UtcTimestamp;
+  availableAt: UtcTimestamp;
+  createdAt: UtcTimestamp;
+  updatedAt: UtcTimestamp;
+  cancelRequestedAt: UtcTimestamp | null;
+  terminalCode: string | null;
+};
+
+export type BackupRequestPage = {
+  items: Array<BackupRequest>;
+  page: PageMetadata;
+};
+
+export type BackupRun = {
+  id: CanonicalUuid;
+  requestId: CanonicalUuid;
+  rootRequestId: CanonicalUuid;
+  guestId: CanonicalUuid;
+  state: BackupRunState;
+  attempt: number;
+  revision: number;
+  submissionProvenance: string;
+  upid: string | null;
+  guestName: string | null;
+  guestType: "qemu" | "lxc";
+  vmid: number;
+  nodeName: string;
+  policyName: string;
+  targetName: string;
+  startedAt: UtcTimestamp;
+  finishedAt: UtcTimestamp | null;
+  requestRevision?: number;
+  requestCancelRequestedAt?: UtcTimestamp | null;
+  reason?: "manual" | "never_backed_up" | "max_age" | "bytes_written" | "retry";
+  priority?: number;
+  exitStatus?: string | null;
+  statusFailureCode?: string | null;
+  stopAttemptClaimedAt?: UtcTimestamp | null;
+  stopAttemptStatus?:
+    | "dispatching"
+    | "requested"
+    | "ambiguous"
+    | "definitive_rejection"
+    | "dispatch_unknown"
+    | null;
+  stopAttemptResolvedAt?: UtcTimestamp | null;
+  stopFailureCode?: string | null;
+  recoveryOutcome?: string | null;
+  nextLogOffset?: number;
+};
+
+export type BackupRunPage = {
+  items: Array<BackupRun>;
+  page: PageMetadata;
+};
+
+export type BackupEvent = {
+  id: CanonicalUuid;
+  sequence: number;
+  type: string;
+  state: string;
+  occurredAt: string;
+  detailCode?: string | null;
+};
+
+export type BackupEventPage = {
+  items: Array<BackupEvent>;
+  page: PageMetadata;
+};
+
+export type BackupLogEntry = {
+  lineNo: number;
+  observedAt: string;
+  content: string;
+};
+
+export type BackupLogPage = {
+  items: Array<BackupLogEntry>;
+  page: PageMetadata;
+};
+
+export type NotificationStateCounts = {
+  pending: number;
+  claimed: number;
+  sent: number;
+};
+
+export type BackupNotificationHealth = {
+  byState: NotificationStateCounts;
+  oldestUnsentAt: UtcTimestamp | null;
+  lastErrorCode: string | null;
+  nextDeliveryAttemptAt: UtcTimestamp | null;
+};
+
+export type BackupNotification = {
+  id: CanonicalUuid;
+  kind: "failure" | "attention_required" | "recovery";
+  state: "pending" | "claimed" | "sent";
+  attempt: number;
+  deliveryAttempts: number;
+  guestName: string;
+  guestType: "qemu" | "lxc";
+  vmid: number;
+  node: string;
+  targetLabel: string;
+  problemCode: string;
+  detailCode: string | null;
+  occurredAt: UtcTimestamp;
+  nextRetryAt: UtcTimestamp | null;
+  consecutiveFailures: number;
+  lastErrorCode: string | null;
+  createdAt: UtcTimestamp;
+  sentAt: UtcTimestamp | null;
+};
+
+export type BackupNotificationPage = {
+  items: Array<BackupNotification>;
+  page: PageMetadata;
+};
+
+export type OperationsWorkerHealth = {
+  status: "starting" | "ready" | "busy" | "degraded" | "stopping";
+  heartbeatAt: UtcTimestamp;
+  expiresAt: UtcTimestamp;
+  fresh: boolean;
+  nextActionAt: UtcTimestamp | null;
+  buildVersion: string;
+  currentActivity: string | null;
+};
+
+export type OperationsWorkers = {
+  collector: OperationsWorkerHealth | null;
+  backup: OperationsWorkerHealth | null;
+};
+
+export type OperationsCollectorSchedule = {
+  nextScanAt: UtcTimestamp;
+  lastAttemptStartedAt: UtcTimestamp | null;
+  lastAttemptFinishedAt: UtcTimestamp | null;
+  lastSuccessfulAppliedAt: UtcTimestamp | null;
+};
+
+export type OperationsResourceCounts = {
+  systems: number;
+  nodes: number;
+  guests: number;
+  targets: number;
+  policies: number;
+};
+
+export type BackupRequestStateCounts = {
+  pending: number;
+  retry_wait: number;
+  leased: number;
+  starting: number;
+  running: number;
+  reconcile_required: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  unknown: number;
+};
+
+export type BackupRequestReasonCounts = {
+  manual: number;
+  never_backed_up: number;
+  max_age: number;
+  bytes_written: number;
+};
+
+export type BackupRunStateCounts = {
+  awaiting_submission: number;
+  reconcile_required: number;
+  running: number;
+  cancel_requested: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  unknown: number;
+};
+
+export type OperationsAuditEvent = {
+  id: CanonicalUuid;
+  occurredAt: UtcTimestamp;
+  eventType: AuditEventType;
+  outcome: "succeeded" | "denied";
+  subjectType: string | null;
+  reasonCode: string | null;
+};
+
+export type OperationsLastSuccessfulRun = {
+  runId: CanonicalUuid;
+  guestName: string | null;
+  vmid: number;
+  nodeName: string;
+  targetName: string;
+  finishedAt: UtcTimestamp;
+};
+
+export type OperationsDashboard = {
+  workers: OperationsWorkers;
+  collectorSchedule: OperationsCollectorSchedule | null;
+  resources: OperationsResourceCounts;
+  requestsByState: BackupRequestStateCounts;
+  requestsByReason: BackupRequestReasonCounts;
+  runsByState: BackupRunStateCounts;
+  oldestPendingAt: UtcTimestamp | null;
+  lastSuccessfulRun: OperationsLastSuccessfulRun | null;
+  staleEvidence: number;
+  shadowBlockers: number;
+  openProblems: number;
+  notifications: BackupNotificationHealth;
+  recentAuditEvents: Array<OperationsAuditEvent>;
+  auditVisible: boolean;
+};
+
+export type AdministrationHealthCheckState =
+  | {
+      status: "ready";
+    }
+  | {
+      status: "unavailable";
+      reason: string;
+    };
+
+export type AdministrationHealthReport = {
+  status: "ok" | "unavailable";
+  checkedAt: UtcTimestamp;
+  checks: {
+    [key: string]: AdministrationHealthCheckState;
+  };
+};
+
+export type AuthLoginRequest = {
+  username: string;
+  password: string;
+};
+
+export type AuthPrincipal = {
+  id: CanonicalUuid;
+  username: string;
+  permissions: Array<
+    | "inventory.read"
+    | "backup_configuration.manage"
+    | "backup_operations.manage"
+    | "audit.read"
+    | "security.manage"
+  >;
+};
+
+export type AuthSession = {
+  user: AuthPrincipal;
+  csrfToken: string;
+  idleExpiresAt: UtcTimestamp;
+  absoluteExpiresAt: UtcTimestamp;
+};
+
+export type AuthError = {
+  error: {
+    code:
+      "authentication_required" | "authentication_failed" | "permission_denied";
+  };
+};
+
+export type RevisionCommandRequest = {
+  expectedRevision: number;
+};
+
+export type TlsMode = "system_ca" | "custom_ca" | "sha256_fingerprint";
+
+export type OnboardingProduct = "pve" | "pbs";
+
+export type OnboardingEndpointInput = {
+  /**
+   * DNS host name or IPv4/IPv6 literal only; URL schemes, paths, and embedded ports are forbidden.
+   */
+  host: string;
+  port: number;
+  tlsMode: TlsMode;
+  customCaPem: null;
+  sha256Fingerprint: string | null;
+};
+
+export type OnboardingTokenInput = {
+  tokenId: string;
+};
+
+export type OnboardingPveCredentialsInput = {
+  scan: OnboardingTokenInput;
+  backup: OnboardingTokenInput;
+};
+
+export type OnboardingPbsCredentialsInput = {
+  scan: OnboardingTokenInput;
+};
+
+export type OnboardingPveActivationInput = {
+  expectedRevision: 0;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPveCredentialsInput;
+};
+
+export type OnboardingPbsActivationInput = {
+  expectedRevision: 0;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPbsCredentialsInput;
+};
+
+export type OnboardingActivationRequest =
+  | ({
+      product: "pve";
+    } & OnboardingPveActivationInput)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsActivationInput);
+
+export type OnboardingPveEndpointMutationInput = {
+  expectedRevision: number;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPveCredentialsInput;
+};
+
+export type OnboardingPbsEndpointMutationInput = {
+  expectedRevision: number;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPbsCredentialsInput;
+};
+
+export type OnboardingEndpointMutationRequest =
+  | ({
+      product: "pve";
+    } & OnboardingPveEndpointMutationInput)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsEndpointMutationInput);
+
+export type OnboardingPveRotationInput = {
+  expectedRevision: number;
+  endpointId: CanonicalUuid;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPveCredentialsInput;
+};
+
+export type OnboardingPbsRotationInput = {
+  expectedRevision: number;
+  endpointId: CanonicalUuid;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInput;
+  credentials: OnboardingPbsCredentialsInput;
+};
+
+export type OnboardingRotationRequest =
+  | ({
+      product: "pve";
+    } & OnboardingPveRotationInput)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsRotationInput);
+
+export type OnboardingGuidanceCommand = {
+  id: string;
+  command: string;
+  purpose: string;
+  mutatesRemote: boolean;
+  containsSecret: false;
+};
+
+export type OnboardingGuidance = {
+  product: OnboardingProduct;
+  commands: Array<OnboardingGuidanceCommand>;
+  warnings: Array<string>;
+};
+
+export type OnboardingIssueCode =
+  | "tls_verification_failed"
+  | "tls_fingerprint_mismatch"
+  | "authentication_failed"
+  | "remote_unavailable"
+  | "invalid_remote_response"
+  | "product_mismatch"
+  | "version_evidence_mismatch"
+  | "unsupported_version"
+  | "role_missing"
+  | "role_definition_mismatch"
+  | "credential_missing"
+  | "token_identity_invalid"
+  | "token_identities_not_separated"
+  | "required_permission_missing"
+  | "permission_not_propagated"
+  | "no_access_override"
+  | "forbidden_permission_present"
+  | "additional_read_only_permission"
+  | "application_permission_denied";
+
+export type OnboardingIssue = {
+  code: OnboardingIssueCode;
+  severity: "warning" | "error";
+  credential: "scan" | "backup" | null;
+  path: string | null;
+  privilege: string | null;
+};
+
+export type OnboardingVerification = {
+  tls: "tls_verified" | "failed";
+  product: "product_supported" | "failed";
+  scanPermissions: "scan_permissions_verified" | "failed";
+  backupPermissions: "backup_permissions_verified" | "failed" | null;
+  activation: "connection_activated" | "not_activated";
+  inventory: "first_automatic_scan_pending" | "not_started";
+  detectedProduct: OnboardingProduct | null;
+  detectedVersion: string | null;
+  warnings: Array<OnboardingIssue>;
+};
+
+export type OnboardingMutationResult = {
+  status: "applied" | "replayed";
+  connectionId: CanonicalUuid;
+  revision: number;
+  onboardingStatus: "first_automatic_scan_pending";
+  verification: OnboardingVerification;
+};
+
+export type OnboardingVerificationError = {
+  error: {
+    code: "onboarding_verification_failed";
+    issues: Array<OnboardingIssue>;
+    verification: OnboardingVerification;
+  };
+};
+
+export type OnboardingUnavailableError = {
+  error: {
+    code: "onboarding_unavailable";
+  };
+};
+
+export type ConnectionUpdateRequest = {
+  expectedRevision: number;
+  displayName: string;
+};
+
+export type ConnectionEndpoint = {
+  id: CanonicalUuid;
+  host: string;
+  port: number;
+  priority: number;
+  enabled: boolean;
+  tlsMode: TlsMode;
+  customCaConfigured: boolean;
+  sha256Fingerprint: string | null;
+  lastAttemptedAt: UtcTimestamp | null;
+  lastSuccessAt: UtcTimestamp | null;
+  lastErrorCode: string | null;
+};
+
+export type ConnectionCredentialMetadata = {
+  purpose: "collector" | "backup";
+  principal: string;
+  tokenName: string;
+  configured: true;
+  revision: number;
+  rotatedAt: UtcTimestamp | null;
+  updatedAt: UtcTimestamp;
+};
+
+export type ConnectionSummary = {
+  id: CanonicalUuid;
+  displayName: string;
+  product: "pve" | "pbs";
+  enabled: boolean;
+  revision: number;
+  detectedVersion: string | null;
+  versionSupportStatus: "supported" | "unsupported" | "unknown";
+  createdAt: UtcTimestamp;
+  updatedAt: UtcTimestamp;
+};
+
+export type ConnectionOnboardingStatus =
+  | "first_automatic_scan_pending"
+  | "inventory_verified"
+  | "inventory_partial"
+  | "inventory_failed";
+
+export type ConnectionOnboardingState = {
+  status: ConnectionOnboardingStatus;
+  verifiedAt: UtcTimestamp;
+  inventoryStatusChangedAt: UtcTimestamp;
+  lastInventoryRunId: CanonicalUuid | null;
+};
+
+export type ConnectionDetail = ConnectionSummary & {
+  endpoints: Array<ConnectionEndpoint>;
+  credentials: Array<ConnectionCredentialMetadata>;
+  onboardingState: ConnectionOnboardingState | null;
+};
+
+export type ConnectionList = {
+  items: Array<ConnectionSummary>;
+  page: PageMetadata;
+};
+
+export type AdministrationRoleName = "admin" | "viewer";
+
+export type UserCreateCommandRequest = {
+  expectedRevision: 0;
+  username: string;
+  displayName: string;
+  roles: Array<AdministrationRoleName>;
+};
+
+export type UserUpdateCommandRequest = {
+  expectedRevision: number;
+  displayName: string;
+};
+
+export type UserRolesCommandRequest = {
+  expectedRevision: number;
+  roles: Array<AdministrationRoleName>;
+};
+
+export type TargetCommandRequest = {
+  expectedRevision: number;
+  displayName: string;
+  connectionId: CanonicalUuid;
+  clusterId: CanonicalUuid;
+  storageId: CanonicalUuid;
+  minimumFreeBytes: DecimalBytes | null;
+  fixedParallelLimit: number | null;
+  pbsConnectionId: CanonicalUuid | null;
+  pbsDatastoreId: CanonicalUuid | null;
+  pbsNamespaceId: CanonicalUuid | null;
+  allowedNodeIds: Array<CanonicalUuid>;
+};
+
+export type PolicyCommandRequest = {
+  expectedRevision: number;
+  displayName: string;
+  connectionId: CanonicalUuid;
+  clusterId: CanonicalUuid;
+  targetId: CanonicalUuid | null;
+  priority: number | null;
+  backupMode: "snapshot" | "suspend" | "stop" | null;
+  compression: "0" | "gzip" | "lzo" | "zstd" | null;
+  maximumAgeSeconds: string | null;
+  bytesWrittenThreshold: DecimalBytes | null;
+  cooldownSeconds: string | null;
+  schedule: "collector_cycle" | null;
+  legacyMaxfiles: number | null;
+  keepAll: boolean | null;
+  keepLast: number | null;
+  keepHourly: number | null;
+  keepDaily: number | null;
+  keepWeekly: number | null;
+  keepMonthly: number | null;
+  keepYearly: number | null;
+  retentionExecutionEnabled: boolean;
+  failureNotificationRecipients: Array<string>;
+};
+
+export type BulkConfigurationCommandRequest = {
+  expectedRevision: number;
+  entries: Array<{
+    [key: string]: unknown;
+  }>;
+};
+
+export type ConfigurationCommandResult = {
+  status: "applied" | "replayed";
+  revision: number;
+};
+
+export type InvalidCommandError = {
+  error: {
+    code: "invalid_request";
+  };
+};
+
+export type ConfigurationConflictError = {
+  error: {
+    code: "revision_conflict";
+    currentRevision: number;
+  };
+};
+
+export type ConfigurationBlockedError = {
+  error: {
+    code: "activation_blocked";
+    blockers: Array<string>;
+  };
+};
+
+export type ConfigurationUnavailableError = {
+  error: {
+    code: "configuration_unavailable";
+  };
+};
+
 export type CanonicalUuid = string;
 
 export type UtcTimestamp = string;
@@ -201,7 +864,14 @@ export type InventoryResourcePage = {
 };
 
 export type BackupTargetBlockerCode =
-  | "freshness_policy_unconfigured"
+  | "storage_inventory_evidence_missing"
+  | "storage_inventory_evidence_stale"
+  | "storage_inventory_evidence_future"
+  | "executor_evidence_missing"
+  | "executor_evidence_partial"
+  | "executor_evidence_stale"
+  | "executor_evidence_future"
+  | "executor_unauthorized"
   | "connection_disabled"
   | "connection_not_pve"
   | "cluster_archived"
@@ -212,12 +882,21 @@ export type BackupTargetBlockerCode =
   | "no_usable_node"
   | "storage_not_configured_on_node"
   | "node_state_missing"
+  | "node_state_evidence_missing"
+  | "node_state_evidence_stale"
+  | "node_state_evidence_future"
   | "node_offline"
   | "node_storage_disabled"
   | "node_storage_inactive"
   | "capacity_unavailable"
   | "capacity_invalid"
+  | "capacity_evidence_missing"
+  | "capacity_evidence_stale"
+  | "capacity_evidence_future"
   | "pbs_mapping_missing"
+  | "pbs_mapping_evidence_missing"
+  | "pbs_mapping_evidence_stale"
+  | "pbs_mapping_evidence_future"
   | "pbs_endpoint_unresolved"
   | "pbs_endpoint_ambiguous"
   | "pbs_connection_disabled"
@@ -228,10 +907,33 @@ export type BackupTargetBlockerCode =
   | "pbs_namespace_missing"
   | "pbs_namespace_archived"
   | "pbs_capacity_missing"
+  | "pbs_capacity_evidence_missing"
+  | "pbs_capacity_evidence_stale"
+  | "pbs_capacity_evidence_future"
   | "pbs_remote_capacity_unproven";
 
 export type BackupTargetCapacityStatus =
   "missing" | "measured" | "unavailable" | "invalid";
+
+export type BackupTargetExecutorStatus =
+  | "requires_target_configuration"
+  | "missing"
+  | "partial"
+  | "authorized"
+  | "unauthorized";
+
+export type BackupTargetExecutorEvidence = {
+  status: BackupTargetExecutorStatus;
+  targetCount: number;
+  expectedNodeCount: number;
+  observedNodeCount: number;
+  vmBackupAuthorized: boolean | null;
+  datastoreAllocateAuthorized: boolean | null;
+  authorized: boolean | null;
+  freshness: "missing" | "fresh" | "stale" | "future";
+  observedAt: UtcTimestamp | null;
+  blockers: Array<BackupTargetBlockerCode>;
+};
 
 export type PbsEndpointMatchStatus = "matched" | "unresolved" | "ambiguous";
 
@@ -254,7 +956,7 @@ export type PbsBackupTargetEvidence = {
   port: number;
   datastore: string;
   namespace: string | null;
-  mappingObservedAt: UtcTimestamp;
+  mappingObservedAt: UtcTimestamp | null;
   endpointMatch: PbsEndpointMatchStatus;
   pbsConnectionId: CanonicalUuid | null;
   pbsServerId: CanonicalUuid | null;
@@ -278,15 +980,234 @@ export type BackupTargetCandidate = {
   storageType: string;
   shared: boolean;
   inventoryState: InventoryState;
-  observedAt: UtcTimestamp;
+  observedAt: UtcTimestamp | null;
   canEnable: boolean;
   nodes: Array<BackupTargetNodeEvidence>;
+  executor: BackupTargetExecutorEvidence;
   pbs: PbsBackupTargetEvidence | null;
   blockers: Array<BackupTargetBlockerCode>;
 };
 
 export type BackupTargetCandidatePage = {
   items: Array<BackupTargetCandidate>;
+  page: PageMetadata;
+};
+
+export type ConfiguredBackupTargetBlockerCode =
+  | "configuration_incomplete"
+  | "pbs_binding_missing"
+  | "executor_evidence_missing";
+
+export type ConfiguredBackupTargetAllowedNode = {
+  id: CanonicalUuid;
+  name: string;
+};
+
+export type ConfiguredBackupTarget = {
+  id: CanonicalUuid;
+  revision: number;
+  enabled: boolean;
+  displayName: string;
+  connectionId: CanonicalUuid;
+  connectionName: string;
+  clusterId: CanonicalUuid;
+  clusterName: string;
+  storageId: CanonicalUuid;
+  storageName: string;
+  storageType: string;
+  minimumFreeBytes: DecimalBytes | null;
+  fixedParallelLimit: number | null;
+  pbsConnectionId: CanonicalUuid | null;
+  pbsDatastoreId: CanonicalUuid | null;
+  pbsNamespaceId: CanonicalUuid | null;
+  disabledAt: UtcTimestamp | null;
+  allowedNodes: Array<ConfiguredBackupTargetAllowedNode>;
+  canEnable: boolean;
+  blockers: Array<ConfiguredBackupTargetBlockerCode>;
+};
+
+export type ConfiguredBackupTargetPage = {
+  items: Array<ConfiguredBackupTarget>;
+  page: PageMetadata;
+};
+
+export type PolicyStatus = "draft" | "enabled" | "disabled";
+
+export type PolicyBlockerCode =
+  "configuration_incomplete" | "executor_evidence_missing";
+
+export type PolicyRetention = {
+  legacyMaxFiles: number | null;
+  keepAll: boolean | null;
+  keepLast: number | null;
+  keepHourly: number | null;
+  keepDaily: number | null;
+  keepWeekly: number | null;
+  keepMonthly: number | null;
+  keepYearly: number | null;
+};
+
+export type ConfiguredPolicy = {
+  id: CanonicalUuid;
+  revision: number;
+  status: PolicyStatus;
+  displayName: string;
+  connectionId: CanonicalUuid;
+  connectionName: string;
+  clusterId: CanonicalUuid;
+  clusterName: string;
+  targetId: CanonicalUuid | null;
+  targetName: string | null;
+  priority: number | null;
+  mode: string | null;
+  compression: string | null;
+  maximumAgeSeconds: number | null;
+  bytesWrittenThreshold: DecimalBytes | null;
+  cooldownSeconds: number | null;
+  schedule: string | null;
+  desiredRetention: PolicyRetention | null;
+  retentionExecutionEnabled: boolean;
+  failureNotificationRecipients: Array<string>;
+  disabledAt: UtcTimestamp | null;
+  canEnable: false;
+  blockers: Array<PolicyBlockerCode>;
+};
+
+export type PolicyPage = {
+  items: Array<ConfiguredPolicy>;
+  page: PageMetadata;
+};
+
+export type PolicySelectionEntry = {
+  id: CanonicalUuid;
+  revision: number;
+  status: "active" | "disabled";
+  kind: "assignment" | "guest_override";
+  scope: "global" | "connection" | "cluster" | "node" | "guest";
+  connectionId: CanonicalUuid | null;
+  clusterId: CanonicalUuid | null;
+  nodeId: CanonicalUuid | null;
+  guestId: CanonicalUuid | null;
+  subjectName: string | null;
+  selectionValue: string | null;
+  mode: string | null;
+  compression: string | null;
+  desiredRetention: PolicyRetention | null;
+  disabledAt: UtcTimestamp | null;
+};
+
+export type PolicySelectionPage = {
+  items: Array<PolicySelectionEntry>;
+  page: PageMetadata;
+};
+
+export type ShadowOutcome = "eligible" | "blocked" | "not_due" | "deduplicated";
+
+export type ShadowReason =
+  "manual" | "never_backed_up" | "max_age" | "bytes_written";
+
+export type ShadowGateCode =
+  | "connection_enabled"
+  | "cluster_enabled"
+  | "node_enabled"
+  | "guest_enabled"
+  | "policy_enabled"
+  | "target_enabled"
+  | "explicit_exclusion_absent"
+  | "guest_active"
+  | "inventory_fresh"
+  | "placement_present"
+  | "placement_fresh"
+  | "active_request_absent"
+  | "target_node_allowed"
+  | "target_storage_enabled"
+  | "target_storage_active"
+  | "executor_authorization_fresh"
+  | "executor_authorized"
+  | "capacity_fresh"
+  | "minimum_free_space"
+  | "node_concurrency"
+  | "target_concurrency"
+  | "pbs_mapping_valid";
+
+export type ShadowGateScope =
+  | "connection"
+  | "cluster"
+  | "node"
+  | "guest"
+  | "policy"
+  | "target"
+  | "inventory"
+  | "placement"
+  | "authorization"
+  | "capacity"
+  | "concurrency"
+  | "request"
+  | "pbs_mapping";
+
+export type ShadowGateDetailCode =
+  | "passed"
+  | "disabled"
+  | "explicitly_excluded"
+  | "archived"
+  | "missing"
+  | "stale"
+  | "not_allowed"
+  | "inactive"
+  | "unauthorized"
+  | "insufficient_free_space"
+  | "concurrency_limit_reached"
+  | "invalid_mapping"
+  | "active_request_exists";
+
+export type ShadowEvaluation = {
+  id: CanonicalUuid;
+  cycleToken: CanonicalUuid;
+  fencingToken: number;
+  evaluatorVersion: number;
+  decisionCount: number;
+  gateCount: number;
+  startedAt: UtcTimestamp;
+  completedAt: UtcTimestamp;
+  persistedAt: UtcTimestamp;
+};
+
+export type ShadowDecision = {
+  id: CanonicalUuid;
+  evaluationId: CanonicalUuid;
+  guestId: CanonicalUuid;
+  nodeId: CanonicalUuid | null;
+  outcome: ShadowOutcome;
+  reason: ShadowReason | null;
+  priority: 100 | 200 | 300 | 400 | null;
+  policyId: CanonicalUuid;
+  policyRevision: number;
+  targetId: CanonicalUuid;
+  targetRevision: number;
+  completedAt: UtcTimestamp;
+};
+
+export type ShadowGate = {
+  position: number;
+  code: ShadowGateCode;
+  passed: boolean;
+  scope: ShadowGateScope;
+  subjectId: CanonicalUuid;
+  observedAt: UtcTimestamp | null;
+  detailCode: ShadowGateDetailCode;
+};
+
+export type ShadowDecisionDetail = ShadowDecision & {
+  gates: Array<ShadowGate>;
+};
+
+export type ShadowEvaluationPage = {
+  items: Array<ShadowEvaluation>;
+  page: PageMetadata;
+};
+
+export type ShadowDecisionPage = {
+  items: Array<ShadowDecision>;
   page: PageMetadata;
 };
 
@@ -374,6 +1295,118 @@ export type CollectorScopePage = {
   page: PageMetadata;
 };
 
+export type AdministrationUser = {
+  id: CanonicalUuid;
+  username: string;
+  displayName: string;
+  enabled: boolean;
+  revision: number;
+  roles: Array<AdministrationRoleName>;
+  createdAt: UtcTimestamp;
+  updatedAt: UtcTimestamp;
+  disabledAt: UtcTimestamp | null;
+  lastLoginAt: UtcTimestamp | null;
+};
+
+export type AdministrationUserPage = {
+  items: Array<AdministrationUser>;
+  page: PageMetadata;
+};
+
+export type AdministrationRole = {
+  id: CanonicalUuid;
+  name: AdministrationRoleName;
+  displayName: string;
+  permissions: Array<
+    | "inventory.read"
+    | "backup_configuration.manage"
+    | "backup_operations.manage"
+    | "audit.read"
+    | "security.manage"
+  >;
+};
+
+export type AdministrationRolePage = {
+  items: Array<AdministrationRole>;
+  page: PageMetadata;
+};
+
+export type AuditEventType =
+  | "first_admin_created"
+  | "user_created"
+  | "user_updated"
+  | "user_disabled"
+  | "role_assigned"
+  | "role_removed"
+  | "login_succeeded"
+  | "login_failed"
+  | "session_created"
+  | "session_revoked"
+  | "target_created"
+  | "target_updated"
+  | "target_enabled"
+  | "target_disabled"
+  | "policy_created"
+  | "policy_updated"
+  | "policy_enabled"
+  | "policy_disabled"
+  | "selection_upserted"
+  | "selection_disabled"
+  | "guest_override_upserted"
+  | "guest_override_disabled"
+  | "connection_created"
+  | "connection_updated"
+  | "connection_enabled"
+  | "connection_disabled"
+  | "endpoint_created"
+  | "endpoint_updated"
+  | "endpoint_disabled"
+  | "credential_rotated"
+  | "manual_backup_requested"
+  | "backup_cancel_requested";
+
+export type AdministrationAuditEvent = {
+  id: CanonicalUuid;
+  occurredAt: UtcTimestamp;
+  actorUserId: CanonicalUuid | null;
+  actorSessionId: CanonicalUuid | null;
+  eventType: AuditEventType;
+  outcome: "succeeded" | "denied";
+  subjectType:
+    | "user"
+    | "session"
+    | "role"
+    | "target"
+    | "policy"
+    | "selection"
+    | "guest_override"
+    | "connection"
+    | null;
+  subjectId: CanonicalUuid | null;
+  reasonCode: string | null;
+  correlationId: CanonicalUuid;
+};
+
+export type AdministrationAuditEventPage = {
+  items: Array<AdministrationAuditEvent>;
+  page: PageMetadata;
+};
+
+export type SecurityCommandBlockedError = {
+  error: {
+    code: "security_invariant_blocked";
+    blockers: [
+      "user_missing" | "user_disabled" | "self_lockout" | "last_active_admin",
+    ];
+  };
+};
+
+export type SecurityCommandUnavailableError = {
+  error: {
+    code: "security_administration_unavailable";
+  };
+};
+
 export type ApiError = {
   error: {
     code: "invalid_query";
@@ -388,6 +1421,119 @@ export type ReadModelUnavailableError = {
   };
 };
 
+export type OnboardingEndpointInputWritable = {
+  /**
+   * DNS host name or IPv4/IPv6 literal only; URL schemes, paths, and embedded ports are forbidden.
+   */
+  host: string;
+  port: number;
+  tlsMode: TlsMode;
+  customCaPem: string | null;
+  sha256Fingerprint: string | null;
+};
+
+export type OnboardingTokenInputWritable = {
+  tokenId: string;
+  tokenSecret: string;
+};
+
+export type OnboardingPveCredentialsInputWritable = {
+  scan: OnboardingTokenInputWritable;
+  backup: OnboardingTokenInputWritable;
+};
+
+export type OnboardingPbsCredentialsInputWritable = {
+  scan: OnboardingTokenInputWritable;
+};
+
+export type OnboardingPveActivationInputWritable = {
+  expectedRevision: 0;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPveCredentialsInputWritable;
+};
+
+export type OnboardingPbsActivationInputWritable = {
+  expectedRevision: 0;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPbsCredentialsInputWritable;
+};
+
+export type OnboardingActivationRequestWritable =
+  | ({
+      product: "pve";
+    } & OnboardingPveActivationInputWritable)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsActivationInputWritable);
+
+export type OnboardingPveEndpointMutationInputWritable = {
+  expectedRevision: number;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPveCredentialsInputWritable;
+};
+
+export type OnboardingPbsEndpointMutationInputWritable = {
+  expectedRevision: number;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPbsCredentialsInputWritable;
+};
+
+export type OnboardingEndpointMutationRequestWritable =
+  | ({
+      product: "pve";
+    } & OnboardingPveEndpointMutationInputWritable)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsEndpointMutationInputWritable);
+
+export type OnboardingPveRotationInputWritable = {
+  expectedRevision: number;
+  endpointId: CanonicalUuid;
+  product: "pve";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPveCredentialsInputWritable;
+};
+
+export type OnboardingPbsRotationInputWritable = {
+  expectedRevision: number;
+  endpointId: CanonicalUuid;
+  product: "pbs";
+  displayName: string;
+  endpoint: OnboardingEndpointInputWritable;
+  credentials: OnboardingPbsCredentialsInputWritable;
+};
+
+export type OnboardingRotationRequestWritable =
+  | ({
+      product: "pve";
+    } & OnboardingPveRotationInputWritable)
+  | ({
+      product: "pbs";
+    } & OnboardingPbsRotationInputWritable);
+
+export type UserCreateCommandRequestWritable = {
+  expectedRevision: 0;
+  username: string;
+  displayName: string;
+  password: string;
+  roles: Array<AdministrationRoleName>;
+};
+
+export type UserUpdateCommandRequestWritable = {
+  expectedRevision: number;
+  displayName: string;
+  password?: string;
+};
+
 export type Kind = InventoryResourceKind;
 
 export type Limit = number;
@@ -397,6 +1543,18 @@ export type Cursor = PageCursor;
 export type ConnectionId = CanonicalUuid;
 
 export type ClusterId = CanonicalUuid;
+
+export type Search = string;
+
+export type Enabled = boolean;
+
+export type PolicyStatus2 = PolicyStatus;
+
+export type PolicyId = CanonicalUuid;
+
+export type ConnectionPathId = CanonicalUuid;
+
+export type EndpointPathId = CanonicalUuid;
 
 /**
  * Cluster, PBS server, datastore/parent namespace, namespace, or backup-group ID as required by the selected kind.
@@ -408,6 +1566,20 @@ export type InventoryState2 = InventoryState;
 export type GuestType = "qemu" | "lxc";
 
 export type RunId = CanonicalUuid;
+
+export type IdempotencyKey = string;
+
+export type CsrfToken = string;
+
+export type UserId = CanonicalUuid;
+
+export type AuditEventId = CanonicalUuid;
+
+export type ActorUserId = CanonicalUuid;
+
+export type AuditEventType2 = AuditEventType;
+
+export type AuditOutcome = "succeeded" | "denied";
 
 export type GetInventoryOverviewData = {
   body?: never;
@@ -500,6 +1672,1274 @@ export type ListBackupTargetCandidatesResponses = {
 export type ListBackupTargetCandidatesResponse =
   ListBackupTargetCandidatesResponses[keyof ListBackupTargetCandidatesResponses];
 
+export type UpdateBackupTargetData = {
+  body: TargetCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/backup-targets/{id}";
+};
+
+export type UpdateBackupTargetErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type UpdateBackupTargetError =
+  UpdateBackupTargetErrors[keyof UpdateBackupTargetErrors];
+
+export type UpdateBackupTargetResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpdateBackupTargetResponse =
+  UpdateBackupTargetResponses[keyof UpdateBackupTargetResponses];
+
+export type EnableBackupTargetData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/backup-targets/{id}/enable";
+};
+
+export type EnableBackupTargetErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Activation is blocked by configuration or fresh evidence.
+   */
+  422: ConfigurationBlockedError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type EnableBackupTargetError =
+  EnableBackupTargetErrors[keyof EnableBackupTargetErrors];
+
+export type EnableBackupTargetResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type EnableBackupTargetResponse =
+  EnableBackupTargetResponses[keyof EnableBackupTargetResponses];
+
+export type DisableBackupTargetData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/backup-targets/{id}/disable";
+};
+
+export type DisableBackupTargetErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisableBackupTargetError =
+  DisableBackupTargetErrors[keyof DisableBackupTargetErrors];
+
+export type DisableBackupTargetResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisableBackupTargetResponse =
+  DisableBackupTargetResponses[keyof DisableBackupTargetResponses];
+
+export type ListBackupTargetsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    search?: string;
+    enabled?: boolean;
+  };
+  url: "/api/v1/backup-targets";
+};
+
+export type ListBackupTargetsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupTargetsError =
+  ListBackupTargetsErrors[keyof ListBackupTargetsErrors];
+
+export type ListBackupTargetsResponses = {
+  /**
+   * A bounded keyset page of configured backup targets with fail-closed configuration evidence.
+   */
+  200: ConfiguredBackupTargetPage;
+};
+
+export type ListBackupTargetsResponse =
+  ListBackupTargetsResponses[keyof ListBackupTargetsResponses];
+
+export type CreateBackupTargetData = {
+  body: TargetCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/backup-targets";
+};
+
+export type CreateBackupTargetErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Activation is blocked by configuration or fresh evidence.
+   */
+  422: ConfigurationBlockedError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type CreateBackupTargetError =
+  CreateBackupTargetErrors[keyof CreateBackupTargetErrors];
+
+export type CreateBackupTargetResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type CreateBackupTargetResponse =
+  CreateBackupTargetResponses[keyof CreateBackupTargetResponses];
+
+export type LoginData = {
+  body: AuthLoginRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/login";
+};
+
+export type LoginErrors = {
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+};
+
+export type LoginError = LoginErrors[keyof LoginErrors];
+
+export type LoginResponses = {
+  /**
+   * Authenticated local session.
+   */
+  200: AuthSession;
+};
+
+export type LoginResponse = LoginResponses[keyof LoginResponses];
+
+export type GetAuthSessionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/session";
+};
+
+export type GetAuthSessionErrors = {
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+};
+
+export type GetAuthSessionError =
+  GetAuthSessionErrors[keyof GetAuthSessionErrors];
+
+export type GetAuthSessionResponses = {
+  /**
+   * Current principal and derived CSRF token; never the session token.
+   */
+  200: AuthSession;
+};
+
+export type GetAuthSessionResponse =
+  GetAuthSessionResponses[keyof GetAuthSessionResponses];
+
+export type LogoutData = {
+  body?: never;
+  headers: {
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/auth/logout";
+};
+
+export type LogoutErrors = {
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+};
+
+export type LogoutError = LogoutErrors[keyof LogoutErrors];
+
+export type LogoutResponses = {
+  /**
+   * Session revoked.
+   */
+  204: void;
+};
+
+export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
+
+export type ListPoliciesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    search?: string;
+    status?: PolicyStatus;
+  };
+  url: "/api/v1/policies";
+};
+
+export type ListPoliciesErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListPoliciesError = ListPoliciesErrors[keyof ListPoliciesErrors];
+
+export type ListPoliciesResponses = {
+  /**
+   * A bounded keyset page of configured policies in their read-only projection.
+   */
+  200: PolicyPage;
+};
+
+export type ListPoliciesResponse =
+  ListPoliciesResponses[keyof ListPoliciesResponses];
+
+export type CreatePolicyData = {
+  body: PolicyCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/policies";
+};
+
+export type CreatePolicyErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Activation is blocked by configuration or fresh evidence.
+   */
+  422: ConfigurationBlockedError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type CreatePolicyError = CreatePolicyErrors[keyof CreatePolicyErrors];
+
+export type CreatePolicyResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type CreatePolicyResponse =
+  CreatePolicyResponses[keyof CreatePolicyResponses];
+
+export type UpdatePolicyData = {
+  body: PolicyCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}";
+};
+
+export type UpdatePolicyErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type UpdatePolicyError = UpdatePolicyErrors[keyof UpdatePolicyErrors];
+
+export type UpdatePolicyResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpdatePolicyResponse =
+  UpdatePolicyResponses[keyof UpdatePolicyResponses];
+
+export type EnablePolicyData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/enable";
+};
+
+export type EnablePolicyErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Activation is blocked by configuration or fresh evidence.
+   */
+  422: ConfigurationBlockedError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type EnablePolicyError = EnablePolicyErrors[keyof EnablePolicyErrors];
+
+export type EnablePolicyResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type EnablePolicyResponse =
+  EnablePolicyResponses[keyof EnablePolicyResponses];
+
+export type DisablePolicyData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/disable";
+};
+
+export type DisablePolicyErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisablePolicyError = DisablePolicyErrors[keyof DisablePolicyErrors];
+
+export type DisablePolicyResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisablePolicyResponse =
+  DisablePolicyResponses[keyof DisablePolicyResponses];
+
+export type DisablePolicySelectionData = {
+  body: BulkConfigurationCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/selection/disable";
+};
+
+export type DisablePolicySelectionErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisablePolicySelectionError =
+  DisablePolicySelectionErrors[keyof DisablePolicySelectionErrors];
+
+export type DisablePolicySelectionResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisablePolicySelectionResponse =
+  DisablePolicySelectionResponses[keyof DisablePolicySelectionResponses];
+
+export type UpsertPolicyGuestOverridesData = {
+  body: BulkConfigurationCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/guest-overrides";
+};
+
+export type UpsertPolicyGuestOverridesErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type UpsertPolicyGuestOverridesError =
+  UpsertPolicyGuestOverridesErrors[keyof UpsertPolicyGuestOverridesErrors];
+
+export type UpsertPolicyGuestOverridesResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpsertPolicyGuestOverridesResponse =
+  UpsertPolicyGuestOverridesResponses[keyof UpsertPolicyGuestOverridesResponses];
+
+export type DisablePolicyGuestOverridesData = {
+  body: BulkConfigurationCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/guest-overrides/disable";
+};
+
+export type DisablePolicyGuestOverridesErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisablePolicyGuestOverridesError =
+  DisablePolicyGuestOverridesErrors[keyof DisablePolicyGuestOverridesErrors];
+
+export type DisablePolicyGuestOverridesResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisablePolicyGuestOverridesResponse =
+  DisablePolicyGuestOverridesResponses[keyof DisablePolicyGuestOverridesResponses];
+
+export type ListPolicySelectionData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/policies/{id}/selection";
+};
+
+export type ListPolicySelectionErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListPolicySelectionError =
+  ListPolicySelectionErrors[keyof ListPolicySelectionErrors];
+
+export type ListPolicySelectionResponses = {
+  /**
+   * A bounded keyset page of assignments and guest overrides for one policy.
+   */
+  200: PolicySelectionPage;
+};
+
+export type ListPolicySelectionResponse =
+  ListPolicySelectionResponses[keyof ListPolicySelectionResponses];
+
+export type UpsertPolicySelectionData = {
+  body: BulkConfigurationCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/policies/{id}/selection";
+};
+
+export type UpsertPolicySelectionErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type UpsertPolicySelectionError =
+  UpsertPolicySelectionErrors[keyof UpsertPolicySelectionErrors];
+
+export type UpsertPolicySelectionResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpsertPolicySelectionResponse =
+  UpsertPolicySelectionResponses[keyof UpsertPolicySelectionResponses];
+
+export type ListShadowEvaluationsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/shadow/evaluations";
+};
+
+export type ListShadowEvaluationsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListShadowEvaluationsError =
+  ListShadowEvaluationsErrors[keyof ListShadowEvaluationsErrors];
+
+export type ListShadowEvaluationsResponses = {
+  /**
+   * Persisted read-only shadow evaluation runs.
+   */
+  200: ShadowEvaluationPage;
+};
+
+export type ListShadowEvaluationsResponse =
+  ListShadowEvaluationsResponses[keyof ListShadowEvaluationsResponses];
+
+export type ListShadowDecisionsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    outcome?: ShadowOutcome;
+    reason?: ShadowReason;
+    policyId?: CanonicalUuid;
+    targetId?: CanonicalUuid;
+    guestId?: CanonicalUuid;
+  };
+  url: "/api/v1/shadow/decisions";
+};
+
+export type ListShadowDecisionsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListShadowDecisionsError =
+  ListShadowDecisionsErrors[keyof ListShadowDecisionsErrors];
+
+export type ListShadowDecisionsResponses = {
+  /**
+   * Persisted read-only shadow decisions.
+   */
+  200: ShadowDecisionPage;
+};
+
+export type ListShadowDecisionsResponse =
+  ListShadowDecisionsResponses[keyof ListShadowDecisionsResponses];
+
+export type GetShadowDecisionData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/shadow/decisions/{id}";
+};
+
+export type GetShadowDecisionErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The shadow decision was not found.
+   */
+  404: unknown;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetShadowDecisionError =
+  GetShadowDecisionErrors[keyof GetShadowDecisionErrors];
+
+export type GetShadowDecisionResponses = {
+  /**
+   * One shadow decision with its ordered gates.
+   */
+  200: ShadowDecisionDetail;
+};
+
+export type GetShadowDecisionResponse =
+  GetShadowDecisionResponses[keyof GetShadowDecisionResponses];
+
+export type GetOperationsDashboardData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/operations/dashboard";
+};
+
+export type GetOperationsDashboardErrors = {
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetOperationsDashboardError =
+  GetOperationsDashboardErrors[keyof GetOperationsDashboardErrors];
+
+export type GetOperationsDashboardResponses = {
+  /**
+   * Operational health and workload summary.
+   */
+  200: OperationsDashboard;
+};
+
+export type GetOperationsDashboardResponse =
+  GetOperationsDashboardResponses[keyof GetOperationsDashboardResponses];
+
+export type ListBackupRequestsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    state?: BackupRequestState;
+  };
+  url: "/api/v1/operations/queue";
+};
+
+export type ListBackupRequestsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupRequestsError =
+  ListBackupRequestsErrors[keyof ListBackupRequestsErrors];
+
+export type ListBackupRequestsResponses = {
+  /**
+   * Priority-ordered backup request queue.
+   */
+  200: BackupRequestPage;
+};
+
+export type ListBackupRequestsResponse =
+  ListBackupRequestsResponses[keyof ListBackupRequestsResponses];
+
+export type RequestManualBackupData = {
+  body: ManualBackupRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/operations/requests";
+};
+
+export type RequestManualBackupErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Operation blocked.
+   */
+  422: unknown;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type RequestManualBackupError =
+  RequestManualBackupErrors[keyof RequestManualBackupErrors];
+
+export type RequestManualBackupResponses = {
+  /**
+   * Manual request enqueued.
+   */
+  201: BackupOperationResult;
+};
+
+export type RequestManualBackupResponse =
+  RequestManualBackupResponses[keyof RequestManualBackupResponses];
+
+export type CancelBackupRequestData = {
+  body: RevisionRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/operations/requests/{id}/cancel";
+};
+
+export type CancelBackupRequestErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Operation blocked.
+   */
+  422: unknown;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type CancelBackupRequestError =
+  CancelBackupRequestErrors[keyof CancelBackupRequestErrors];
+
+export type CancelBackupRequestResponses = {
+  /**
+   * Cancellation recorded.
+   */
+  200: BackupOperationResult;
+};
+
+export type CancelBackupRequestResponse =
+  CancelBackupRequestResponses[keyof CancelBackupRequestResponses];
+
+export type ListBackupRequestEventsData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/operations/requests/{id}/events";
+};
+
+export type ListBackupRequestEventsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupRequestEventsError =
+  ListBackupRequestEventsErrors[keyof ListBackupRequestEventsErrors];
+
+export type ListBackupRequestEventsResponses = {
+  /**
+   * Ordered request events.
+   */
+  200: BackupEventPage;
+};
+
+export type ListBackupRequestEventsResponse =
+  ListBackupRequestEventsResponses[keyof ListBackupRequestEventsResponses];
+
+export type ListBackupRunsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    state?: BackupRunState;
+  };
+  url: "/api/v1/operations/runs";
+};
+
+export type ListBackupRunsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupRunsError =
+  ListBackupRunsErrors[keyof ListBackupRunsErrors];
+
+export type ListBackupRunsResponses = {
+  /**
+   * Backup run history.
+   */
+  200: BackupRunPage;
+};
+
+export type ListBackupRunsResponse =
+  ListBackupRunsResponses[keyof ListBackupRunsResponses];
+
+export type GetBackupRunData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/operations/runs/{id}";
+};
+
+export type GetBackupRunErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Run not found.
+   */
+  404: unknown;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetBackupRunError = GetBackupRunErrors[keyof GetBackupRunErrors];
+
+export type GetBackupRunResponses = {
+  /**
+   * Backup run detail.
+   */
+  200: BackupRun;
+};
+
+export type GetBackupRunResponse =
+  GetBackupRunResponses[keyof GetBackupRunResponses];
+
+export type ListBackupRunEventsData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/operations/runs/{id}/events";
+};
+
+export type ListBackupRunEventsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupRunEventsError =
+  ListBackupRunEventsErrors[keyof ListBackupRunEventsErrors];
+
+export type ListBackupRunEventsResponses = {
+  /**
+   * Ordered run events.
+   */
+  200: BackupEventPage;
+};
+
+export type ListBackupRunEventsResponse =
+  ListBackupRunEventsResponses[keyof ListBackupRunEventsResponses];
+
+export type ListBackupRunLogsData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/operations/runs/{id}/logs";
+};
+
+export type ListBackupRunLogsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupRunLogsError =
+  ListBackupRunLogsErrors[keyof ListBackupRunLogsErrors];
+
+export type ListBackupRunLogsResponses = {
+  /**
+   * Sanitized task log lines.
+   */
+  200: BackupLogPage;
+};
+
+export type ListBackupRunLogsResponse =
+  ListBackupRunLogsResponses[keyof ListBackupRunLogsResponses];
+
+export type ListBackupNotificationsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    kind?: "failure" | "attention_required" | "recovery";
+  };
+  url: "/api/v1/operations/notifications";
+};
+
+export type ListBackupNotificationsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListBackupNotificationsError =
+  ListBackupNotificationsErrors[keyof ListBackupNotificationsErrors];
+
+export type ListBackupNotificationsResponses = {
+  /**
+   * Sanitized Matrix notification delivery states.
+   */
+  200: BackupNotificationPage;
+};
+
+export type ListBackupNotificationsResponse =
+  ListBackupNotificationsResponses[keyof ListBackupNotificationsResponses];
+
+export type GetBackupNotificationHealthData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/operations/notifications/health";
+};
+
+export type GetBackupNotificationHealthErrors = {
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetBackupNotificationHealthError =
+  GetBackupNotificationHealthErrors[keyof GetBackupNotificationHealthErrors];
+
+export type GetBackupNotificationHealthResponses = {
+  /**
+   * Notification delivery health.
+   */
+  200: BackupNotificationHealth;
+};
+
+export type GetBackupNotificationHealthResponse =
+  GetBackupNotificationHealthResponses[keyof GetBackupNotificationHealthResponses];
+
 export type GetCollectorStatusData = {
   body?: never;
   path?: never;
@@ -577,3 +3017,834 @@ export type ListCollectorScopesResponses = {
 
 export type ListCollectorScopesResponse =
   ListCollectorScopesResponses[keyof ListCollectorScopesResponses];
+
+export type GetAdministrationHealthData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/admin/health";
+};
+
+export type GetAdministrationHealthErrors = {
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+};
+
+export type GetAdministrationHealthError =
+  GetAdministrationHealthErrors[keyof GetAdministrationHealthErrors];
+
+export type GetAdministrationHealthResponses = {
+  /**
+   * Authenticated safe readiness projection for administration.
+   */
+  200: AdministrationHealthReport;
+};
+
+export type GetAdministrationHealthResponse =
+  GetAdministrationHealthResponses[keyof GetAdministrationHealthResponses];
+
+export type ListAdministrationUsersData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    search?: string;
+    enabled?: boolean;
+  };
+  url: "/api/v1/admin/users";
+};
+
+export type ListAdministrationUsersErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListAdministrationUsersError =
+  ListAdministrationUsersErrors[keyof ListAdministrationUsersErrors];
+
+export type ListAdministrationUsersResponses = {
+  /**
+   * A password-free user page.
+   */
+  200: AdministrationUserPage;
+};
+
+export type ListAdministrationUsersResponse =
+  ListAdministrationUsersResponses[keyof ListAdministrationUsersResponses];
+
+export type CreateAdministrationUserData = {
+  body: UserCreateCommandRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/admin/users";
+};
+
+export type CreateAdministrationUserErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The last-admin, self-lockout, or user-state invariant blocked the command.
+   */
+  422: SecurityCommandBlockedError;
+  /**
+   * The security administration store is temporarily unavailable.
+   */
+  503: SecurityCommandUnavailableError;
+};
+
+export type CreateAdministrationUserError =
+  CreateAdministrationUserErrors[keyof CreateAdministrationUserErrors];
+
+export type CreateAdministrationUserResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type CreateAdministrationUserResponse =
+  CreateAdministrationUserResponses[keyof CreateAdministrationUserResponses];
+
+export type UpdateAdministrationUserData = {
+  body: UserUpdateCommandRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/admin/users/{id}";
+};
+
+export type UpdateAdministrationUserErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The last-admin, self-lockout, or user-state invariant blocked the command.
+   */
+  422: SecurityCommandBlockedError;
+  /**
+   * The security administration store is temporarily unavailable.
+   */
+  503: SecurityCommandUnavailableError;
+};
+
+export type UpdateAdministrationUserError =
+  UpdateAdministrationUserErrors[keyof UpdateAdministrationUserErrors];
+
+export type UpdateAdministrationUserResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpdateAdministrationUserResponse =
+  UpdateAdministrationUserResponses[keyof UpdateAdministrationUserResponses];
+
+export type DisableAdministrationUserData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/admin/users/{id}/disable";
+};
+
+export type DisableAdministrationUserErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The last-admin, self-lockout, or user-state invariant blocked the command.
+   */
+  422: SecurityCommandBlockedError;
+  /**
+   * The security administration store is temporarily unavailable.
+   */
+  503: SecurityCommandUnavailableError;
+};
+
+export type DisableAdministrationUserError =
+  DisableAdministrationUserErrors[keyof DisableAdministrationUserErrors];
+
+export type DisableAdministrationUserResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisableAdministrationUserResponse =
+  DisableAdministrationUserResponses[keyof DisableAdministrationUserResponses];
+
+export type ReplaceAdministrationUserRolesData = {
+  body: UserRolesCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/admin/users/{id}/roles";
+};
+
+export type ReplaceAdministrationUserRolesErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The last-admin, self-lockout, or user-state invariant blocked the command.
+   */
+  422: SecurityCommandBlockedError;
+  /**
+   * The security administration store is temporarily unavailable.
+   */
+  503: SecurityCommandUnavailableError;
+};
+
+export type ReplaceAdministrationUserRolesError =
+  ReplaceAdministrationUserRolesErrors[keyof ReplaceAdministrationUserRolesErrors];
+
+export type ReplaceAdministrationUserRolesResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type ReplaceAdministrationUserRolesResponse =
+  ReplaceAdministrationUserRolesResponses[keyof ReplaceAdministrationUserRolesResponses];
+
+export type ListAdministrationRolesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/admin/roles";
+};
+
+export type ListAdministrationRolesErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListAdministrationRolesError =
+  ListAdministrationRolesErrors[keyof ListAdministrationRolesErrors];
+
+export type ListAdministrationRolesResponses = {
+  /**
+   * Closed roles and permissions.
+   */
+  200: AdministrationRolePage;
+};
+
+export type ListAdministrationRolesResponse =
+  ListAdministrationRolesResponses[keyof ListAdministrationRolesResponses];
+
+export type ListAdministrationAuditEventsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    actorUserId?: CanonicalUuid;
+    eventType?: AuditEventType;
+    outcome?: "succeeded" | "denied";
+  };
+  url: "/api/v1/admin/audit-events";
+};
+
+export type ListAdministrationAuditEventsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListAdministrationAuditEventsError =
+  ListAdministrationAuditEventsErrors[keyof ListAdministrationAuditEventsErrors];
+
+export type ListAdministrationAuditEventsResponses = {
+  /**
+   * Append-only security audit events.
+   */
+  200: AdministrationAuditEventPage;
+};
+
+export type ListAdministrationAuditEventsResponse =
+  ListAdministrationAuditEventsResponses[keyof ListAdministrationAuditEventsResponses];
+
+export type GetAdministrationAuditEventData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/admin/audit-events/{id}";
+};
+
+export type GetAdministrationAuditEventErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * Audit event not found.
+   */
+  404: unknown;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetAdministrationAuditEventError =
+  GetAdministrationAuditEventErrors[keyof GetAdministrationAuditEventErrors];
+
+export type GetAdministrationAuditEventResponses = {
+  /**
+   * One append-only audit event.
+   */
+  200: AdministrationAuditEvent;
+};
+
+export type GetAdministrationAuditEventResponse =
+  GetAdministrationAuditEventResponses[keyof GetAdministrationAuditEventResponses];
+
+export type ListConnectionsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+  };
+  url: "/api/v1/connections";
+};
+
+export type ListConnectionsErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListConnectionsError =
+  ListConnectionsErrors[keyof ListConnectionsErrors];
+
+export type ListConnectionsResponses = {
+  /**
+   * Password- and secret-free connection summaries.
+   */
+  200: ConnectionList;
+};
+
+export type ListConnectionsResponse =
+  ListConnectionsResponses[keyof ListConnectionsResponses];
+
+export type GetConnectionData = {
+  body?: never;
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}";
+};
+
+export type GetConnectionErrors = {
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * Connection not found.
+   */
+  404: unknown;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type GetConnectionError = GetConnectionErrors[keyof GetConnectionErrors];
+
+export type GetConnectionResponses = {
+  /**
+   * Secret-free connection detail.
+   */
+  200: ConnectionDetail;
+};
+
+export type GetConnectionResponse =
+  GetConnectionResponses[keyof GetConnectionResponses];
+
+export type UpdateConnectionData = {
+  body: ConnectionUpdateRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}";
+};
+
+export type UpdateConnectionErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type UpdateConnectionError =
+  UpdateConnectionErrors[keyof UpdateConnectionErrors];
+
+export type UpdateConnectionResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type UpdateConnectionResponse =
+  UpdateConnectionResponses[keyof UpdateConnectionResponses];
+
+export type DisableConnectionData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}/disable";
+};
+
+export type DisableConnectionErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisableConnectionError =
+  DisableConnectionErrors[keyof DisableConnectionErrors];
+
+export type DisableConnectionResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisableConnectionResponse =
+  DisableConnectionResponses[keyof DisableConnectionResponses];
+
+export type DisableConnectionEndpointData = {
+  body: RevisionCommandRequest;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+    endpointId: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}/endpoints/{endpointId}/disable";
+};
+
+export type DisableConnectionEndpointErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * Activation is blocked by configuration or fresh evidence.
+   */
+  422: ConfigurationBlockedError;
+  /**
+   * The configuration command store is temporarily unavailable.
+   */
+  503: ConfigurationUnavailableError;
+};
+
+export type DisableConnectionEndpointError =
+  DisableConnectionEndpointErrors[keyof DisableConnectionEndpointErrors];
+
+export type DisableConnectionEndpointResponses = {
+  /**
+   * The command was applied or replayed idempotently.
+   */
+  200: ConfigurationCommandResult;
+};
+
+export type DisableConnectionEndpointResponse =
+  DisableConnectionEndpointResponses[keyof DisableConnectionEndpointResponses];
+
+export type GetConnectionOnboardingGuidanceData = {
+  body?: never;
+  path: {
+    product: OnboardingProduct;
+  };
+  query?: never;
+  url: "/api/v1/connections/onboarding/guidance/{product}";
+};
+
+export type GetConnectionOnboardingGuidanceErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
+   */
+  503: OnboardingUnavailableError;
+};
+
+export type GetConnectionOnboardingGuidanceError =
+  GetConnectionOnboardingGuidanceErrors[keyof GetConnectionOnboardingGuidanceErrors];
+
+export type GetConnectionOnboardingGuidanceResponses = {
+  /**
+   * Secret-free, individually reviewable Proxmox CLI guidance.
+   */
+  200: OnboardingGuidance;
+};
+
+export type GetConnectionOnboardingGuidanceResponse =
+  GetConnectionOnboardingGuidanceResponses[keyof GetConnectionOnboardingGuidanceResponses];
+
+export type ActivateOnboardedConnectionData = {
+  body: OnboardingActivationRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/connections/onboarding/activate";
+};
+
+export type ActivateOnboardedConnectionErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * TLS, product, role, permission, or propagation evidence failed closed.
+   */
+  422: OnboardingVerificationError;
+  /**
+   * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
+   */
+  503: OnboardingUnavailableError;
+};
+
+export type ActivateOnboardedConnectionError =
+  ActivateOnboardedConnectionErrors[keyof ActivateOnboardedConnectionErrors];
+
+export type ActivateOnboardedConnectionResponses = {
+  /**
+   * The fully verified onboarding mutation was applied or replayed idempotently.
+   */
+  200: OnboardingMutationResult;
+};
+
+export type ActivateOnboardedConnectionResponse =
+  ActivateOnboardedConnectionResponses[keyof ActivateOnboardedConnectionResponses];
+
+export type RotateOnboardedConnectionCredentialsData = {
+  body: OnboardingRotationRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}/onboarding/rotate";
+};
+
+export type RotateOnboardedConnectionCredentialsErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * TLS, product, role, permission, or propagation evidence failed closed.
+   */
+  422: OnboardingVerificationError;
+  /**
+   * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
+   */
+  503: OnboardingUnavailableError;
+};
+
+export type RotateOnboardedConnectionCredentialsError =
+  RotateOnboardedConnectionCredentialsErrors[keyof RotateOnboardedConnectionCredentialsErrors];
+
+export type RotateOnboardedConnectionCredentialsResponses = {
+  /**
+   * The fully verified onboarding mutation was applied or replayed idempotently.
+   */
+  200: OnboardingMutationResult;
+};
+
+export type RotateOnboardedConnectionCredentialsResponse =
+  RotateOnboardedConnectionCredentialsResponses[keyof RotateOnboardedConnectionCredentialsResponses];
+
+export type AddVerifiedConnectionEndpointData = {
+  body: OnboardingEndpointMutationRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}/onboarding/endpoints";
+};
+
+export type AddVerifiedConnectionEndpointErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * TLS, product, role, permission, or propagation evidence failed closed.
+   */
+  422: OnboardingVerificationError;
+  /**
+   * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
+   */
+  503: OnboardingUnavailableError;
+};
+
+export type AddVerifiedConnectionEndpointError =
+  AddVerifiedConnectionEndpointErrors[keyof AddVerifiedConnectionEndpointErrors];
+
+export type AddVerifiedConnectionEndpointResponses = {
+  /**
+   * The fully verified onboarding mutation was applied or replayed idempotently.
+   */
+  200: OnboardingMutationResult;
+};
+
+export type AddVerifiedConnectionEndpointResponse =
+  AddVerifiedConnectionEndpointResponses[keyof AddVerifiedConnectionEndpointResponses];
+
+export type UpdateVerifiedConnectionEndpointData = {
+  body: OnboardingEndpointMutationRequestWritable;
+  headers: {
+    "Idempotency-Key": string;
+    "X-CSRF-Token": string;
+  };
+  path: {
+    id: CanonicalUuid;
+    endpointId: CanonicalUuid;
+  };
+  query?: never;
+  url: "/api/v1/connections/{id}/onboarding/endpoints/{endpointId}";
+};
+
+export type UpdateVerifiedConnectionEndpointErrors = {
+  /**
+   * The command envelope or closed payload is invalid.
+   */
+  400: InvalidCommandError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The expected revision or idempotency payload conflicts.
+   */
+  409: ConfigurationConflictError;
+  /**
+   * TLS, product, role, permission, or propagation evidence failed closed.
+   */
+  422: OnboardingVerificationError;
+  /**
+   * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
+   */
+  503: OnboardingUnavailableError;
+};
+
+export type UpdateVerifiedConnectionEndpointError =
+  UpdateVerifiedConnectionEndpointErrors[keyof UpdateVerifiedConnectionEndpointErrors];
+
+export type UpdateVerifiedConnectionEndpointResponses = {
+  /**
+   * The fully verified onboarding mutation was applied or replayed idempotently.
+   */
+  200: OnboardingMutationResult;
+};
+
+export type UpdateVerifiedConnectionEndpointResponse =
+  UpdateVerifiedConnectionEndpointResponses[keyof UpdateVerifiedConnectionEndpointResponses];

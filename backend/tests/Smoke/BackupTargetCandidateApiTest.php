@@ -12,6 +12,9 @@ use App\Application\Target\ReadModel\BackupTargetCandidatePage;
 use App\Application\Target\ReadModel\BackupTargetCandidateQuery;
 use App\Application\Target\ReadModel\BackupTargetCandidateReadModel;
 use App\Application\Target\ReadModel\BackupTargetCapacityStatus;
+use App\Application\Target\ReadModel\BackupTargetExecutorEvidence;
+use App\Application\Target\ReadModel\BackupTargetExecutorStatus;
+use App\Application\Target\ReadModel\EvidenceFreshness;
 use App\Application\Target\ReadModel\BackupTargetNodeEvidence;
 use App\Domain\Shared\UInt64Decimal;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupTargetCandidateReadModel;
@@ -60,7 +63,7 @@ final class BackupTargetCandidateApiTest extends WebTestCase
         self::assertSame(
             [
                 'id', 'connectionId', 'connectionName', 'clusterId', 'clusterName', 'storageName',
-                'storageType', 'shared', 'inventoryState', 'observedAt', 'canEnable', 'nodes', 'pbs',
+                'storageType', 'shared', 'inventoryState', 'observedAt', 'canEnable', 'nodes', 'executor', 'pbs',
                 'blockers',
             ],
             array_keys($item),
@@ -71,7 +74,7 @@ final class BackupTargetCandidateApiTest extends WebTestCase
         self::assertIsArray($node);
         self::assertSame('18446744073709551615', $node['totalBytes'] ?? null);
         self::assertFalse($item['canEnable'] ?? null);
-        self::assertSame(['freshness_policy_unconfigured'], $item['blockers'] ?? null);
+        self::assertSame(['executor_evidence_missing'], $item['blockers'] ?? null);
         $page = $payload['page'] ?? null;
         self::assertIsArray($page);
         $nextCursor = $page['nextCursor'] ?? null;
@@ -185,7 +188,11 @@ final class BackupTargetCandidateReadModelFake implements BackupTargetCandidateR
             '2026-07-12T10:00:00.000000Z',
             [$node],
             null,
-            [BackupTargetBlockerCode::FreshnessPolicyUnconfigured],
+            [BackupTargetBlockerCode::ExecutorEvidenceMissing],
+            new BackupTargetExecutorEvidence(
+                BackupTargetExecutorStatus::Missing, 1, 1, 0, null, null, null,
+                EvidenceFreshness::Missing, null, [BackupTargetBlockerCode::ExecutorEvidenceMissing],
+            ),
         );
         $next = null === $query->page->cursor
             ? PageCursor::resource($query->cursorContext(), $candidate->storageName, $candidate->id)

@@ -16,7 +16,6 @@ const emptyPage = (limit: number): CursorPageMetadata => ({
   hasMore: false,
   nextCursor: null,
 });
-
 export const useOperationsStore = defineStore("operations", () => {
   const status = ref<CollectorStatus | null>(null);
   const runs = ref<CollectorRun[]>([]);
@@ -30,11 +29,9 @@ export const useOperationsStore = defineStore("operations", () => {
   const scopesError = ref<string | null>(null);
   let requestId = 0;
   let scopeRequestId = 0;
-
   const incompleteScopeCount = computed(
     () => scopes.value.filter((scope) => scope.status !== "complete").length,
   );
-
   async function load(
     api: InventoryApi = inventoryApi,
     append = false,
@@ -64,12 +61,10 @@ export const useOperationsStore = defineStore("operations", () => {
       if (currentRequest === requestId) loading.value = false;
     }
   }
-
   async function loadMoreRuns(api: InventoryApi = inventoryApi): Promise<void> {
     if (loading.value || !runsPage.value.hasMore) return;
     await load(api, true);
   }
-
   async function loadScopes(
     runId: string,
     append: boolean,
@@ -94,14 +89,12 @@ export const useOperationsStore = defineStore("operations", () => {
       scopes.value = append ? [...scopes.value, ...result.items] : result.items;
       scopesPage.value = result.page;
     } catch (caught) {
-      if (currentRequest === scopeRequestId) {
+      if (currentRequest === scopeRequestId)
         scopesError.value = apiErrorMessage(caught);
-      }
     } finally {
       if (currentRequest === scopeRequestId) scopesLoading.value = false;
     }
   }
-
   async function selectRun(
     runId: string,
     api: InventoryApi = inventoryApi,
@@ -109,7 +102,6 @@ export const useOperationsStore = defineStore("operations", () => {
     selectedRunId.value = runId;
     await loadScopes(runId, false, api);
   }
-
   async function loadMoreScopes(
     api: InventoryApi = inventoryApi,
   ): Promise<void> {
@@ -117,12 +109,10 @@ export const useOperationsStore = defineStore("operations", () => {
       scopesLoading.value ||
       !scopesPage.value.hasMore ||
       selectedRunId.value === null
-    ) {
+    )
       return;
-    }
     await loadScopes(selectedRunId.value, true, api);
   }
-
   return {
     status,
     runs,

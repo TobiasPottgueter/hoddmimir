@@ -146,6 +146,15 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
             if (1 !== $updated) {
                 throw new PveCoreInventoryConflict('The inventory sync run could not be finished exactly once.');
             }
+            if (!$connectionChanged) {
+                $this->recordOnboardingInventoryState(
+                    $connection,
+                    $failure->connectionId->binary(),
+                    $failure->runId->binary(),
+                    'inventory_failed',
+                    $finishedAt,
+                );
+            }
             $this->assertFenceBeforeCommit($connection, $lease);
         });
     }
@@ -228,6 +237,17 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                 'objects_updated' => $updated,
                 'objects_archived' => $archived,
             ], ['id' => $commit->runId->binary(), 'status' => 'running']);
+            $this->recordOnboardingInventoryState(
+                $connection,
+                $commit->connectionId->binary(),
+                $commit->runId->binary(),
+                match ($status) {
+                    'succeeded' => 'inventory_verified',
+                    'partial' => 'inventory_partial',
+                    default => 'inventory_failed',
+                },
+                $finishedAt,
+            );
             $this->assertFenceBeforeCommit($connection, $lease);
 
             return new PveCoreApplyResult(
@@ -238,6 +258,20 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                 $diagnosticOnly,
             );
         });
+    }
+
+    private function recordOnboardingInventoryState(
+        Connection $connection,
+        string $connectionId,
+        string $runId,
+        string $state,
+        string $changedAt,
+    ): void {
+        $connection->update('proxmox_connection_onboarding_state', [
+            'state' => $state,
+            'inventory_status_changed_at' => $changedAt,
+            'last_inventory_run_id' => $runId,
+        ], ['connection_id' => $connectionId]);
     }
 
     /** @return array{int, int, int, InventoryIdentifier, array<string, InventoryIdentifier>} */

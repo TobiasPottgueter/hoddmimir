@@ -31,6 +31,7 @@ final readonly class PbsRequest
     public static function pruneJobs(): self { return new self(['admin', 'prune'], [], 4_194_304); }
     public static function syncJobs(): self { return new self(['admin', 'sync'], ['sync-direction' => 'all'], 4_194_304); }
     public static function verifyJobs(): self { return new self(['admin', 'verify'], [], 4_194_304); }
+    public static function permissions(): self { return new self(['access', 'permissions'], [], 8_388_608); }
 
     public static function permission(string $path): self
     {

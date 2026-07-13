@@ -18,7 +18,24 @@ const candidate = {
   inventoryState: "active",
   observedAt: "2026-07-12T10:00:00.000000Z",
   canEnable: false,
-  blockers: ["freshness_policy_unconfigured"],
+  blockers: [
+    "storage_inventory_evidence_missing",
+    "node_state_evidence_stale",
+    "pbs_capacity_evidence_future",
+    "executor_evidence_missing",
+  ],
+  executor: {
+    status: "partial",
+    targetCount: 1,
+    expectedNodeCount: 2,
+    observedNodeCount: 1,
+    vmBackupAuthorized: true,
+    datastoreAllocateAuthorized: null,
+    authorized: null,
+    freshness: "fresh",
+    observedAt: "2026-07-12T10:00:00.000000Z",
+    blockers: ["executor_evidence_missing"],
+  },
   nodes: [
     {
       nodeId: OTHER_UUID,
@@ -62,7 +79,14 @@ describe("BackupTargetCandidateCard", () => {
     });
 
     expect(wrapper.text()).toContain("Nicht aktivierbar");
-    expect(wrapper.text()).toContain("Freshness-Regel");
+    expect(wrapper.text()).toContain("Storage-Inventarevidenz fehlt");
+    expect(wrapper.text()).toContain("älter als fünf Minuten");
+    expect(wrapper.text()).toContain("liegt in der Zukunft");
+    expect(wrapper.text()).toContain("Executor-Evidenz fehlt");
+    expect(wrapper.text()).toContain("Executor-Evidenz unvollständig");
+    expect(wrapper.text()).toContain("VM.Backup");
+    expect(wrapper.text()).toContain("Datastore.AllocateSpace");
+    expect(wrapper.text()).toContain("1 / 2");
     expect(wrapper.text()).toContain("pve-a");
     expect(wrapper.text()).toContain("18.446.744.073.709.551.615 B");
     expect(wrapper.text()).toContain("pbs.example.test:8007");
@@ -71,5 +95,26 @@ describe("BackupTargetCandidateCard", () => {
     expect(wrapper.text()).not.toMatch(
       /speichern|starten|stoppen|abbrechen|scannen/i,
     );
+  });
+
+  it("kennzeichnet fehlende Zeitpunkte ausdrücklich", () => {
+    const wrapper = mount(BackupTargetCandidateCard, {
+      props: {
+        candidate: {
+          ...candidate,
+          observedAt: null,
+          nodes: [{ ...candidate.nodes[0]!, observedAt: null }],
+          pbs: candidate.pbs && {
+            ...candidate.pbs,
+            mappingObservedAt: null,
+            capacityObservedAt: null,
+          },
+        },
+      },
+      global: { plugins: [PrimeVue] },
+    });
+    expect(
+      wrapper.text().match(/Keine Messung/g)?.length,
+    ).toBeGreaterThanOrEqual(4);
   });
 });

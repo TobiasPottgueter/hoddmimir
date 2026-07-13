@@ -31,8 +31,15 @@ SECRET_NAMES = (
     "mariadb_web_password",
     "mariadb_collector_password",
     "mariadb_backup_worker_password",
+    "matrix_webhook_url",
 )
-DATABASE_SECRET_NAMES = SECRET_NAMES[2:]
+DATABASE_SECRET_NAMES = (
+    "mariadb_root_password",
+    "mariadb_migration_password",
+    "mariadb_web_password",
+    "mariadb_collector_password",
+    "mariadb_backup_worker_password",
+)
 KEY_MATERIAL_OLD = "a" * 64
 KEY_MATERIAL_NEW = "b" * 64
 
@@ -57,6 +64,7 @@ def valid_variables() -> dict[str, object]:
         "hoddmimir_backup_execution_enabled": False,
         "hoddmimir_backup_execution_activation_ack": "",
         "hoddmimir_timezone": "UTC",
+        "hoddmimir_matrix_webhook_url": "https://matrix.example.test/hook/secret",
         "hoddmimir_encryption_keyring": {
             "format": 1,
             "revision": 7,
@@ -72,7 +80,8 @@ def valid_variables() -> dict[str, object]:
     for index, secret_name in enumerate(SECRET_NAMES, start=1):
         if secret_name == "encryption_key":
             continue
-        variables[f"hoddmimir_{secret_name}"] = f"{index:x}" * 64
+        if secret_name != "matrix_webhook_url":
+            variables[f"hoddmimir_{secret_name}"] = f"{index:x}" * 64
 
     return variables
 
@@ -192,6 +201,8 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(0, self.run_preflight(variables).returncode)
         variables["hoddmimir_backup_execution_enabled"] = True
         variables["hoddmimir_backup_execution_activation_ack"] = "ENABLE_PRODUCTION_BACKUPS"
+        variables["hoddmimir_matrix_notifications_enabled"] = True
+        variables["hoddmimir_matrix_webhook_url"] = "https://matrix.example.test/hook/production"
         self.assertEqual(0, self.run_preflight(variables).returncode)
 
     def test_rejects_mutable_or_invalid_digest_for_each_application_image(self) -> None:
@@ -218,11 +229,25 @@ class PreflightTest(unittest.TestCase):
         result = self.run_preflight(variables)
         self.assertNotEqual(0, result.returncode)
 
+    def test_rejects_backup_execution_without_problem_delivery(self) -> None:
+        variables = valid_variables()
+        variables["hoddmimir_backup_execution_enabled"] = True
+        variables["hoddmimir_backup_execution_activation_ack"] = "ENABLE_PRODUCTION_BACKUPS"
+        variables["hoddmimir_matrix_notifications_enabled"] = False
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
     def test_rejects_collector_grid_width_outside_application_bounds(self) -> None:
         for width in (0, 31_536_001):
             with self.subTest(width=width):
                 variables = valid_variables()
                 variables["hoddmimir_collector_grid_width_seconds"] = width
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_evidence_freshness_outside_application_bounds(self) -> None:
+        for seconds in (0, 86_401):
+            with self.subTest(seconds=seconds):
+                variables = valid_variables()
+                variables["hoddmimir_evidence_freshness_seconds"] = seconds
                 self.assertNotEqual(0, self.run_preflight(variables).returncode)
 
     def test_rejects_pve_storage_node_fanout_outside_application_bounds(self) -> None:
@@ -277,6 +302,25 @@ class PreflightTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertNotIn(rejected_secret, result.stdout + result.stderr)
+
+    def test_matrix_webhook_is_strict_https_and_secret_safe(self) -> None:
+        for webhook in (
+            "http://matrix.example.test/hook/secret",
+            "https://user:secret@matrix.example.test/hook",
+            "https://matrix.example.test/hook#fragment",
+            "not-a-url",
+        ):
+            with self.subTest(webhook=webhook):
+                variables = valid_variables()
+                variables["hoddmimir_matrix_webhook_url"] = webhook
+                result = self.run_preflight(variables)
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn(webhook, result.stdout + result.stderr)
+
+        variables = valid_variables()
+        variables["hoddmimir_matrix_notifications_enabled"] = True
+        variables["hoddmimir_matrix_webhook_url"] = "https://matrix.invalid/disabled"
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
 
     def test_rejects_invalid_encryption_keyring_envelopes(self) -> None:
         invalid_keyrings: dict[str, object] = {
@@ -476,6 +520,11 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
             self.assertEqual("hoddmimir_collector", services["data-worker"]["environment"]["DATABASE_USER"])
             self.assertEqual("120", services["data-worker"]["environment"]["COLLECTOR_GRID_WIDTH_SECONDS"])
+            for application_service in ("data-worker", "backup-worker", "webapp"):
+                self.assertEqual(
+                    "300",
+                    services[application_service]["environment"]["EVIDENCE_FRESHNESS_SECONDS"],
+                )
             self.assertEqual("128", services["data-worker"]["environment"]["PVE_STORAGE_MAX_NODE_FANOUT"])
             self.assertEqual("128", services["data-worker"]["environment"]["PBS_MAX_DATASTORE_FANOUT"])
             expected_content_environment = {
@@ -517,6 +566,14 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("127.0.0.1", services["webapp"]["ports"][0]["host_ip"])
             self.assertEqual(8080, services["webapp"]["ports"][0]["target"])
             self.assertEqual("false", services["backup-worker"]["environment"]["BACKUP_EXECUTION_ENABLED"])
+            self.assertEqual("false", services["backup-worker"]["environment"]["MATRIX_NOTIFICATION_ENABLED"])
+            self.assertEqual("proxmox-backup", services["backup-worker"]["environment"]["MATRIX_WEBHOOK_CHANNEL"])
+            self.assertEqual("10", services["backup-worker"]["environment"]["MATRIX_WEBHOOK_TIMEOUT_SECONDS"])
+            self.assertEqual("/run/secrets/matrix_webhook_url", services["backup-worker"]["environment"]["MATRIX_WEBHOOK_URL_FILE"])
+            self.assertIn(
+                "matrix_webhook_url",
+                {secret["source"] for secret in services["backup-worker"]["secrets"]},
+            )
             self.assertEqual(
                 ["hoddmimir:worker:data"],
                 services["data-worker"]["command"],
@@ -535,6 +592,25 @@ class ComposeContractTest(unittest.TestCase):
                 services["backup-worker"]["healthcheck"]["test"],
             )
             self.assertNotIn("ports", services["mariadb"])
+            for application_service in ("data-worker", "backup-worker", "webapp"):
+                service = services[application_service]
+                self.assertEqual(1, service["cpus"])
+                self.assertEqual("536870912", str(service["mem_limit"]))
+                self.assertEqual(128, service["pids_limit"])
+                self.assertTrue(service["read_only"])
+                self.assertEqual(["ALL"], service["cap_drop"])
+                self.assertEqual(["no-new-privileges:true"], service["security_opt"])
+
+            mariadb = services["mariadb"]
+            self.assertEqual(2, mariadb["cpus"])
+            self.assertEqual("2147483648", str(mariadb["mem_limit"]))
+            self.assertEqual(256, mariadb["pids_limit"])
+            self.assertTrue(mariadb["read_only"])
+            self.assertEqual(["ALL"], mariadb["cap_drop"])
+            self.assertEqual(["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"], mariadb["cap_add"])
+            self.assertEqual(["no-new-privileges:true"], mariadb["security_opt"])
+            self.assertIn("/tmp:mode=1777", mariadb["tmpfs"])
+            self.assertIn("/run/mysqld:uid=999,gid=999,mode=1770", mariadb["tmpfs"])
 
             migration_configured = run([
                 "docker",
@@ -557,6 +633,10 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual("/run/secrets/mariadb_migration_password", migration["environment"]["DATABASE_PASSWORD_FILE"])
             self.assertTrue(migration["read_only"])
             self.assertEqual(["ALL"], migration["cap_drop"])
+            self.assertEqual(1, migration["cpus"])
+            self.assertEqual("536870912", str(migration["mem_limit"]))
+            self.assertEqual(128, migration["pids_limit"])
+            self.assertEqual(["no-new-privileges:true"], migration["security_opt"])
             self.assertEqual(
                 {"app_secret", "mariadb_migration_password"},
                 {secret["source"] for secret in migration["secrets"]},
@@ -1432,6 +1512,7 @@ class DeploymentTransactionTest(unittest.TestCase):
             "mariadb_web_password": 0o640,
             "mariadb_collector_password": 0o640,
             "mariadb_backup_worker_password": 0o640,
+            "matrix_webhook_url": 0o640,
             "compose.yaml": 0o600,
         }
         for name, mode in modes.items():

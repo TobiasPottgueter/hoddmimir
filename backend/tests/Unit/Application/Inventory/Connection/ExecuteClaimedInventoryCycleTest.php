@@ -73,6 +73,8 @@ use App\Application\Inventory\PbsContent\SelectedEndpointPbsContent;
 use App\Application\Monitoring\ConnectionMonitoringResult;
 use App\Application\Monitoring\MonitoringRunStatus;
 use App\Application\Monitoring\SelectedEndpointMonitoring;
+use App\Application\Scheduler\Shadow\AutomaticShadowEvaluator;
+use App\Application\Scheduler\Shadow\ShadowEvaluationPersistenceResult;
 use App\Application\Proxmox\Pbs\PbsDatastoreBackendType;
 use App\Application\Proxmox\Pbs\PbsDatastoreCapacity;
 use App\Application\Proxmox\Pbs\PbsDatastoreConfigurationSnapshot;
@@ -100,6 +102,31 @@ use PHPUnit\Framework\TestCase;
 
 final class ExecuteClaimedInventoryCycleTest extends TestCase
 {
+    public function testSuccessfulAuthoritativePveCycleEvaluatesShadowExactlyOnceBeforeReturn(): void
+    {
+        $shadow = new RecordingAutomaticShadowEvaluator();
+        [$executor] = $this->executor(
+            [$this->target('first', ProxmoxProduct::Pve, [1])],
+            [$this->snapshot('first')],
+            shadowEvaluation: $shadow,
+        );
+        self::assertSame(CollectorCycleStatus::Succeeded, $executor->execute($this->cycle())->status);
+        self::assertCount(1, $shadow->leases);
+        self::assertSame(7, $shadow->leases[0]->fencingToken);
+    }
+
+    public function testPartialPveCycleDoesNotEvaluateShadow(): void
+    {
+        $shadow = new RecordingAutomaticShadowEvaluator();
+        [$executor] = $this->executor(
+            [$this->target('first', ProxmoxProduct::Pve, [1])],
+            [$this->snapshot('first')],
+            [new PveCoreApplyResult(PveCoreApplyStatus::Partial, 0, 0, 0, false)],
+            shadowEvaluation: $shadow,
+        );
+        self::assertSame(CollectorCycleStatus::Partial, $executor->execute($this->cycle())->status);
+        self::assertSame([], $shadow->leases);
+    }
     public function testCapabilityInvariantFailsPveParentBeforeApply(): void
     {
         [$executor, , $store] = $this->executor(
@@ -772,6 +799,7 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
         ?SelectedEndpointPbsContent $pbsContent = null,
         ?SelectedEndpointMonitoring $monitoring = null,
         ?CapabilitySnapshotStore $capabilityStore = null,
+        ?AutomaticShadowEvaluator $shadowEvaluation = null,
     ): array {
         $schedule = new CycleScheduleStore();
         $coordinator = new CollectorCycleCoordinator(
@@ -801,6 +829,7 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
                 $monitoring ?? new RecordingSelectedEndpointMonitoring([]),
                 new FixedClock(),
                 $stopRequested ?? new NeverStopRequested(),
+                $shadowEvaluation,
             ),
             $schedule,
             $store,
@@ -1065,6 +1094,18 @@ final class QueuedPbsInventoryMapper implements PbsInventoryMapper
         $outcome = array_shift($this->outcomes);
         if ($outcome instanceof PbsInventoryMappingFailure) { throw $outcome; }
         return (new MapPbsInventorySnapshot())->map($runId, $read, $observedAt);
+    }
+}
+
+final class RecordingAutomaticShadowEvaluator implements AutomaticShadowEvaluator
+{
+    /** @var list<CollectorLease> */
+    public array $leases = [];
+
+    public function execute(CollectorLease $lease): ShadowEvaluationPersistenceResult
+    {
+        $this->leases[] = $lease;
+        return ShadowEvaluationPersistenceResult::Persisted;
     }
 }
 

@@ -1,6 +1,7 @@
 const dateFormatter = new Intl.DateTimeFormat("de-DE", {
   dateStyle: "medium",
   timeStyle: "medium",
+  timeZone: "UTC",
 });
 
 const byteFormatter = new Intl.NumberFormat("de-DE", {

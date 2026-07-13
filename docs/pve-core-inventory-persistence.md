@@ -1,6 +1,6 @@
 # PVE-Core-Inventarpersistenz
 
-Stand: 11. Juli 2026
+Stand: 13. Juli 2026
 
 ## Umfang
 
@@ -11,14 +11,13 @@ Node-Platzierung. Er umfasst außerdem den Connection-bezogenen Sync-Lauf,
 Endpoint-Versuche und die Ergebnisse der beiden Scopes `pve_topology` und
 `pve_guests`.
 
-Bewusst noch nicht enthalten sind die Runtime-Aktivierung im Collector,
-PVE-Storages und deren Node-Zustände, PBS-Inventar, Backupjobs sowie
-PVE-/PBS-Tasks. Diese Grenzen dürfen durch den Core-Writer nicht implizit
-vorweggenommen werden.
+Der Core-Writer bleibt bewusst auf Topologie, Gäste und Placement begrenzt.
+PVE-Storages und deren Node-Zustände, PBS-Inventar, Backupjobs sowie PVE-/PBS-
+Tasks werden durch getrennte, inzwischen verdrahtete Slices gelesen und
+persistiert; diese Grenzen darf der Core-Writer nicht implizit übernehmen.
 
-Der produktive Credential-/TLS-gebundene PVE-Core-Reader ist inzwischen als
-separater, noch nicht verdrahteter Infrastructure-Slice vorhanden. Sein
-Sicherheits- und Routenvertrag steht in
+Der produktive Credential-/TLS-gebundene PVE-Core-Reader ist im kontinuierlichen
+Collector verdrahtet. Sein Sicherheits- und Routenvertrag steht in
 [`pve-runtime-core-reader.md`](pve-runtime-core-reader.md).
 
 ## Secret-freier Connection-Katalog
@@ -30,7 +29,7 @@ deterministisch nach Priorität und ID.
 
 Endpoint-Adressen, TLS-Material, Principals, Credential-Referenzen,
 verschlüsselte Werte und Klartext-Secrets überschreiten diese
-Application-Grenze nicht. Sie werden später ausschließlich hinter dem
+Application-Grenze nicht. Sie werden ausschließlich hinter dem
 `EndpointInstallationReader` durch Infrastructure aufgelöst. Ein Endpoint-
 Snapshot ist stets in sich geschlossen; Failover-Ergebnisse werden nicht zu
 einem gemeinsamen Snapshot zusammengeführt.

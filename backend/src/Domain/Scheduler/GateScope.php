@@ -12,7 +12,9 @@ enum GateScope: string
     case Guest = 'guest';
     case Policy = 'policy';
     case Target = 'target';
+    case Inventory = 'inventory';
     case Placement = 'placement';
+    case Authorization = 'authorization';
     case Capacity = 'capacity';
     case Concurrency = 'concurrency';
     case Request = 'request';

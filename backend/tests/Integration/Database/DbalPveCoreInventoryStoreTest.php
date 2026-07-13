@@ -68,6 +68,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         $this->identifierGenerator = new SequentialInventoryIdentifierGenerator();
         $this->store = new DbalPveCoreInventoryStore($this->connection(), $this->identifierGenerator);
         $this->insertConnection($this->connectionId, $this->primaryEndpointId, $this->secondaryEndpointId);
+        $this->insertOnboardingState('pve', true);
     }
 
     protected function tearDown(): void
@@ -102,6 +103,10 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertSame(0, $firstResult->updated);
         self::assertSame(0, $firstResult->archived);
         self::assertFalse($firstResult->diagnosticOnly);
+        self::assertSame(
+            ['state' => 'inventory_verified', 'last_inventory_run_id' => $firstRun->binary()],
+            $this->connection()->fetchAssociative('SELECT state, last_inventory_run_id FROM proxmox_connection_onboarding_state'),
+        );
         self::assertSame(
             ['product' => 'pve', 'identity_kind' => 'pve_cluster', 'identity_value' => 'cluster-alpha'],
             $this->connection()->fetchAssociative(
@@ -611,6 +616,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_clusters'));
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_nodes'));
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM guests'));
+        self::assertSame('inventory_partial', $this->connection()->fetchOne('SELECT state FROM proxmox_connection_onboarding_state'));
         self::assertSame(4, $this->databaseInteger(
             'SELECT COUNT(*) FROM inventory_sync_scope_results WHERE sync_run_id = :run_id',
             ['run_id' => $run->binary()],
@@ -670,6 +676,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
             ['run_id' => $run->binary()],
         ));
         self::assertSame(0, $this->databaseInteger('SELECT COUNT(*) FROM pve_clusters'));
+        self::assertSame('inventory_failed', $this->connection()->fetchOne('SELECT state FROM proxmox_connection_onboarding_state'));
 
         try {
             $this->store->finishWithoutSnapshot($lease, $failure);
@@ -703,6 +710,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
                 ['run_id' => $run->binary()],
             ),
         );
+        self::assertSame('first_automatic_scan_pending', $this->connection()->fetchOne('SELECT state FROM proxmox_connection_onboarding_state'));
 
         $fencedRun = self::id('run-terminal-fence-drift');
         $fencedLease = $this->seedOwnedLease('terminal-fence-drift');
@@ -1497,6 +1505,24 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         }
     }
 
+    private function insertOnboardingState(string $product, bool $backup): void
+    {
+        $this->connection()->insert('proxmox_connection_onboarding_state', [
+            'connection_id' => $this->connectionId->binary(),
+            'state' => 'first_automatic_scan_pending',
+            'tls_verified' => 1,
+            'product_supported' => 1,
+            'scan_permissions_verified' => 1,
+            'backup_permissions_verified' => $backup ? 1 : null,
+            'detected_product' => $product,
+            'detected_version' => '8.4.1',
+            'warnings_json' => '[]',
+            'verified_at' => '2026-07-11 00:00:00.000000',
+            'inventory_status_changed_at' => '2026-07-11 00:00:00.000000',
+            'last_inventory_run_id' => null,
+        ]);
+    }
+
     private function insertEndpoint(
         InventoryIdentifier $connection,
         InventoryIdentifier $endpoint,
@@ -1716,6 +1742,7 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
             'proxmox_installation_bindings',
             'inventory_sync_runs',
             'proxmox_capability_snapshots',
+            'proxmox_connection_onboarding_state',
             'proxmox_credentials',
             'proxmox_connection_endpoints',
             'proxmox_connections',

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { RouterLink, RouterView, useRoute } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import Button from "primevue/button";
+import { useAuthStore } from "@/stores/auth";
 
 interface NavigationItem {
   label: string;
@@ -8,19 +10,34 @@ interface NavigationItem {
   to: string;
 }
 
-const navigationItems: NavigationItem[] = [
+const allNavigationItems: NavigationItem[] = [
   { label: "Übersicht", icon: "pi pi-home", to: "/" },
   { label: "Systeme", icon: "pi pi-server", to: "/systems" },
+  { label: "Verbindungen", icon: "pi pi-link", to: "/connections" },
   { label: "Inventar", icon: "pi pi-sitemap", to: "/inventory" },
   { label: "Collector-Betrieb", icon: "pi pi-wave-pulse", to: "/operations" },
   { label: "Backup-Ziele", icon: "pi pi-database", to: "/backup-targets" },
   { label: "Policies", icon: "pi pi-sliders-h", to: "/policies" },
+  { label: "Shadow-Auswertungen", icon: "pi pi-directions-alt", to: "/shadow" },
   { label: "Queue", icon: "pi pi-list-check", to: "/queue" },
   { label: "Läufe", icon: "pi pi-history", to: "/runs" },
   { label: "Administration", icon: "pi pi-cog", to: "/administration" },
 ];
 
 const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
+const navigationItems = computed(() =>
+  allNavigationItems.filter(
+    (item) =>
+      (item.to !== "/administration" && item.to !== "/connections") ||
+      (item.to === "/administration" &&
+        (auth.hasPermission("security.manage") ||
+          auth.hasPermission("audit.read"))) ||
+      (item.to === "/connections" &&
+        auth.hasPermission("backup_configuration.manage")),
+  ),
+);
 const navigationOpen = ref(false);
 const currentTitle = computed(() =>
   typeof route.meta.title === "string" ? route.meta.title : "Übersicht",
@@ -28,6 +45,11 @@ const currentTitle = computed(() =>
 
 function closeNavigation(): void {
   navigationOpen.value = false;
+}
+
+async function logout(): Promise<void> {
+  await auth.logout();
+  await router.replace({ name: "login" });
 }
 </script>
 
@@ -93,10 +115,21 @@ function closeNavigation(): void {
           <h1>{{ currentTitle }}</h1>
         </div>
 
-        <span class="app-topbar__environment">
-          <i class="pi pi-eye" aria-hidden="true" />
-          Betriebsansicht
-        </span>
+        <div class="app-topbar__principal">
+          <span
+            ><i class="pi pi-user" aria-hidden="true" />{{
+              auth.principal?.username
+            }}</span
+          >
+          <Button
+            label="Abmelden"
+            icon="pi pi-sign-out"
+            severity="secondary"
+            text
+            size="small"
+            @click="logout"
+          />
+        </div>
       </header>
 
       <main id="main-content" class="app-content" tabindex="-1">

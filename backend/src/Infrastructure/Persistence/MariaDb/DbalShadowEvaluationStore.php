@@ -67,6 +67,8 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
                 return $result;
             }
 
+            $this->assertConfigurationRevisions($connection, $batch);
+
             $persistedAt = $this->databaseNow($connection);
             if ($batch->finishedAt > $persistedAt) {
                 throw new ShadowEvaluationConflict(
@@ -214,6 +216,33 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
             || ($cycle['worker_kind'] ?? null) !== 'collector'
             || $this->integer($cycle, 'fencing_token') !== $lease->fencingToken) {
             throw new CollectorLeaseOwnershipLost('The shadow evaluation write lost its collector lease.');
+        }
+    }
+
+    private function assertConfigurationRevisions(Connection $connection, ShadowEvaluationBatch $batch): void
+    {
+        foreach ($batch->decisions as $decision) {
+            if (null === $decision->policy || null === $decision->target) {
+                continue;
+            }
+            $policy = $connection->fetchAssociative(
+                'SELECT revision, status FROM backup_policies WHERE id = :id FOR UPDATE',
+                ['id' => $decision->policy->policyId->binary()],
+            );
+            $target = $connection->fetchAssociative(
+                'SELECT revision, status FROM backup_targets WHERE id = :id FOR UPDATE',
+                ['id' => $decision->target->targetId->binary()],
+            );
+            if (false === $policy || false === $target
+                || $this->integer($policy, 'revision') !== $decision->policy->revision
+                || $this->integer($target, 'revision') !== $decision->target->revision
+                || 'enabled' !== ($policy['status'] ?? null)
+                || 'enabled' !== ($target['status'] ?? null)) {
+                throw new ShadowEvaluationConflict(
+                    ShadowEvaluationConflictCode::PayloadMismatch,
+                    'The policy or target changed during shadow evaluation.',
+                );
+            }
         }
     }
 

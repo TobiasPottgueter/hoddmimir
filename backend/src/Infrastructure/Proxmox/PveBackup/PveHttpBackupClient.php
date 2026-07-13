@@ -13,11 +13,14 @@ use App\Application\Proxmox\Pve\PveBackupSubmissionResult;
 use App\Application\Proxmox\Pve\PveReadFailure;
 use App\Application\Proxmox\Pve\PveTaskLogPage;
 use App\Application\Proxmox\Pve\PveTaskLogQuery;
+use App\Application\Proxmox\Pve\PveTaskPage;
+use App\Application\Proxmox\Pve\PveTaskQuery;
 use App\Application\Proxmox\Pve\PveTaskStatus;
 use App\Application\Proxmox\Pve\PveTaskStopResult;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Application\Proxmox\Pve\PveVersion;
 use App\Infrastructure\Proxmox\PveTaskStatusReader;
+use App\Infrastructure\Proxmox\PveTaskPageReader;
 
 final readonly class PveHttpBackupClient implements PveBackupClient
 {
@@ -28,6 +31,7 @@ final readonly class PveHttpBackupClient implements PveBackupClient
         private PveBackupSubmissionReader $submissionReader,
         private PveTaskStatusReader $statusReader,
         private PveBackupTaskLogReader $logReader,
+        private PveTaskPageReader $taskPageReader,
     ) {
     }
 
@@ -85,5 +89,21 @@ final readonly class PveHttpBackupClient implements PveBackupClient
         }
 
         return PveTaskStopResult::requested();
+    }
+
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage
+    {
+        try {
+            return $this->taskPageReader->read(
+                $node,
+                $query,
+                $this->transport->get(
+                    ['nodes', $node, 'tasks'],
+                    $query->parameters(),
+                ),
+            );
+        } catch (PveReadFailure) {
+            throw PveBackupApiFailure::for(PveBackupApiFailureCode::InvalidResponse);
+        }
     }
 }

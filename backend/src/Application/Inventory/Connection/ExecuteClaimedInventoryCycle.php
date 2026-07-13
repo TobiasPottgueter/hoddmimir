@@ -31,6 +31,7 @@ use App\Application\Inventory\Pve\PveInventoryMapper;
 use App\Application\Inventory\Pve\PveSyncRunFailure;
 use App\Application\Inventory\Pve\PveSyncRunStart;
 use App\Application\Monitoring\SelectedEndpointMonitoring;
+use App\Application\Scheduler\Shadow\AutomaticShadowEvaluator;
 use App\Domain\Shared\Clock;
 
 final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
@@ -51,6 +52,7 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
         private SelectedEndpointMonitoring $monitoring,
         private Clock $clock,
         private StopRequested $stopRequested,
+        private ?AutomaticShadowEvaluator $shadowEvaluation = null,
     ) {
     }
 
@@ -85,6 +87,11 @@ final readonly class ExecuteClaimedInventoryCycle implements RunCollectorCycle
             default => CollectorCycleStatus::Succeeded,
         };
         $checkpoint->checkpoint();
+        if (CollectorCycleStatus::Succeeded === $status && $pve['succeeded'] > 0
+            && null !== $this->shadowEvaluation) {
+            $this->shadowEvaluation->execute($checkpoint->lease());
+            $checkpoint->checkpoint();
+        }
         return new ClaimedInventoryCycleResult(
             $status,
             $pve['succeeded'],

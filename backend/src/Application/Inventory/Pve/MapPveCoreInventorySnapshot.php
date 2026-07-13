@@ -47,8 +47,8 @@ final readonly class MapPveCoreInventorySnapshot implements PveCoreInventoryMapp
             $binding,
             new PveCoreScopeResult(PveCoreScope::Topology, $status),
             new PveCoreScopeResult(PveCoreScope::Guests, $status),
-            array_values($nodes),
-            array_values($guests),
+            \array_values($nodes),
+            \array_values($guests),
             $observedAt,
         );
     }

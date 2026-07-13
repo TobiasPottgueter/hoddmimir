@@ -6,7 +6,7 @@ namespace App\Application\Health;
 
 use App\Application\Readiness\ReadinessReport;
 use DateTimeImmutable;
-use DateTimeInterface;
+use DateTimeZone;
 
 final readonly class HealthReport
 {
@@ -32,7 +32,7 @@ final readonly class HealthReport
     {
         return [
             'status' => $this->isReady() ? 'ok' : 'unavailable',
-            'checkedAt' => $this->checkedAt->format(DateTimeInterface::RFC3339_EXTENDED),
+            'checkedAt' => $this->checkedAt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.u\Z'),
             'checks' => $this->readiness->checks(),
         ];
     }

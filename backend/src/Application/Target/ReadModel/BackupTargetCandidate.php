@@ -15,6 +15,7 @@ final readonly class BackupTargetCandidate
     public array $nodes;
     /** @var list<BackupTargetBlockerCode> */
     public array $blockers;
+    public BackupTargetExecutorEvidence $executor;
 
     /**
      * @param list<BackupTargetNodeEvidence> $nodes
@@ -30,10 +31,11 @@ final readonly class BackupTargetCandidate
         public string $storageType,
         public bool $shared,
         public string $inventoryState,
-        public string $observedAt,
+        public ?string $observedAt,
         array $nodes,
         public ?PbsBackupTargetEvidence $pbs,
         array $blockers,
+        ?BackupTargetExecutorEvidence $executor = null,
     ) {
         new ReadModelIdentifier($id);
         new ReadModelIdentifier($connectionId);
@@ -44,9 +46,11 @@ final readonly class BackupTargetCandidate
         if ('active' !== $inventoryState && 'archived' !== $inventoryState) {
             throw new InvalidArgumentException('Backup-target candidate identity is invalid.');
         }
-        $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s.u\Z', $observedAt, new DateTimeZone('UTC'));
-        if (false === $date || $date->format('Y-m-d\TH:i:s.u\Z') !== $observedAt) {
-            throw new InvalidArgumentException('Backup-target candidate timestamps must be canonical UTC.');
+        if (null !== $observedAt) {
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s.u\Z', $observedAt, new DateTimeZone('UTC'));
+            if (false === $date || $date->format('Y-m-d\TH:i:s.u\Z') !== $observedAt) {
+                throw new InvalidArgumentException('Backup-target candidate timestamps must be canonical UTC.');
+            }
         }
         foreach ($nodes as $node) {
             // @phpstan-ignore instanceof.alwaysTrue (enforce the PHPDoc boundary at runtime)
@@ -55,6 +59,10 @@ final readonly class BackupTargetCandidate
             }
         }
         $this->nodes = $nodes;
+        $this->executor = $executor ?? new BackupTargetExecutorEvidence(
+            BackupTargetExecutorStatus::RequiresTargetConfiguration,
+            0, 0, 0, null, null, null, EvidenceFreshness::Missing, null, [],
+        );
         $seen = [];
         $normalized = [];
         foreach ($blockers as $blocker) {
@@ -71,6 +79,7 @@ final readonly class BackupTargetCandidate
         return 'active' === $this->inventoryState
             && [] !== array_filter($this->nodes, static fn (BackupTargetNodeEvidence $node): bool => $node->usable())
             && [] === $this->blockers
+            && $this->executor->usable()
             && ('pbs' !== $this->storageType
                 ? null === $this->pbs
                 : null !== $this->pbs
@@ -94,6 +103,7 @@ final readonly class BackupTargetCandidate
             'observedAt' => $this->observedAt,
             'canEnable' => $this->canEnable(),
             'nodes' => array_map(static fn (BackupTargetNodeEvidence $node): array => $node->toArray(), $this->nodes),
+            'executor' => $this->executor->toArray(),
             'pbs' => $this->pbs?->toArray(),
             'blockers' => array_column($this->blockers, 'value'),
         ];

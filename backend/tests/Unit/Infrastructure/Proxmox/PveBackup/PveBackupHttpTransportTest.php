@@ -23,6 +23,7 @@ use App\Infrastructure\Proxmox\PveBackup\PveHttpBackupClient;
 use App\Infrastructure\Proxmox\PveRequestAuthenticator;
 use App\Infrastructure\Proxmox\PveRetryDelay;
 use App\Infrastructure\Proxmox\PveRetryPolicy;
+use App\Infrastructure\Proxmox\PveTaskPageReader;
 use App\Infrastructure\Proxmox\PveTaskStatusReader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -353,6 +354,7 @@ final class PveBackupHttpTransportTest extends TestCase
                 new PveBackupSubmissionReader(),
                 new PveTaskStatusReader($version),
                 new PveBackupTaskLogReader(),
+                new PveTaskPageReader(),
             );
 
             $result = $client->submit(new PveBackupSubmission(

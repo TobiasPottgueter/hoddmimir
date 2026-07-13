@@ -16,6 +16,7 @@ use App\Infrastructure\Proxmox\PveHttpClientFactory;
 use App\Infrastructure\Proxmox\PveRetryDelay;
 use App\Infrastructure\Proxmox\PveRetryPolicy;
 use App\Infrastructure\Proxmox\PveTaskStatusReader;
+use App\Infrastructure\Proxmox\PveTaskPageReader;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -58,6 +59,7 @@ final readonly class PveNativeBackupClientFactory implements PveBackupClientFact
             new PveBackupSubmissionReader(),
             new PveTaskStatusReader($version),
             new PveBackupTaskLogReader(),
+            new PveTaskPageReader(),
         );
     }
 }
