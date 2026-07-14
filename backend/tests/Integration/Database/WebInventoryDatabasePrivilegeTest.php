@@ -88,6 +88,33 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
             self::assertSame(0, $web->executeStatement(
                 "UPDATE backup_policies SET failure_notification_recipients_json = '[]' WHERE 1 = 0",
             ));
+            self::assertSame(0, $web->executeStatement(<<<'SQL'
+UPDATE backup_policies
+SET target_id = target_id,
+    display_name = display_name,
+    status = status,
+    revision = revision,
+    policy_priority = policy_priority,
+    backup_mode = backup_mode,
+    compression = compression,
+    maximum_age_seconds = maximum_age_seconds,
+    bytes_written_threshold = bytes_written_threshold,
+    cooldown_seconds = cooldown_seconds,
+    schedule = schedule,
+    legacy_maxfiles = legacy_maxfiles,
+    keep_all = keep_all,
+    keep_last = keep_last,
+    keep_hourly = keep_hourly,
+    keep_daily = keep_daily,
+    keep_weekly = keep_weekly,
+    keep_monthly = keep_monthly,
+    keep_yearly = keep_yearly,
+    retention_execution_enabled = retention_execution_enabled,
+    failure_notification_recipients_json = failure_notification_recipients_json,
+    updated_at = updated_at,
+    disabled_at = disabled_at
+WHERE 1 = 0
+SQL));
             foreach ([
                 'UPDATE proxmox_connections SET id = id WHERE 1 = 0',
                 'UPDATE proxmox_connections SET product = product WHERE 1 = 0',
@@ -97,6 +124,9 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'UPDATE proxmox_credentials SET connection_id = connection_id WHERE 1 = 0',
                 'UPDATE proxmox_credentials SET purpose = purpose WHERE 1 = 0',
                 'UPDATE proxmox_credentials SET enabled = enabled WHERE 1 = 0',
+                'UPDATE backup_policies SET id = id WHERE 1 = 0',
+                'UPDATE backup_policies SET connection_id = connection_id WHERE 1 = 0',
+                'UPDATE backup_policies SET cluster_id = cluster_id WHERE 1 = 0',
             ] as $sql) {
                 $this->assertDenied(static fn () => $web->executeStatement($sql));
             }

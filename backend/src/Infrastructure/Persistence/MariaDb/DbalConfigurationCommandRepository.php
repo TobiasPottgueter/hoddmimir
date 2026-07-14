@@ -248,7 +248,10 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
             if ([] !== $blockers) {
                 return ConfigurationCommandResult::blocked(...$blockers);
             }
-            unset($data['connection_id'], $data['cluster_id']);
+            // The policy id is guard context only. Keeping it in the DBAL data
+            // map would generate `SET id = ?` and exceed the WebApp role's
+            // intentionally immutable-primary-key update grant.
+            unset($data['id'], $data['connection_id'], $data['cluster_id']);
             $data += ['revision' => $next, 'updated_at' => $this->now()];
             $this->connection->update('backup_policies', $data, ['id' => $command->subjectId], $this->policyTypes() + ['id' => ParameterType::BINARY]);
         } else {
