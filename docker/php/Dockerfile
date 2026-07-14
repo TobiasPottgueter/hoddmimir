@@ -9,6 +9,8 @@ FROM ${PHP_IMAGE} AS php-base
 
 ARG ICU_VERSION=76.1-r1
 ARG C_ARES_VERSION=1.34.8-r0
+ARG CURL_VERSION=8.20.0-r0
+ARG LIBCURL_VERSION=8.20.0-r0
 ARG AUTOCONF_VERSION=2.72-r1
 ARG DPKG_DEV_VERSION=1.22.21-r0
 ARG DPKG_VERSION=1.22.21-r0
@@ -28,7 +30,9 @@ ENV APP_ENV=prod \
 
 RUN apk add --no-cache \
         "c-ares=${C_ARES_VERSION}" \
+        "curl=${CURL_VERSION}" \
         "icu-libs=${ICU_VERSION}" \
+        "libcurl=${LIBCURL_VERSION}" \
         "su-exec=${SU_EXEC_VERSION}" \
     && apk add --no-cache --virtual .php-ext-build-deps \
         "autoconf=${AUTOCONF_VERSION}" \

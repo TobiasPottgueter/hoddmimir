@@ -112,7 +112,7 @@ final class PveConfigurationTest extends TestCase
         PveCertificateFingerprint::fromSha256('invalid');
     }
 
-    public function testTlsModesAreExclusiveAndNativeOptionsNeverRelaxVerification(): void
+    public function testTlsModesAreExclusiveAndFingerprintPinningReplacesCaAndHostnameTrust(): void
     {
         $certificate = PveCustomCaCertificate::fromPem($this->certificatePem());
         $materializer = new PveCustomCaMaterializer(new NativeAtomicFileMaterializer(), $this->temporaryDirectory());
@@ -124,7 +124,7 @@ final class PveConfigurationTest extends TestCase
             PveTlsConfiguration::certificateFingerprint($fingerprint),
         ];
 
-        foreach ($configurations as $configuration) {
+        foreach (array_slice($configurations, 0, 2) as $configuration) {
             $options = $factory->options($configuration);
             self::assertTrue($options['verify_peer']);
             self::assertTrue($options['verify_host']);
@@ -137,7 +137,14 @@ final class PveConfigurationTest extends TestCase
         self::assertArrayNotHasKey('cafile', $factory->options($configurations[0]));
         self::assertArrayNotHasKey('peer_fingerprint', $factory->options($configurations[0]));
         self::assertSame($materializer->materialize($certificate), $factory->options($configurations[1])['cafile']);
-        self::assertSame(['sha256' => str_repeat('ab', 32)], $factory->options($configurations[2])['peer_fingerprint']);
+        $fingerprintOptions = $factory->options($configurations[2]);
+        self::assertFalse($fingerprintOptions['verify_peer']);
+        self::assertFalse($fingerprintOptions['verify_host']);
+        self::assertSame(0, $fingerprintOptions['max_redirects']);
+        self::assertSame(30.0, $fingerprintOptions['timeout']);
+        self::assertSame(30.0, $fingerprintOptions['max_duration']);
+        self::assertArrayNotHasKey('cafile', $fingerprintOptions);
+        self::assertSame(['sha256' => str_repeat('ab', 32)], $fingerprintOptions['peer_fingerprint']);
         self::assertInstanceOf(NativeHttpClient::class, $factory->create(PveTlsConfiguration::systemCa()));
     }
 

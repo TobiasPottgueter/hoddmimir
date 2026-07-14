@@ -39,20 +39,20 @@ use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
 final class PbsHttpTransportTest extends TestCase
 {
-    public function testSuccessfulRequestUsesStrictTlsAndSecretScopedHeader(): void
+    public function testSuccessfulRequestDelegatesTlsTrustAndUsesSecretScopedHeader(): void
     {
         $called = false;
         /** @var array<string, mixed> $seenOptions */
         $seenOptions = [];
         $seenMethod = '';
         $seenUrl = '';
-        $http = new MockHttpClient(function (string $method, string $url, array $options) use (&$called, &$seenOptions, &$seenMethod, &$seenUrl): MockResponse {
+        $http = new PbsRawOptionRecordingHttpClient(new MockHttpClient(function (string $method, string $url, array $options) use (&$called, &$seenOptions, &$seenMethod, &$seenUrl): MockResponse {
             $called = true;
             $seenMethod = $method;
             $seenUrl = $url;
             $seenOptions = $options;
             return new MockResponse('{"data":{"ok":true}}', ['http_code' => 200]);
-        });
+        }));
         $auth = new PbsInlineAuthenticator();
         $envelope = $this->transport($http, $auth, new PbsRecordingDelay())->get(PbsRequest::ping());
         self::assertInstanceOf(\stdClass::class, $envelope->data);
@@ -69,7 +69,13 @@ final class PbsHttpTransportTest extends TestCase
         });
         self::assertContains('authorization: pbsapitoken collector@pbs!inventory:01234567-89ab-cdef-0123-456789abcdef', $normalizedHeaders);
         self::assertFalse($seenOptions['buffer']);
-        self::assertTrue($seenOptions['verify_peer']); self::assertTrue($seenOptions['verify_host']); self::assertSame(0, $seenOptions['max_redirects']);
+        self::assertCount(1, $http->requests);
+        $rawOptions = $http->requests[0];
+        self::assertArrayNotHasKey('verify_peer', $rawOptions);
+        self::assertArrayNotHasKey('verify_host', $rawOptions);
+        self::assertArrayNotHasKey('peer_fingerprint', $rawOptions);
+        self::assertArrayNotHasKey('cafile', $rawOptions);
+        self::assertSame(0, $rawOptions['max_redirects']);
         self::assertSame(1, $auth->calls);
         self::assertFalse($auth->active);
     }
@@ -348,7 +354,7 @@ final class PbsHttpTransportTest extends TestCase
         self::assertSame(['verbose' => 0], $transport->requests[8]->query);
     }
 
-    private function transport(MockHttpClient $http, PbsRequestAuthenticator $auth, PbsRetryDelay $delay): PbsHttpTransport
+    private function transport(HttpClientInterface $http, PbsRequestAuthenticator $auth, PbsRetryDelay $delay): PbsHttpTransport
     {
         return new PbsHttpTransport($http, new PbsApiUrlBuilder('pbs.test'), $auth, new PbsRetryPolicy(), $delay, new PbsJsonEnvelopeDecoder(), new PbsNoopCheckpoint());
     }
@@ -357,6 +363,39 @@ final class PbsHttpTransportTest extends TestCase
     {
         try { $operation(); self::fail('failure expected'); }
         catch (PbsReadFailure $failure) { self::assertSame($code, $failure->failureCode); }
+    }
+}
+
+/** @internal */
+final class PbsRawOptionRecordingHttpClient implements HttpClientInterface
+{
+    /** @var list<array<string, mixed>> */
+    public array $requests = [];
+
+    public function __construct(private HttpClientInterface $inner)
+    {
+    }
+
+    /** @param array<string, mixed> $options */
+    public function request(string $method, string $url, array $options = []): ResponseInterface
+    {
+        $this->requests[] = $options;
+
+        return $this->inner->request($method, $url, $options);
+    }
+
+    public function stream(ResponseInterface|iterable $responses, ?float $timeout = null): ResponseStreamInterface
+    {
+        return $this->inner->stream($responses, $timeout);
+    }
+
+    /** @param array<string, mixed> $options */
+    public function withOptions(array $options): static
+    {
+        $clone = clone $this;
+        $clone->inner = $this->inner->withOptions($options);
+
+        return $clone;
     }
 }
 

@@ -72,8 +72,6 @@ final readonly class PbsHttpTransport implements PbsApiTransport
                 $response = $this->httpClient->request('GET', $url, [
                     'headers' => ['Accept' => 'application/json', 'Authorization' => $authorization],
                     'buffer' => false,
-                    'verify_peer' => true,
-                    'verify_host' => true,
                     'max_redirects' => 0,
                 ]);
                 $status = $response->getStatusCode();

@@ -92,6 +92,10 @@ validiert werden. Sie muss:
 
 Die Token-IDs müssen verschieden sein und kanonisch
 `hoddmimir@pve!scan` beziehungsweise `hoddmimir@pve!backup` entsprechen.
+System-CA und Custom-CA validieren Zertifikatskette und Hostnamen. Nur der
+explizite Fingerprint-Modus ersetzt beide Prüfungen durch den exakten
+SHA-256-Leaf-Digest; ein falscher Pin scheitert vor der Übertragung von
+HTTP-Headern. Ein globaler `insecure`-Schalter ist nicht vorgesehen.
 
 ### Remote-Prüfung ohne Mutation
 

@@ -112,8 +112,6 @@ final readonly class PveBackupHttpTransport implements PveBackupApiTransport
                 $options = [
                     'headers' => ['Accept' => 'application/json', 'Authorization' => $authorization],
                     'buffer' => false,
-                    'verify_peer' => true,
-                    'verify_host' => true,
                     'max_redirects' => 0,
                     'timeout' => PveHttpMethod::Post === $method ? 60.0 : 30.0,
                     'max_duration' => PveHttpMethod::Post === $method ? 60.0 : 30.0,

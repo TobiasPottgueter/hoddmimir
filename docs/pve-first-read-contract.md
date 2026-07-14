@@ -151,20 +151,30 @@ Folgerungen für den Collector:
 
 ## TLS-Fingerprint-Semantik
 
-Produktionsverbindungen verwenden entweder die normale CA- und
-Hostname-Verifikation oder ein ausdrücklich konfiguriertes
-SHA-256-Zertifikat-Pinning. Für das Pinning gilt im eigenen Transport:
+Produktionsverbindungen verwenden genau einen Trust-Modus: System-CA,
+Custom-CA oder ein ausdrücklich konfiguriertes SHA-256-Zertifikat-Pinning.
+System-CA und Custom-CA validieren Zertifikatskette und Hostnamen. Nur der
+exklusive Pin-Modus ersetzt diese beiden Prüfungen durch den exakten
+Leaf-Digest; er ist keine generische Abschaltung der TLS-Verifikation. Für das
+Pinning gilt im eigenen Transport:
 
 - Der Fingerprint ist der SHA-256-Digest des DER-kodierten, vom PVE-API-Port
   präsentierten **Leaf-Zertifikats**.
 - Eingaben dürfen als 32 Doppelhex-Oktette mit Doppelpunkten oder als 64
   Hex-Zeichen normalisiert werden; intern werden exakt 32 Bytes
   verglichen. Groß-/Kleinschreibung und Doppelpunkte sind nur Darstellung.
-- Der Vergleich erfolgt vor Authentifizierungsdaten und ohne stillen Fallback,
-  TOFU oder deaktivierte TLS-Prüfung. Eine Abweichung ist ein harter
+- Der TLS-Handshake überträgt bei einer Abweichung keine HTTP- und damit keine
+  Authentifizierungsheader. Es gibt keinen stillen Fallback, kein TOFU und
+  keinen globalen `insecure`-Modus. Eine Abweichung ist ein harter
   Verbindungsfehler.
 - Ein Pin ist endpointbezogen und muss bei einem legitimen Zertifikatswechsel
   kontrolliert ersetzt werden.
+
+Die Semantik folgt den offiziellen Proxmox-Verträgen: Der
+[PBS-4-Client](https://pbs.proxmox.com/docs/backup-client.html) verwendet
+`PBS_FINGERPRINT` zur Prüfung des Serverzertifikats, wenn die System-CA es nicht
+validieren kann; [`pvesm` aus PVE 7](https://pve.proxmox.com/pve-docs-7/pvesm.1.html)
+verlangt den SHA-256-Fingerprint für selbstsignierte PBS-Zertifikate.
 
 PVE erzeugt standardmäßig je Node ein eigenes API-Zertifikat, das von der
 clusterweiten PVE-CA signiert ist; ein Node kann außerdem ein eigenes

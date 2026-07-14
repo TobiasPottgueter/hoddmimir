@@ -5,6 +5,7 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 worker_image=${HODDMIMIR_WORKER_SECRET_TEST_IMAGE:-hoddmimir-worker-secret-test:local}
 web_image=${HODDMIMIR_WEB_SECRET_TEST_IMAGE:-hoddmimir-web-secret-test:local}
+alpine_test_image=${HODDMIMIR_ALPINE_SECRET_TEST_IMAGE:-alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40}
 secret_volume="hoddmimir-secret-staging-test-$$"
 health_container="hoddmimir-secret-health-test-$$"
 
@@ -18,7 +19,7 @@ docker build --target worker --tag "$worker_image" --file "$repository_root/dock
 docker build --target web --tag "$web_image" --file "$repository_root/docker/web/Dockerfile" "$repository_root"
 
 docker volume create "$secret_volume" >/dev/null
-docker run --rm --volume "$secret_volume:/secrets" alpine:3.23 sh -eu -c '
+docker run --rm --volume "$secret_volume:/secrets" "$alpine_test_image" sh -eu -c '
     umask 077
     printf "%s\n" "app-secret-value" > /secrets/app_secret
     printf "%s\n" "encryption-key-value" > /secrets/encryption_key
@@ -32,7 +33,7 @@ docker run --rm --volume "$secret_volume:/secrets" alpine:3.23 sh -eu -c '
     chown 12345:12345 /secrets/app_secret /secrets/encryption_key /secrets/database_password /secrets/matrix_webhook_url
 '
 
-docker run --rm --volume "$secret_volume:/secrets:ro" alpine:3.23 sh -eu -c '
+docker run --rm --volume "$secret_volume:/secrets:ro" "$alpine_test_image" sh -eu -c '
     for secret in app_secret encryption_key database_password matrix_webhook_url; do
         test "$(stat -c %a "/secrets/$secret")" = 600
         test "$(stat -c %u "/secrets/$secret")" = 12345

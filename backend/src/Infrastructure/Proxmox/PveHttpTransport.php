@@ -95,8 +95,6 @@ final readonly class PveHttpTransport implements PveApiTransport
                             'Authorization' => $authorization,
                         ],
                         'buffer' => false,
-                        'verify_peer' => true,
-                        'verify_host' => true,
                         'max_redirects' => 0,
                     ],
                 );

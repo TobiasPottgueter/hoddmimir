@@ -36,6 +36,12 @@ final readonly class PbsNativeHttpClientFactory implements PbsHttpClientFactory
         }
         /** @var PbsCertificateFingerprint $pin */
         $pin = $tls->certificateFingerprint;
-        return $options + ['peer_fingerprint' => ['sha256' => $pin->sha256]];
+        // The exact leaf pin is the exclusive trust anchor in this mode. A
+        // mismatch aborts the TLS handshake before any HTTP header is sent.
+        return array_replace($options, [
+            'verify_peer' => false,
+            'verify_host' => false,
+            'peer_fingerprint' => ['sha256' => $pin->sha256],
+        ]);
     }
 }

@@ -37,7 +37,7 @@ final class MutationConfigurationTest extends TestCase
         self::assertSame(['Kernel.php'], $globalSource['excludes']);
 
         foreach ([$critical, $global] as $configuration) {
-            self::assertSame(60, $configuration['timeout']);
+            self::assertSame(180, $configuration['timeout']);
             self::assertTrue($configuration['timeoutsAsEscaped']);
             self::assertSame(0, $configuration['maxTimeouts']);
             self::assertFalse($configuration['ignoreMsiWithNoMutations']);

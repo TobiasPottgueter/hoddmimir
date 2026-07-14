@@ -50,15 +50,58 @@ class SupplyChainGateContractTest(unittest.TestCase):
 
         self.assertIn("docker buildx build", build)
         self.assertIn('--output "type=docker,dest=$archive"', build)
-        self.assertIn('test "$archive_count" -eq 6', build)
+        self.assertIn('test "$archive_count" -eq "$expected_count"', build)
         self.assertNotRegex(build, r"docker\s+build(?!x)")
         self.assertNotRegex(scan, r"docker\s+build(?:x)?")
         self.assertIn('--input "/artifacts/images/$archive_name"', scan)
-        self.assertIn('test "$scanned" -eq 6', scan)
-        self.assertIn('test "$sbom_count" -eq 6', scan)
+        self.assertIn('test "$scanned" -eq "$expected_count"', scan)
+        self.assertIn('test "$sbom_count" -eq "$expected_count"', scan)
+        for script in (build, scan):
+            self.assertIn("CONTAINER_ARTIFACT", script)
+            self.assertIn("CONTAINER_PLATFORM", script)
         self.assertIn("./scripts/ci/build-container-images.sh", makefile)
         self.assertIn("./scripts/ci/scan-container-images.sh", makefile)
         self.assertNotIn("docker buildx build", makefile)
+
+    def test_workflow_parallelizes_exactly_six_scanned_platform_images(self) -> None:
+        workflow = read(".github/workflows/ci.yml")
+        image_job = workflow.split("\n  container-images:\n", maxsplit=1)[1].split(
+            "\n  containers:\n", maxsplit=1
+        )[0]
+        final_job = workflow.split("\n  containers:\n", maxsplit=1)[1].split(
+            "\n  publish-images:\n", maxsplit=1
+        )[0]
+
+        self.assertEqual(6, image_job.count("          - artifact:"))
+        self.assertIn("fail-fast: false", image_job)
+        self.assertIn("make container-multiarch", image_job)
+        self.assertIn("make container-security", image_job)
+        self.assertIn("BUILDX_CACHE_SCOPE_PREFIX: container", image_job)
+        self.assertIn("if: matrix.platform == 'linux/arm64'", image_job)
+        self.assertIn("needs.container-images.result", final_job)
+        self.assertIn('"$actual" = "$expected"', final_job)
+        self.assertIn('" -eq 6', final_job)
+
+    def test_scheduled_mutation_uses_one_foundation_and_disjoint_shards(self) -> None:
+        workflow = read(".github/workflows/ci.yml")
+        foundation = workflow.split("\n  mutation-foundation:\n", maxsplit=1)[1].split(
+            "\n  mutation-shard:\n", maxsplit=1
+        )[0]
+        shards = workflow.split("\n  mutation-shard:\n", maxsplit=1)[1].split(
+            "\n  mutation-full:\n", maxsplit=1
+        )[0]
+        aggregate = workflow.split("\n  mutation-full:\n", maxsplit=1)[1].split(
+            "\n  frontend:\n", maxsplit=1
+        )[0]
+
+        self.assertEqual(1, foundation.count("run-mutation.sh coverage"))
+        self.assertEqual(12, len(re.findall(r"^          - (?:critical|global-rest)-\d$", shards, re.MULTILINE)))
+        self.assertIn("REUSE_MUTATION_COVERAGE: \"1\"", shards)
+        self.assertIn("run-mutation.sh shard", shards)
+        self.assertIn("mkdir -p var/mutation && tar -xzf foundation.tgz -C var/mutation", shards)
+        self.assertIn("mutation-shards.php aggregate", aggregate)
+        self.assertIn("needs.mutation-shard.result", aggregate)
+        self.assertIn("mkdir -p var/mutation && tar -xzf foundation.tgz -C var/mutation plan", aggregate)
 
     def test_vulnerability_policy_is_fail_closed_for_all_high_and_critical_findings(self) -> None:
         scan = read("scripts/ci/scan-container-images.sh")
@@ -118,7 +161,9 @@ class SupplyChainGateContractTest(unittest.TestCase):
         expected_packages = {
             "docker/php/Dockerfile": {
                 "c-ares",
+                "curl",
                 "icu-libs",
+                "libcurl",
                 "icu-dev",
                 "autoconf",
                 "dpkg-dev",
@@ -135,7 +180,9 @@ class SupplyChainGateContractTest(unittest.TestCase):
             },
             "docker/web/Dockerfile": {
                 "c-ares",
+                "curl",
                 "icu-libs",
+                "libcurl",
                 "icu-dev",
                 "autoconf",
                 "dpkg-dev",
@@ -159,6 +206,24 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 re.findall(r'"([a-z0-9+.-]+)=\$\{[A-Z0-9_]+\}"', dockerfile)
             )
             self.assertEqual(expected, pinned)
+
+    def test_secret_staging_uses_an_immutable_alpine_helper(self) -> None:
+        staging = read("scripts/tests/test-app-secret-staging.sh")
+
+        self.assertRegex(
+            staging,
+            r"alpine:3\.23\.\d+@sha256:[0-9a-f]{64}",
+        )
+        self.assertNotRegex(staging, r"docker run[^\n]+\salpine:[^@\s]+(?:\s|$)")
+
+    def test_production_runtime_curl_packages_are_pinned_to_security_fixed_releases(self) -> None:
+        php = read("docker/php/Dockerfile")
+        web = read("docker/web/Dockerfile")
+
+        self.assertIn("ARG CURL_VERSION=8.20.0-r0", php)
+        self.assertIn("ARG LIBCURL_VERSION=8.20.0-r0", php)
+        self.assertIn("ARG CURL_VERSION=8.21.0-r0", web)
+        self.assertIn("ARG LIBCURL_VERSION=8.21.0-r0", web)
 
     def test_production_worker_and_web_exclude_tests_dev_config_and_composer(self) -> None:
         php = read("docker/php/Dockerfile")
@@ -204,7 +269,7 @@ class SupplyChainGateContractTest(unittest.TestCase):
 
     def test_workflow_runs_build_before_scan_and_never_publishes_or_deploys(self) -> None:
         workflow = read(".github/workflows/ci.yml")
-        ordinary_workflow = workflow.split("\n  publish-images:\n", maxsplit=1)[0]
+        ordinary_workflow = workflow.split("\n  publish-image:\n", maxsplit=1)[0]
         relevant = "\n".join(
             (
                 ordinary_workflow,
@@ -245,7 +310,10 @@ class SupplyChainGateContractTest(unittest.TestCase):
 class ImagePublicationWorkflowContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = read(".github/workflows/ci.yml")
-        self.publish_job = self.workflow.split("\n  publish-images:\n", maxsplit=1)[1]
+        self.build_job = self.workflow.split("\n  publish-image:\n", maxsplit=1)[1].split(
+            "\n  publish-images:\n", maxsplit=1
+        )[0]
+        self.final_job = self.workflow.split("\n  publish-images:\n", maxsplit=1)[1]
 
     def test_publication_is_manual_explicit_and_has_minimal_write_permission(self) -> None:
         self.assertIn("workflow_dispatch:", self.workflow)
@@ -254,16 +322,18 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
         self.assertIn('required: false\n        default: ""\n        type: string', self.workflow)
         self.assertIn(
             "if: github.event_name == 'workflow_dispatch' && inputs.publish_images == true",
-            self.publish_job,
+            self.build_job,
         )
-        self.assertIn("contents: read", self.publish_job)
-        self.assertIn("packages: write", self.publish_job)
-        self.assertNotIn("id-token: write", self.publish_job)
+        self.assertIn("contents: read", self.build_job)
+        self.assertIn("packages: write", self.build_job)
+        self.assertNotIn("id-token: write", self.build_job)
+        self.assertIn("contents: read", self.final_job)
+        self.assertNotIn("packages: write", self.final_job)
         self.assertIn(
             'test "$CONFIRMATION" = "PUBLISH_MULTIARCH_IMAGES"',
-            self.publish_job,
+            self.build_job,
         )
-        self.assertIn("persist-credentials: false", self.publish_job)
+        self.assertIn("persist-credentials: false", self.build_job)
         self.assertIn(
             "cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.publish_images) }}",
             self.workflow,
@@ -274,80 +344,80 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
             "- mutation-full",
             "- proxmox-schema-policy",
         ):
-            self.assertIn(required_gate, self.publish_job)
+            self.assertIn(required_gate, self.build_job)
+        self.assertIn("needs: publish-image", self.final_job)
+        self.assertIn("needs.publish-image.result", self.final_job)
 
     def test_actions_and_build_infrastructure_are_immutable(self) -> None:
-        for action_ref in re.findall(r"uses:\s*[^@\s]+@([^\s]+)", self.publish_job):
+        publication = self.build_job + self.final_job
+        for action_ref in re.findall(r"uses:\s*[^@\s]+@([^\s]+)", publication):
             self.assertRegex(action_ref, r"^[0-9a-f]{40}$")
-        self.assertRegex(self.publish_job, r"version: v\d+\.\d+\.\d+")
+        self.assertRegex(publication, r"version: v\d+\.\d+\.\d+")
         self.assertRegex(
-            self.publish_job,
+            publication,
             r"image=moby/buildkit:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
         )
         self.assertRegex(
-            self.publish_job,
+            self.build_job,
             r"image: tonistiigi/binfmt:[^\s@]+@sha256:[0-9a-f]{64}",
         )
 
     def test_exact_worker_and_web_multiarch_manifests_are_published(self) -> None:
-        self.assertEqual(2, self.publish_job.count("docker buildx build"))
-        self.assertEqual(2, self.publish_job.count("--platform linux/amd64,linux/arm64"))
-        self.assertEqual(2, self.publish_job.count("--push"))
-        self.assertIn("--target worker", self.publish_job)
-        self.assertIn("--file docker/php/Dockerfile", self.publish_job)
-        self.assertIn("--target web", self.publish_job)
-        self.assertIn("--file docker/web/Dockerfile", self.publish_job)
-        self.assertNotIn("docker/mariadb/Dockerfile", self.publish_job)
-        self.assertIn("--provenance=mode=max", self.publish_job)
-        self.assertIn("--sbom=true", self.publish_job)
+        self.assertEqual(2, self.build_job.count("          - target:"))
+        self.assertIn("target: worker", self.build_job)
+        self.assertIn("dockerfile: docker/php/Dockerfile", self.build_job)
+        self.assertIn("target: web", self.build_job)
+        self.assertIn("dockerfile: docker/web/Dockerfile", self.build_job)
+        self.assertEqual(1, self.build_job.count("docker buildx build"))
+        self.assertEqual(1, self.build_job.count("--platform linux/amd64,linux/arm64"))
+        self.assertEqual(1, self.build_job.count("--push"))
+        self.assertNotIn("docker/mariadb/Dockerfile", self.build_job)
+        self.assertIn("--provenance=mode=max", self.build_job)
+        self.assertIn("--sbom=true", self.build_job)
+        for scope in (
+            "container-$TARGET-linux-amd64",
+            "container-$TARGET-linux-arm64",
+            "publish-$TARGET-multiarch",
+        ):
+            self.assertIn(scope, self.build_job)
 
     def test_manifest_digests_are_validated_and_exported_for_deployment(self) -> None:
         self.assertEqual(
-            2,
-            self.publish_job.count(
+            1,
+            self.build_job.count(
                 'select(test("^sha256:[0-9a-f]{64}$"))'
             ),
         )
-        self.assertIn("artifacts/published-images.json", self.publish_job)
-        self.assertIn("workerReference", self.publish_job)
-        self.assertIn("webReference", self.publish_job)
-        self.assertIn("artifact-digest", self.publish_job)
-        self.assertIn("Use only the `@sha256:` references for deployment.", self.publish_job)
+        self.assertIn('([.[].target] | sort) == ["web", "worker"]', self.final_job)
+        self.assertIn("EXPECTED_REPOSITORY: ${{ github.repository }}", self.final_job)
+        self.assertIn("artifacts/published-images.json", self.final_job)
+        self.assertIn(".images.worker.reference", self.final_job)
+        self.assertIn(".images.web.reference", self.final_job)
+        self.assertIn("artifact-digest", self.final_job)
+        self.assertIn("Use only the `@sha256:` references for deployment.", self.final_job)
 
     def test_anonymous_digest_pull_is_proved_before_references_are_exported(self) -> None:
-        logout = self.publish_job.index(
-            "Remove registry credentials before public pull proof"
-        )
-        proof = self.publish_job.index("Prove both manifests are anonymously pullable")
-        export = self.publish_job.index("Write immutable deployment references")
-
-        self.assertLess(logout, proof)
+        proof = self.final_job.index("docker buildx imagetools inspect")
+        export = self.final_job.index("artifacts/published-images.json")
         self.assertLess(proof, export)
-        self.assertEqual(
-            2,
-            self.publish_job.count("docker buildx imagetools inspect"),
-        )
-        self.assertEqual(
-            2,
-            self.publish_job.count(
-                'DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect'
-            ),
-        )
+        self.assertEqual(1, self.final_job.count("docker buildx imagetools inspect"))
+        self.assertIn('DOCKER_CONFIG="$anonymous_config"', self.final_job)
+        self.assertNotIn("docker/login-action", self.final_job)
         self.assertIn(
             "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY",
-            self.publish_job,
+            self.build_job,
         )
 
     def test_untrusted_dispatch_inputs_are_not_interpolated_into_shell_programs(self) -> None:
         run_blocks = re.findall(
             r"(?ms)^\s+run: \|\n(.*?)(?=^\s{6}- name:|\Z)",
-            self.publish_job,
+            self.build_job + self.final_job,
         )
         self.assertGreater(len(run_blocks), 0)
         for run_block in run_blocks:
             self.assertNotIn("${{ inputs.", run_block)
-        self.assertIn("REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}", self.publish_job)
-        self.assertIn("printf 'source_ref=%s\\n' \"$GITHUB_REF\"", self.publish_job)
+        self.assertIn("REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}", self.build_job)
+        self.assertIn("printf 'source_ref=%s\\n' \"$GITHUB_REF\"", self.build_job)
 
 
 if __name__ == "__main__":

@@ -37,9 +37,14 @@ nicht stillschweigend.
 
 Alle Routen sind feste GET-Deskriptoren mit Antwortgrößenlimit. TLS verwendet
 System-CA, eine materialisierte eigene CA oder einen endpointbezogenen
-SHA-256-Leaf-Pin. Peer- und Hostprüfung bleiben aktiv, Redirects sind
+SHA-256-Leaf-Pin. Die CA-Modi prüfen Peer und Host; nur im exklusiven Pin-Modus
+ersetzt der exakte Digest beide Prüfungen und ein falscher Pin scheitert vor
+jedem HTTP-Header. Das ist kein globaler `insecure`-Modus. Redirects sind
 deaktiviert. Ein echter TLS-Handshake-Test und Read-only-Smokes gegen die
-letzten PBS-3-/4-Patches bleiben Release-Gates.
+letzten PBS-3-/4-Patches bleiben Release-Gates. Die
+[offizielle PBS-4-Client-Dokumentation](https://pbs.proxmox.com/docs/backup-client.html)
+bestätigt den Fingerprint als Serverzertifikatsprüfung, wenn die System-CA das
+Zertifikat nicht validieren kann.
 
 ## Berechtigungs- und Vollständigkeitssemantik
 

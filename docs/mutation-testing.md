@@ -56,10 +56,24 @@ HTTP-heavy tests within the per-mutant timeout without weakening selection.
 Set `INFECTION_THREADS=4` when a fixed concurrency is more appropriate than
 automatic CPU detection.
 
-The per-mutant timeout is 60 seconds. Timeouts still count as escaped and the
-allowed timeout count remains zero; the larger budget prevents broad but valid
-covering-test selections from being skipped merely because they exceed
-Infection's ten-second default.
+The per-mutant timeout is 180 seconds. The fresh scheduled foundation has
+contained a valid individual test taking about 96 seconds, so the previous
+60-second limit could cause Infection to skip a mutant before execution when
+its coverage-derived nominal test duration already reached that limit. The
+three-minute ceiling leaves bounded CI headroom without turning process
+timeouts into an accepted outcome.
+
+Infection reports those two cases separately. `skippedCount` contains mutants
+not started because their nominal covering-test duration is at least the
+configured timeout; Infection excludes them from its tested-mutant MSI
+denominator. `timeOutCount` contains mutant processes that were started and
+then exceeded the configured limit. The weighted Hoddmímir aggregation follows
+that denominator exactly, but still rejects every non-zero `timeOutCount`;
+`timeoutsAsEscaped` remains enabled and `maxTimeouts` remains exactly zero.
+
+Shard manifests are passed as separate positional source paths supported by
+Infection 0.34. They are not joined into the deprecated comma-separated
+`--filter` option.
 
 For an immediate rerun after changing only mutation configuration,
 `REUSE_MUTATION_COVERAGE=1 make mutation-critical` can reuse an existing
@@ -82,14 +96,25 @@ full mutation campaigns:
 
 - pull requests run the critical 90% MSI gate; branch protection can require
   `Critical Mutation Gate`;
-- the complete critical plus global campaign runs every night at 02:17 UTC and
-  on manual workflow dispatch;
+- the complete campaign runs every night at 02:17 UTC and on manual workflow
+  dispatch. One foundation job creates the PHPUnit XML/JUnit coverage exactly
+  once. Three critical and nine global-rest jobs then mutate disjoint,
+  deterministic file manifests in parallel;
 - direct pushes keep the existing fast backend, integration, frontend, and
   container gates; maintainers run `make mutation` before merging material
   backend changes when no pull request supplies the required gate.
 
 The full gate is still release-blocking even though it is scheduled rather than
 attached to every push. A red nightly run must be fixed before a release.
+
+The final `Scheduled Full Mutation Gates` job verifies that those twelve
+manifests are a duplicate-free exact partition of all handwritten source. It
+adds Infection's raw status counters rather than averaging shard percentages:
+the critical result uses the three critical shards, while the global result
+uses those same critical counters exactly once plus the nine global-rest
+shards. Thresholds are checked by integer cross multiplication at critical
+MSI >= 90% and global MSI >= 80%. A missing report, inconsistent status total,
+source-plan drift, or any timeout fails closed.
 
 The complete critical and global result for the locally accepted Phase-6
 worktree is recorded in the

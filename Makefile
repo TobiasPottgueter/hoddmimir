@@ -105,7 +105,7 @@ api-schema-drift-test: ## Test the official Proxmox schema drift policy offline
 	python3 -m unittest scripts/tests/test_proxmox_api_schema_drift.py -v
 
 supply-chain-contract-test: ## Verify pinned CI supply-chain gates without running scanners
-	python3 -m unittest scripts/tests/test_supply_chain_gates.py -v
+	python3 -m unittest scripts/tests/test_supply_chain_gates.py scripts/tests/test_mutation_sharding.py -v
 
 secret-scan: ## Scan the complete Git history with the digest-pinned Gitleaks image
 	docker run --rm --volume "$(CURDIR):/repo:ro" --workdir /repo $(GITLEAKS_IMAGE) git --gitleaks-ignore-path /repo/.gitleaksignore --redact --verbose --no-banner /repo

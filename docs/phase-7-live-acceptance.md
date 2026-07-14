@@ -150,7 +150,8 @@ eine ausdrückliche administrative Freigabe erforderlich.
 - [ ] Die exakten Produkt- und Patchversionen der getesteten PVE-7/8/9- und
       PBS-3/4-Systeme dokumentieren.
 - [ ] System-CA, Custom-CA, korrekten SHA-256-Fingerprint und falschen
-      Fingerprint fail-closed prüfen; TLS-Verifikation bleibt immer aktiv.
+      Fingerprint fail-closed prüfen; die Trust-Prüfung bleibt immer aktiv.
+      Bei falschem Pin darf kein Authorization-Header übertragen werden.
 - [ ] Produkt, Version, Scanner- und Executor-Rechte sowie fehlende,
       zusätzliche oder nicht propagierte Rechte mit den geschlossenen
       Allowlists abgleichen.

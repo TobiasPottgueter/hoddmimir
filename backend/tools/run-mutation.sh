@@ -8,9 +8,9 @@ coverage_directory=var/mutation/coverage
 coverage_fingerprint_file="$coverage_directory/input.sha256"
 
 case "$profile" in
-    config|critical|global|all) ;;
+    config|coverage|shard|aggregate|critical|global|all) ;;
     *)
-        echo "Usage: $0 {config|critical|global|all}" >&2
+        echo "Usage: $0 {config|coverage|shard|aggregate|critical|global|all}" >&2
         exit 2
         ;;
 esac
@@ -50,9 +50,9 @@ fi
 
 coverage_fingerprint=$(
     {
-        find src tests config migrations -type f -print
-        printf '%s\n' composer.lock phpunit.xml.dist
-    } | sort | xargs sha256sum | sha256sum | cut -d ' ' -f 1
+        find src tests config migrations -type f -print0
+        printf '%s\0' composer.lock phpunit.xml.dist infection-critical.json5.dist infection.json5.dist tools/run-mutation.sh tools/mutation-shards.php
+    } | sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1
 )
 
 stored_coverage_fingerprint=''
@@ -60,12 +60,19 @@ if [ -f "$coverage_fingerprint_file" ]; then
     stored_coverage_fingerprint=$(cat "$coverage_fingerprint_file")
 fi
 
-if [ "${REUSE_MUTATION_COVERAGE:-0}" = 1 ] \
+if [ "$profile" = shard ]; then
+    if [ ! -s "$coverage_directory/junit.xml" ] \
+        || [ ! -d "$coverage_directory/coverage-xml" ] \
+        || [ "$stored_coverage_fingerprint" != "$coverage_fingerprint" ]; then
+        echo 'The mutation coverage foundation is missing or stale; shard jobs must never regenerate it.' >&2
+        exit 1
+    fi
+elif [ "$profile" != aggregate ] && [ "${REUSE_MUTATION_COVERAGE:-0}" = 1 ] \
     && [ -s "$coverage_directory/junit.xml" ] \
     && [ -d "$coverage_directory/coverage-xml" ] \
     && [ "$stored_coverage_fingerprint" = "$coverage_fingerprint" ]; then
     echo "Reusing existing PHPUnit mutation coverage."
-else
+elif [ "$profile" != aggregate ]; then
     if [ "${REUSE_MUTATION_COVERAGE:-0}" = 1 ]; then
         echo "Existing mutation coverage is missing or stale; regenerating it."
     fi
@@ -76,6 +83,54 @@ else
         --coverage-xml "$coverage_directory/coverage-xml" \
         --log-junit "$coverage_directory/junit.xml"
     printf '%s\n' "$coverage_fingerprint" > "$coverage_fingerprint_file"
+fi
+
+if [ "$profile" = coverage ]; then
+    rm -rf var/mutation/plan
+    php tools/mutation-shards.php plan var/mutation/plan
+    echo "Mutation coverage foundation and shard plan generated."
+    exit 0
+fi
+
+if [ "$profile" = shard ]; then
+    shard_name=${MUTATION_SHARD_NAME:-}
+    case "$shard_name" in
+        critical-[012]) configuration=infection-critical.json5.dist ;;
+        global-rest-[012345678]) configuration=infection.json5.dist ;;
+        *) echo 'MUTATION_SHARD_NAME is invalid.' >&2; exit 2 ;;
+    esac
+    php tools/mutation-shards.php verify-plan var/mutation/plan
+    manifest="var/mutation/plan/$shard_name.txt"
+    report_directory="var/mutation/shards/$shard_name"
+    rm -rf "$report_directory"
+    mkdir -p "$report_directory"
+    cp "$manifest" "$report_directory/manifest.txt"
+    set --
+    while IFS= read -r source_path; do
+        test -n "$source_path"
+        set -- "$@" "$source_path"
+    done < "$manifest"
+    test "$#" -gt 0
+    php -d memory_limit=2G vendor/bin/infection \
+        --configuration="$configuration" \
+        --coverage="$coverage_directory" \
+        --threads="$threads" \
+        --skip-initial-tests \
+        --only-covering-test-cases \
+        --min-msi=0 \
+        --min-covered-msi=0 \
+        --logger-summary-json="$report_directory/summary.json" \
+        --logger-text="$report_directory/escaped-mutants.log" \
+        --no-progress \
+        -- "$@"
+    test -s "$report_directory/summary.json"
+    exit 0
+fi
+
+if [ "$profile" = aggregate ]; then
+    php tools/mutation-shards.php aggregate \
+        var/mutation/plan var/mutation/shards var/mutation/aggregate.json
+    exit 0
 fi
 
 if [ "$profile" = critical ] || [ "$profile" = all ]; then

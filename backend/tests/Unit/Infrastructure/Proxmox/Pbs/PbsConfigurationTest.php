@@ -173,7 +173,7 @@ final class PbsConfigurationTest extends TestCase
         self::assertContains((new PbsSystemJitterSource())->milliseconds(1), [0, 1]);
     }
 
-    public function testTlsModesNeverRelaxVerificationAndCaIsMaterializedInDedicatedDirectory(): void
+    public function testTlsModesAreExclusiveAndPinningReplacesCaAndHostnameTrust(): void
     {
         $files = new PbsRecordingMaterializer();
         $ca = PbsCustomCaCertificate::fromPem($this->certificatePem());
@@ -182,13 +182,18 @@ final class PbsConfigurationTest extends TestCase
         $factory = new PbsNativeHttpClientFactory($materializer);
         $pin = PbsCertificateFingerprint::fromSha256(implode(':', str_split(str_repeat('AB', 32), 2)));
         $configs = [PbsTlsConfiguration::systemCa(), PbsTlsConfiguration::customCa($ca), PbsTlsConfiguration::certificateFingerprint($pin)];
-        foreach ($configs as $config) {
+        foreach (array_slice($configs, 0, 2) as $config) {
             $options = $factory->options($config);
             self::assertTrue($options['verify_peer']); self::assertTrue($options['verify_host']); self::assertSame(0, $options['max_redirects']);
         }
         self::assertSame(PbsTlsMode::SystemCa, $configs[0]->mode);
         self::assertSame('/app/var/pbs-ca/ca-'.$ca->fingerprint().'.pem', $factory->options($configs[1])['cafile']);
-        self::assertSame(['sha256' => str_repeat('ab', 32)], $factory->options($configs[2])['peer_fingerprint']);
+        $fingerprintOptions = $factory->options($configs[2]);
+        self::assertFalse($fingerprintOptions['verify_peer']);
+        self::assertFalse($fingerprintOptions['verify_host']);
+        self::assertSame(0, $fingerprintOptions['max_redirects']);
+        self::assertArrayNotHasKey('cafile', $fingerprintOptions);
+        self::assertSame(['sha256' => str_repeat('ab', 32)], $fingerprintOptions['peer_fingerprint']);
         self::assertSame('/app/var/pbs-ca', $files->directory);
         self::assertSame(0700, $files->directoryMode); self::assertSame(0600, $files->fileMode);
         self::assertInstanceOf(NativeHttpClient::class, $factory->create(PbsTlsConfiguration::systemCa()));

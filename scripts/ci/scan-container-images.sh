@@ -8,6 +8,14 @@ trivy_image=${TRIVY_IMAGE:?TRIVY_IMAGE must be a version- and digest-pinned imag
 target_matrix="$repository_root/scripts/ci/container-targets.txt"
 platform_matrix="$repository_root/scripts/ci/container-platforms.txt"
 image_directory="$artifact_directory/images"
+selected_artifact=${CONTAINER_ARTIFACT:-}
+selected_platform=${CONTAINER_PLATFORM:-}
+
+if { test -n "$selected_artifact" && test -z "$selected_platform"; } \
+    || { test -z "$selected_artifact" && test -n "$selected_platform"; }; then
+    echo 'CONTAINER_ARTIFACT and CONTAINER_PLATFORM must be supplied together.' >&2
+    exit 2
+fi
 
 case "$trivy_image" in
     *:*@sha256:*) ;;
@@ -34,9 +42,15 @@ while IFS='|' read -r artifact dockerfile target; do
     case "$artifact" in
         ''|'#'*) continue ;;
     esac
+    if test -n "$selected_artifact" && test "$artifact" != "$selected_artifact"; then
+        continue
+    fi
 
     while IFS= read -r platform; do
         test -n "$platform"
+        if test -n "$selected_platform" && test "$platform" != "$selected_platform"; then
+            continue
+        fi
         platform_slug=$(printf '%s' "$platform" | tr '/' '-')
         archive_name="$artifact-$platform_slug.docker.tar"
         sbom_name="$artifact-$platform_slug.cdx.json"
@@ -61,6 +75,10 @@ while IFS='|' read -r artifact dockerfile target; do
     done < "$platform_matrix"
 done < "$target_matrix"
 
-test "$scanned" -eq 6
+expected_count=6
+if test -n "$selected_artifact"; then
+    expected_count=1
+fi
+test "$scanned" -eq "$expected_count"
 sbom_count=$(find "$artifact_directory/sbom" -type f -name '*.cdx.json' | wc -l | tr -d ' ')
-test "$sbom_count" -eq 6
+test "$sbom_count" -eq "$expected_count"

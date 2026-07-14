@@ -4,7 +4,7 @@
     "directories": ["src"],
     "excludes": ["Kernel.php"]
   },
-  "timeout": 60,
+  "timeout": 180,
   "threads": "max",
   "testFramework": "phpunit",
   "mutators": {

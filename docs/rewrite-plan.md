@@ -339,7 +339,22 @@ Das bootstrap-freie Anlegen und Prüfen dieser Identitäten über die WebApp ist
 im [`proxmox-connection-onboarding-plan.md`](proxmox-connection-onboarding-plan.md)
 festgelegt.
 
-Produktionsverbindungen erlauben keine deaktivierte TLS-Prüfung. Unterstützt werden eine vertrauenswürdige CA oder explizites SHA-256-Fingerprint-Pinning. Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem Logeintrag redigiert.
+Produktionsverbindungen erlauben keine generische oder globale Abschaltung der
+TLS-Vertrauensprüfung. Die drei exklusiven Modi sind System-CA, Custom-CA und
+ein endpointbezogener exakter SHA-256-Leaf-Fingerprint. System-CA und Custom-CA
+prüfen Zertifikatskette und Hostnamen. Nur im ausdrücklich gewählten
+Fingerprint-Modus ersetzt der exakte Leaf-Digest diese beiden Prüfungen; ein
+abweichendes Zertifikat beendet den TLS-Handshake, bevor HTTP-Header übertragen
+werden. Die Transportverschlüsselung bleibt in allen Modi aktiv. Die
+Request-Transporte dürfen diese ausschließlich von der Client-Factory gesetzte
+Trust-Policy nicht überschreiben. Diese Semantik entspricht der offiziellen
+[PBS-4-Client-Dokumentation](https://pbs.proxmox.com/docs/backup-client.html),
+die `PBS_FINGERPRINT` zur Serverzertifikatsprüfung verwendet, wenn die
+System-CA nicht validieren kann, sowie der
+[PVE-7-`pvesm`-Dokumentation](https://pve.proxmox.com/pve-docs-7/pvesm.1.html),
+die für selbstsignierte PBS-Zertifikate einen SHA-256-Fingerprint verlangt.
+Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem
+Logeintrag redigiert.
 
 ### 5.4 Retry- und Timeout-Regeln
 

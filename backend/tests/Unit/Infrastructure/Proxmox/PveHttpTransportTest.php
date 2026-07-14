@@ -57,7 +57,7 @@ final class PveHttpTransportTest extends TestCase
         self::assertSame('https://pve.test:8006/api2/json/cluster/resources', $http->requests[0]['url']);
         self::assertTrue($http->requests[0]['authorizationWasPresent']);
         self::assertTrue($http->requests[0]['bufferWasDisabled']);
-        self::assertTrue($http->requests[0]['tlsWasStrict']);
+        self::assertTrue($http->requests[0]['tlsWasDelegated']);
     }
 
     public function testTransportRetriesTransportFailuresAndDecryptsEachAttempt(): void
@@ -587,7 +587,7 @@ final class QueueHttpClient implements HttpClientInterface
     /** @var list<ResponseInterface|Throwable> */
     private array $queue;
 
-    /** @var list<array{method: string, url: string, authorizationWasPresent: bool, bufferWasDisabled: bool, tlsWasStrict: bool}> */
+    /** @var list<array{method: string, url: string, authorizationWasPresent: bool, bufferWasDisabled: bool, tlsWasDelegated: bool}> */
     public array $requests = [];
 
     /** @param list<ResponseInterface|Throwable> $queue */
@@ -609,15 +609,17 @@ final class QueueHttpClient implements HttpClientInterface
             }
         }
         $bufferWasDisabled = false === ($options['buffer'] ?? null);
-        $tlsWasStrict = true === ($options['verify_peer'] ?? null)
-            && true === ($options['verify_host'] ?? null)
+        $tlsWasDelegated = !array_key_exists('verify_peer', $options)
+            && !array_key_exists('verify_host', $options)
+            && !array_key_exists('peer_fingerprint', $options)
+            && !array_key_exists('cafile', $options)
             && 0 === ($options['max_redirects'] ?? null);
         $this->requests[] = compact(
             'method',
             'url',
             'authorizationWasPresent',
             'bufferWasDisabled',
-            'tlsWasStrict',
+            'tlsWasDelegated',
         );
 
         $next = array_shift($this->queue);

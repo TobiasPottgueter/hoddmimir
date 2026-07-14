@@ -75,10 +75,14 @@ The client accepts only a credential encrypted for
 only inside the scoped authorization callback and is neither stored in a DTO
 nor exposed through debug or serialization paths.
 
-Every HTTP request enforces peer and hostname verification, disables redirects,
-uses bounded timeouts, streams the response, and aborts payload processing above
-8 MiB. Tokens, passwords, authorization headers, cookies, CSRF values, response
-bodies, and decrypted secrets are never included in stable failures.
+The shared native-client factory exclusively owns TLS trust. System CA and
+custom CA verify peer and hostname; the explicitly selected fingerprint mode
+instead requires the exact SHA-256 leaf digest and fails before transmitting
+HTTP headers on a mismatch. Backup requests cannot override this policy and no
+generic insecure mode exists. Every request disables redirects, uses bounded
+timeouts, streams the response, and aborts payload processing above 8 MiB.
+Tokens, passwords, authorization headers, cookies, CSRF values, response bodies,
+and decrypted secrets are never included in stable failures.
 
 ## Compatibility evidence
 
@@ -87,5 +91,5 @@ submission request, returned UPID, task-log page, and successful task-stop
 envelope. Contract tests prove the PVE 9 `maxfiles` absence, the strict payload
 allowlist, UPID identity matching, ordered task-log decoding, and null stop
 response. Unit tests separately prove the single-attempt write behavior,
-ambiguous outcomes, strict TLS options, failure typing, and current worker
-isolation.
+ambiguous outcomes, factory-owned TLS trust without request overrides, failure
+typing, and current worker isolation.

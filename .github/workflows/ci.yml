@@ -185,11 +185,11 @@ jobs:
       - name: Enforce critical 90 percent MSI
         run: XDEBUG_MODE=coverage sh tools/run-mutation.sh critical
 
-  mutation-full:
-    name: Scheduled Full Mutation Gates
+  mutation-foundation:
+    name: Mutation coverage foundation
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: backend
@@ -207,8 +207,128 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Enforce critical and global MSI
-        run: XDEBUG_MODE=coverage sh tools/run-mutation.sh all
+      - name: Generate the only scheduled coverage baseline and shard plan
+        run: XDEBUG_MODE=coverage sh tools/run-mutation.sh coverage
+
+      - name: Pack coverage foundation
+        run: tar -C var/mutation -czf foundation.tgz coverage plan
+
+      - name: Retain coverage foundation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-mutation-foundation
+          path: backend/foundation.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation-shard:
+    name: Mutation shard (${{ matrix.name }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: mutation-foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - critical-0
+          - critical-1
+          - critical-2
+          - global-rest-0
+          - global-rest-1
+          - global-rest-2
+          - global-rest-3
+          - global-rest-4
+          - global-rest-5
+          - global-rest-6
+          - global-rest-7
+          - global-rest-8
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # 2.36.0
+        with:
+          php-version: "8.5"
+          tools: composer:2.10.2
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Download coverage foundation
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-mutation-foundation
+          path: backend
+
+      - name: Restore coverage foundation
+        run: mkdir -p var/mutation && tar -xzf foundation.tgz -C var/mutation
+
+      - name: Execute disjoint mutation shard
+        env:
+          MUTATION_SHARD_NAME: ${{ matrix.name }}
+          REUSE_MUTATION_COVERAGE: "1"
+        run: sh tools/run-mutation.sh shard
+
+      - name: Retain raw mutation counters
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-mutation-shard-${{ matrix.name }}
+          path: backend/var/mutation/shards
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation-full:
+    name: Scheduled Full Mutation Gates
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs:
+      - mutation-foundation
+      - mutation-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Require all mutation shards
+        run: test "${{ needs.mutation-shard.result }}" = success
+
+      - name: Download coverage foundation
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-mutation-foundation
+          path: backend
+
+      - name: Restore shard plan
+        run: mkdir -p var/mutation && tar -xzf foundation.tgz -C var/mutation plan
+
+      - name: Download all disjoint shard reports
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: hoddmimir-mutation-shard-*
+          path: backend/var/mutation/shards
+          merge-multiple: true
+
+      - name: Enforce weighted critical and global MSI
+        run: php tools/mutation-shards.php aggregate var/mutation/plan var/mutation/shards var/mutation/aggregate.json
+
+      - name: Retain weighted mutation result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-mutation-result
+          path: backend/var/mutation/aggregate.json
+          if-no-files-found: error
+          retention-days: 30
 
   frontend:
     name: Frontend
@@ -266,8 +386,8 @@ jobs:
       - name: Run isolated browser acceptance suite
         run: make e2e
 
-  containers:
-    name: Containers and Compose
+  container-validation:
+    name: Container application validation
     needs:
       - backend
       - backend-integration
@@ -280,21 +400,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
-      - name: Install pinned QEMU emulation
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-        with:
-          image: tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
-          platforms: arm64
-
-      - name: Set up pinned Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-        with:
-          version: v0.35.0
-          driver-opts: |
-            image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
-          buildkitd-flags: --oci-worker-net bridge
-          cache-binary: false
 
       - name: Generate ephemeral development secrets
         run: ./scripts/init-dev-secrets.sh
@@ -355,14 +460,112 @@ jobs:
           curl --fail --silent --show-error http://localhost:8080/api/health
           docker compose ps
 
-      - name: Build production images for amd64 and arm64 without publishing
+  container-images:
+    name: Container ${{ matrix.artifact }} (${{ matrix.platform }})
+    needs:
+      - backend
+      - frontend
+      - secret-scan
+      - supply-chain-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: worker
+            platform: linux/amd64
+            platform_slug: linux-amd64
+          - artifact: worker
+            platform: linux/arm64
+            platform_slug: linux-arm64
+          - artifact: web
+            platform: linux/amd64
+            platform_slug: linux-amd64
+          - artifact: web
+            platform: linux/arm64
+            platform_slug: linux-arm64
+          - artifact: mariadb
+            platform: linux/amd64
+            platform_slug: linux-amd64
+          - artifact: mariadb
+            platform: linux/arm64
+            platform_slug: linux-arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Install pinned QEMU emulation
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          image: tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
+          platforms: arm64
+
+      - name: Set up pinned Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          version: v0.35.0
+          driver-opts: |
+            image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+          buildkitd-flags: --oci-worker-net bridge
+          cache-binary: false
+
+      - name: Build one production platform archive with a stable cache scope
+        env:
+          BUILDX_CACHE_SCOPE_PREFIX: container
+          CONTAINER_ARTIFACT: ${{ matrix.artifact }}
+          CONTAINER_PLATFORM: ${{ matrix.platform }}
         run: make container-multiarch
 
-      - name: Generate SBOMs and reject high or critical vulnerabilities
+      - name: Generate its SBOM and reject high or critical vulnerabilities
+        env:
+          CONTAINER_ARTIFACT: ${{ matrix.artifact }}
+          CONTAINER_PLATFORM: ${{ matrix.platform }}
         run: make container-security
 
-      - name: Retain CycloneDX SBOMs
+      - name: Retain platform CycloneDX SBOM
         if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-container-sbom-${{ matrix.artifact }}-${{ matrix.platform_slug }}
+          path: artifacts/supply-chain/sbom/${{ matrix.artifact }}-${{ matrix.platform_slug }}.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  containers:
+    name: Containers and Compose
+    if: always()
+    needs:
+      - container-validation
+      - container-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require validation and all platform scans
+        run: |
+          test "${{ needs.container-validation.result }}" = success
+          test "${{ needs.container-images.result }}" = success
+
+      - name: Download all six CycloneDX SBOMs
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: hoddmimir-container-sbom-*
+          path: artifacts/supply-chain/sbom
+          merge-multiple: true
+
+      - name: Verify the exact platform SBOM set
+        run: |
+          set -eu
+          actual=$(find artifacts/supply-chain/sbom -type f -name '*.cdx.json' -exec basename {} \; | sort)
+          expected=$(printf '%s\n' \
+            mariadb-linux-amd64.cdx.json mariadb-linux-arm64.cdx.json \
+            web-linux-amd64.cdx.json web-linux-arm64.cdx.json \
+            worker-linux-amd64.cdx.json worker-linux-arm64.cdx.json | sort)
+          test "$actual" = "$expected"
+          test "$(printf '%s\n' "$actual" | wc -l | tr -d ' ')" -eq 6
+
+      - name: Retain combined CycloneDX SBOM set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hoddmimir-container-sboms
@@ -370,8 +573,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  publish-images:
-    name: Publish worker and web manifests
+  publish-image:
+    name: Publish ${{ matrix.target }} manifest
     if: github.event_name == 'workflow_dispatch' && inputs.publish_images == true
     needs:
       - ansible
@@ -382,7 +585,15 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: worker
+            dockerfile: docker/php/Dockerfile
+          - target: web
+            dockerfile: docker/web/Dockerfile
     steps:
       - name: Validate explicit publication input
         env:
@@ -398,22 +609,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve immutable source identity and registry names
+      - name: Resolve immutable source identity and registry name
         id: identity
         env:
           REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -eu
           source_sha=$(git rev-parse --verify HEAD)
           repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          image_namespace="ghcr.io/$repository"
 
           {
             printf 'source_sha=%s\n' "$source_sha"
             printf 'source_ref=%s\n' "$GITHUB_REF"
             printf 'image_tag=%s\n' "$REQUESTED_IMAGE_TAG"
-            printf 'worker_image=%s/worker\n' "$image_namespace"
-            printf 'web_image=%s/web\n' "$image_namespace"
+            printf 'image=%s/%s\n' "ghcr.io/$repository" "$TARGET"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install pinned QEMU emulation
@@ -438,109 +648,154 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish worker manifest
-        id: worker
+      - name: Publish multiarch manifest
+        id: image
         env:
-          IMAGE: ${{ steps.identity.outputs.worker_image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
           SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -eu
-          metadata_file="$RUNNER_TEMP/worker-build-metadata.json"
+          metadata_file="$RUNNER_TEMP/$TARGET-build-metadata.json"
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --target worker \
-            --file docker/php/Dockerfile \
+            --target "$TARGET" \
+            --file "$DOCKERFILE" \
             --tag "$IMAGE:$IMAGE_TAG" \
             --label "org.opencontainers.image.revision=$SOURCE_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --provenance=mode=max \
             --sbom=true \
-            --cache-from type=gha,scope=publish-worker \
-            --cache-to type=gha,mode=max,scope=publish-worker \
+            --cache-from "type=gha,scope=container-$TARGET-linux-amd64" \
+            --cache-from "type=gha,scope=container-$TARGET-linux-arm64" \
+            --cache-from "type=gha,scope=publish-$TARGET-multiarch" \
+            --cache-to "type=gha,mode=max,scope=publish-$TARGET-multiarch" \
             --metadata-file "$metadata_file" \
             --push \
             .
           digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
-      - name: Publish web manifest
-        id: web
+      - name: Write immutable per-image reference
         env:
-          IMAGE: ${{ steps.identity.outputs.web_image }}
-          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
-          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
-        run: |
-          set -eu
-          metadata_file="$RUNNER_TEMP/web-build-metadata.json"
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --target web \
-            --file docker/web/Dockerfile \
-            --tag "$IMAGE:$IMAGE_TAG" \
-            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --provenance=mode=max \
-            --sbom=true \
-            --cache-from type=gha,scope=publish-web \
-            --cache-to type=gha,mode=max,scope=publish-web \
-            --metadata-file "$metadata_file" \
-            --push \
-            .
-          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Remove registry credentials before public pull proof
-        run: docker logout ghcr.io
-
-      - name: Prove both manifests are anonymously pullable
-        env:
-          WORKER_REFERENCE: ${{ steps.identity.outputs.worker_image }}@${{ steps.worker.outputs.digest }}
-          WEB_REFERENCE: ${{ steps.identity.outputs.web_image }}@${{ steps.web.outputs.digest }}
-        run: |
-          set -eu
-          anonymous_config=$(mktemp -d)
-          trap 'rm -rf "$anonymous_config"' EXIT HUP INT TERM
-          DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$WORKER_REFERENCE" >/dev/null
-          DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$WEB_REFERENCE" >/dev/null
-
-      - name: Write immutable deployment references
-        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
           SOURCE_REF: ${{ steps.identity.outputs.source_ref }}
           SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
-          WORKER_IMAGE: ${{ steps.identity.outputs.worker_image }}
-          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
-          WEB_IMAGE: ${{ steps.identity.outputs.web_image }}
-          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -eu
-          mkdir -p artifacts
+          mkdir -p artifacts/publication
           jq -n \
+            --arg target "$TARGET" \
             --arg imageTag "$IMAGE_TAG" \
+            --arg image "$IMAGE" \
             --arg sourceRef "$SOURCE_REF" \
             --arg sourceSha "$SOURCE_SHA" \
-            --arg workerTag "$WORKER_IMAGE:$IMAGE_TAG" \
-            --arg workerDigest "$WORKER_DIGEST" \
-            --arg workerReference "$WORKER_IMAGE@$WORKER_DIGEST" \
-            --arg webTag "$WEB_IMAGE:$IMAGE_TAG" \
-            --arg webDigest "$WEB_DIGEST" \
-            --arg webReference "$WEB_IMAGE@$WEB_DIGEST" \
+            --arg tag "$IMAGE:$IMAGE_TAG" \
+            --arg digest "$DIGEST" \
+            --arg reference "$IMAGE@$DIGEST" \
             '{
+              target: $target,
               imageTag: $imageTag,
+              image: $image,
               sourceRef: $sourceRef,
               sourceSha: $sourceSha,
-              images: {
-                worker: {tag: $workerTag, digest: $workerDigest, reference: $workerReference},
-                web: {tag: $webTag, digest: $webDigest, reference: $webReference}
+              tag: $tag,
+              digest: $digest,
+              reference: $reference
+            }' > "artifacts/publication/$TARGET.json"
+
+      - name: Retain immutable per-image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-published-image-${{ matrix.target }}
+          path: artifacts/publication/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove registry credentials from the runner
+        if: always()
+        run: docker logout ghcr.io || true
+
+  publish-images:
+    name: Publish worker and web manifests
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_images == true
+    needs: publish-image
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require both parallel publish builds
+        run: test "${{ needs.publish-image.result }}" = success
+
+      - name: Download both immutable per-image references
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: hoddmimir-published-image-*
+          path: artifacts/publication
+          merge-multiple: true
+
+      - name: Set up pinned Buildx for anonymous manifest proof
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          version: v0.35.0
+          driver-opts: |
+            image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+          buildkitd-flags: --oci-worker-net bridge
+          cache-binary: false
+
+      - name: Validate, prove, and combine exactly both manifests
+        env:
+          EXPECTED_IMAGE_TAG: ${{ inputs.image_tag }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SOURCE_REF: ${{ github.ref }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(find artifacts/publication -type f -name '*.json' | wc -l | tr -d ' ')" -eq 2
+          jq -s -e '
+            length == 2
+            and ([.[].target] | sort) == ["web", "worker"]
+            and all(.[]; .imageTag == env.EXPECTED_IMAGE_TAG)
+            and all(.[]; .sourceRef == env.EXPECTED_SOURCE_REF)
+            and all(.[]; .sourceSha == env.EXPECTED_SOURCE_SHA)
+            and all(.[]; .image == ("ghcr.io/" + (env.EXPECTED_REPOSITORY | ascii_downcase) + "/" + .target))
+            and all(.[]; .digest | test("^sha256:[0-9a-f]{64}$"))
+            and all(.[]; .tag == (.image + ":" + .imageTag))
+            and all(.[]; .reference == (.image + "@" + .digest))
+          ' artifacts/publication/*.json >/dev/null
+
+          anonymous_config=$(mktemp -d)
+          trap 'rm -rf "$anonymous_config"' EXIT HUP INT TERM
+          for reference in $(jq -r '.reference' artifacts/publication/*.json); do
+            DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$reference" >/dev/null
+          done
+
+          jq -s '
+            sort_by(.target) as $items
+            | {
+                imageTag: $items[0].imageTag,
+                sourceRef: $items[0].sourceRef,
+                sourceSha: $items[0].sourceSha,
+                images: reduce $items[] as $image ({};
+                  .[$image.target] = {
+                    tag: $image.tag,
+                    digest: $image.digest,
+                    reference: $image.reference
+                  })
               }
-            }' > artifacts/published-images.json
+          ' artifacts/publication/*.json > artifacts/published-images.json
 
       - name: Retain immutable deployment references
         id: references
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: hoddmimir-published-images-${{ steps.identity.outputs.image_tag }}
+          name: hoddmimir-published-images-${{ inputs.image_tag }}
           path: artifacts/published-images.json
           if-no-files-found: error
           retention-days: 90
@@ -548,13 +803,15 @@ jobs:
       - name: Summarize published manifests
         env:
           ARTIFACT_DIGEST: ${{ steps.references.outputs.artifact-digest }}
-          IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
-          SOURCE_REF: ${{ steps.identity.outputs.source_ref }}
-          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
-          WORKER_REFERENCE: ${{ steps.identity.outputs.worker_image }}@${{ steps.worker.outputs.digest }}
-          WEB_REFERENCE: ${{ steps.identity.outputs.web_image }}@${{ steps.web.outputs.digest }}
         run: |
           set -eu
+          IMAGE_TAG=$(jq -r '.imageTag' artifacts/published-images.json)
+          SOURCE_REF=$(jq -r '.sourceRef' artifacts/published-images.json)
+          SOURCE_SHA=$(jq -r '.sourceSha' artifacts/published-images.json)
+          WORKER_REFERENCE=$(jq -r '.images.worker.reference' artifacts/published-images.json)
+          WEB_REFERENCE=$(jq -r '.images.web.reference' artifacts/published-images.json)
+          # Markdown backticks are intentionally literal.
+          # shellcheck disable=SC2016
           {
             printf '## Published Hoddmímir images\n\n'
             printf -- '- Source ref: `%s`\n' "$SOURCE_REF"
@@ -565,7 +822,3 @@ jobs:
             printf -- '- Digest artifact SHA-256: `%s`\n' "$ARTIFACT_DIGEST"
             printf '\nUse only the `@sha256:` references for deployment.\n'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove registry credentials from the runner
-        if: always()
-        run: docker logout ghcr.io || true

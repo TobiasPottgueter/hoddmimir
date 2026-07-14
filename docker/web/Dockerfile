@@ -34,6 +34,8 @@ FROM ${FRANKENPHP_IMAGE} AS web-runtime
 
 ARG ICU_VERSION=78.1-r0
 ARG C_ARES_VERSION=1.34.8-r0
+ARG CURL_VERSION=8.21.0-r0
+ARG LIBCURL_VERSION=8.21.0-r0
 ARG AUTOCONF_VERSION=2.73-r0
 ARG DPKG_DEV_VERSION=1.23.7-r0
 ARG DPKG_VERSION=1.23.7-r0
@@ -55,7 +57,9 @@ ENV APP_ENV=prod \
 
 RUN apk add --no-cache \
         "c-ares=${C_ARES_VERSION}" \
+        "curl=${CURL_VERSION}" \
         "icu-libs=${ICU_VERSION}" \
+        "libcurl=${LIBCURL_VERSION}" \
         "su-exec=${SU_EXEC_VERSION}" \
     && apk add --no-cache --virtual .php-ext-build-deps \
         "autoconf=${AUTOCONF_VERSION}" \

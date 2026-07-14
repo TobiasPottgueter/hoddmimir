@@ -42,8 +42,11 @@ Infrastructure DTO and is decrypted only inside the authorization callback.
 Every physical HTTP attempt, including a retry, checkpoints the active
 collector lease before I/O and again in `finally` after the secret callback has
 closed. A checkpoint exception propagates unchanged and is never retried.
-Peer and hostname verification remain enabled for system CA, custom CA and
-SHA-256 fingerprint modes.
+System CA and custom CA modes verify the peer chain and hostname. Only the
+exclusive SHA-256 fingerprint mode replaces both checks with an exact leaf
+certificate digest; a mismatch fails before HTTP headers are transmitted. No
+generic insecure mode exists, and request transports cannot override the
+factory-owned trust mode.
 
 ## Authority and persistence
 

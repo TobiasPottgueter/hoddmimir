@@ -43,8 +43,14 @@ final readonly class PveNativeHttpClientFactory implements PveHttpClientFactory
             return $options + ['cafile' => $caFile];
         }
 
-        return $options + [
+        // Fingerprint pinning is an exclusive trust mode. The exact leaf
+        // certificate digest replaces CA-chain and hostname trust, while the
+        // TLS handshake still fails closed before HTTP headers are sent when
+        // the presented certificate does not match the configured pin.
+        return array_replace($options, [
+            'verify_peer' => false,
+            'verify_host' => false,
             'peer_fingerprint' => ['sha256' => $certificateFingerprint->sha256],
-        ];
+        ]);
     }
 }

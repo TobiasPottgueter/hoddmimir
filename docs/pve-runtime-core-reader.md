@@ -75,7 +75,12 @@ Die drei Datenbankmodi werden vollständig und exklusiv abgebildet:
 - `sha256_fingerprint`: exakt 32 Binärbytes, keine CA-Spalte.
 
 Der Schema-Constraint begrenzt `custom_ca_pem` zusätzlich auf 262.144 Bytes.
-Der Native-Client erzwingt immer Peer- und Hostprüfung und verbietet Redirects.
+Der Native-Client prüft in den CA-Modi Peer und Host. Im exklusiven
+Fingerprint-Modus ist stattdessen der exakte SHA-256-Leaf-Digest der
+Vertrauensanker; ein falscher Pin bricht vor der Übertragung von HTTP-Headern
+ab. Es gibt keinen generischen `insecure`-Modus. Redirects sind immer
+verboten, und nur die Native-Client-Factory setzt die Trust-Optionen; einzelne
+Requests dürfen sie nicht überschreiben.
 Ein typisierter Initialisierungs- oder Materialisierungsfehler wird als `tls`
 gemeldet. Ein TLS-Handshakefehler des Symfony-Native-Transports bleibt ehrlich
 `transport`: Eine vermeintliche TLS-Erkennung anhand veränderlicher Exception-

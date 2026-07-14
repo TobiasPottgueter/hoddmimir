@@ -320,8 +320,6 @@ final class FixturePveHttpClientFactory implements PveHttpClientFactory
     {
         return new MockHttpClient(function (string $method, string $url, array $options): MockResponse {
             TestCase::assertSame('GET', $method);
-            TestCase::assertTrue($options['verify_peer']);
-            TestCase::assertTrue($options['verify_host']);
             TestCase::assertSame(0, $options['max_redirects']);
             $headers = $options['normalized_headers'] ?? [];
             TestCase::assertIsArray($headers);

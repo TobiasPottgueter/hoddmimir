@@ -38,13 +38,13 @@ use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
 final class PveBackupHttpTransportTest extends TestCase
 {
-    public function testGetUsesStrictTlsBoundedOptionsAndSecretScopedAuthorization(): void
+    public function testGetDelegatesTlsTrustAndUsesBoundedSecretScopedRequestOptions(): void
     {
         $seen = null;
-        $http = new MockHttpClient(static function (string $method, string $url, array $options) use (&$seen): MockResponse {
+        $http = new BackupRawOptionRecordingHttpClient(new MockHttpClient(static function (string $method, string $url, array $options) use (&$seen): MockResponse {
             $seen = [$method, $url, $options];
             return new MockResponse('{"data":{"ok":true}}', ['http_code' => 200]);
-        });
+        }));
 
         $result = $this->transport($http)->get(['nodes', 'pve-a', 'tasks'], ['limit' => 1]);
 
@@ -53,12 +53,15 @@ final class PveBackupHttpTransportTest extends TestCase
         self::assertIsArray($seen);
         self::assertSame('GET', $seen[0]);
         self::assertSame('https://pve.test:8006/api2/json/nodes/pve-a/tasks?limit=1', $seen[1]);
-        self::assertTrue($seen[2]['verify_peer']);
-        self::assertTrue($seen[2]['verify_host']);
         self::assertSame(0, $seen[2]['max_redirects']);
         self::assertFalse($seen[2]['buffer']);
         self::assertSame(30.0, $seen[2]['timeout']);
         self::assertStringContainsString('PVEAPIToken=', serialize($seen[2]['normalized_headers']));
+        self::assertCount(1, $http->requests);
+        self::assertArrayNotHasKey('verify_peer', $http->requests[0]);
+        self::assertArrayNotHasKey('verify_host', $http->requests[0]);
+        self::assertArrayNotHasKey('peer_fingerprint', $http->requests[0]);
+        self::assertArrayNotHasKey('cafile', $http->requests[0]);
     }
 
     public function testGetRetriesTransportAndRetryableStatusThenSucceeds(): void
@@ -151,13 +154,13 @@ final class PveBackupHttpTransportTest extends TestCase
         );
     }
 
-    public function testPostUsesExactlyOnePhysicalAttemptAndReturnsTypedResponse(): void
+    public function testPostDelegatesTlsTrustUsesExactlyOnePhysicalAttemptAndReturnsTypedResponse(): void
     {
         $seen = null;
-        $http = new MockHttpClient(static function (string $method, string $url, array $options) use (&$seen): MockResponse {
+        $http = new BackupRawOptionRecordingHttpClient(new MockHttpClient(static function (string $method, string $url, array $options) use (&$seen): MockResponse {
             $seen = [$method, $url, $options];
             return new MockResponse('{"data":"UPID:pve-a:0000002A:000F4240:67000000:vzdump:101:backup@pve:"}');
-        });
+        }));
         $result = $this->transport($http)->post(
             ['nodes', 'pve-a', 'vzdump'],
             ['vmid' => 101, 'storage' => 'backup-store'],
@@ -165,13 +168,16 @@ final class PveBackupHttpTransportTest extends TestCase
 
         self::assertSame(PveBackupWriteTransportStatus::Responded, $result->status);
         self::assertIsString($result->decodedData());
-        self::assertSame(1, $http->getRequestsCount());
+        self::assertSame(1, $http->requestsCount());
         self::assertIsArray($seen);
         self::assertSame('POST', $seen[0]);
         self::assertSame(60.0, $seen[2]['timeout']);
         self::assertSame('vmid=101&storage=backup-store', $seen[2]['body']);
-        self::assertTrue($seen[2]['verify_peer']);
-        self::assertTrue($seen[2]['verify_host']);
+        self::assertCount(1, $http->requests);
+        self::assertArrayNotHasKey('verify_peer', $http->requests[0]);
+        self::assertArrayNotHasKey('verify_host', $http->requests[0]);
+        self::assertArrayNotHasKey('peer_fingerprint', $http->requests[0]);
+        self::assertArrayNotHasKey('cafile', $http->requests[0]);
     }
 
     public function testPostTransportFailureIsAmbiguousAndIsNeverRetried(): void
@@ -412,6 +418,44 @@ final readonly class BackupInlineAuthenticator implements PveRequestAuthenticato
     public function authorize(callable $request): mixed
     {
         return $request('PVEAPIToken=backup@pve!hoddmimir=TOKEN-SENTINEL');
+    }
+}
+
+/** @internal */
+final class BackupRawOptionRecordingHttpClient implements HttpClientInterface
+{
+    /** @var list<array<string, mixed>> */
+    public array $requests = [];
+
+    public function __construct(private HttpClientInterface $inner)
+    {
+    }
+
+    /** @param array<string, mixed> $options */
+    public function request(string $method, string $url, array $options = []): ResponseInterface
+    {
+        $this->requests[] = $options;
+
+        return $this->inner->request($method, $url, $options);
+    }
+
+    public function stream(ResponseInterface|iterable $responses, ?float $timeout = null): ResponseStreamInterface
+    {
+        return $this->inner->stream($responses, $timeout);
+    }
+
+    /** @param array<string, mixed> $options */
+    public function withOptions(array $options): static
+    {
+        $clone = clone $this;
+        $clone->inner = $this->inner->withOptions($options);
+
+        return $clone;
+    }
+
+    public function requestsCount(): int
+    {
+        return $this->inner instanceof MockHttpClient ? $this->inner->getRequestsCount() : count($this->requests);
     }
 }
 
