@@ -65,8 +65,12 @@ SELECT request.*, connection.enabled AS connection_enabled,
        target.status AS target_status, target.revision AS current_target_revision,
        target.display_name AS target_label, target.minimum_free_bytes, target.fixed_parallel_limit,
        target.pbs_connection_id,
+       (SELECT capability.version_major FROM proxmox_capability_snapshots capability
+         WHERE capability.connection_id = request.connection_id AND capability.product = 'pve'
+         ORDER BY capability.last_observed_at DESC, capability.id DESC LIMIT 1) AS current_pve_major,
        allowed.node_id AS allowed_node_id,
-       storage.id AS storage_id, storage.storage_name, storage.supports_backup,
+       storage.id AS storage_id, storage.storage_name, storage.storage_type AS target_storage_type,
+       storage.supports_backup,
        storage.disabled AS storage_disabled, storage.inventory_state AS storage_state,
        storage.last_seen_at AS storage_seen,
        node_storage.enabled AS storage_enabled, node_storage.active AS storage_active,
@@ -322,15 +326,17 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
             || $this->integer($row['placement_revision'] ?? null) !== $this->integer($row['current_placement_revision'] ?? null)
             || $this->integer($row['policy_revision'] ?? null) !== $this->integer($row['current_policy_revision'] ?? null)
             || $this->integer($row['target_revision'] ?? null) !== $this->integer($row['current_target_revision'] ?? null)) return 'snapshot_revision_changed';
+        $retentionBlocker = $this->retentionCompatibilityBlocker($row);
+        if (null !== $retentionBlocker) return $retentionBlocker;
         foreach (['cluster_seen','guest_seen','placement_seen','node_seen','storage_seen','capacity_seen','executor_seen'] as $field) {
             if (!$this->freshAt($row[$field] ?? null, $now)) return $field.'_stale';
         }
-        if (null !== ($row['pbs_connection_id'] ?? null)
-            && (1 !== $this->integer($row['pbs_connection_enabled'] ?? null)
-                || 1 !== $this->integer($row['pbs_writes'] ?? null)
+        if ('pbs' === ($row['target_storage_type'] ?? null)
+            && (!$this->enabledFlag($row['pbs_connection_enabled'] ?? null)
+                || !$this->enabledFlag($row['pbs_writes'] ?? null)
                 || 'active' !== ($row['pbs_state'] ?? null)
                 || 'datastore_filesystem' !== ($row['pbs_capacity_semantics'] ?? null)
-                || 1 !== $this->integer($row['pbs_mapping_valid'] ?? null)
+                || !$this->enabledFlag($row['pbs_mapping_valid'] ?? null)
                 || null === $this->decimal($row['pbs_available_bytes'] ?? null)
                 || !$this->freshAt($row['pbs_capacity_seen'] ?? null, $now)
                 || !$this->freshAt($row['pbs_mapping_seen'] ?? null, $now)
@@ -338,6 +344,44 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
             return 'pbs_evidence_invalid';
         }
         return null;
+    }
+
+    private function enabledFlag(mixed $value): bool
+    {
+        return 1 === $value || '1' === $value;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function retentionCompatibilityBlocker(array $row): ?string
+    {
+        $pveMajor = $row['current_pve_major'] ?? null;
+        if ((!is_int($pveMajor) && !is_string($pveMajor)) || !ctype_digit((string) $pveMajor)
+            || (int) $pveMajor < 7 || (int) $pveMajor > 9) {
+            return 'pve_evidence_invalid';
+        }
+        $raw = $row['resolved_policy_json'] ?? null;
+        $hash = $row['resolved_policy_hash'] ?? null;
+        if (!is_string($raw) || !is_string($hash) || 32 !== strlen($hash)
+            || !hash_equals(hash('sha256', $raw, true), $hash)) {
+            return 'policy_snapshot_invalid';
+        }
+        try {
+            $policy = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return 'policy_snapshot_invalid';
+        }
+        if (!is_array($policy)) return 'policy_snapshot_invalid';
+        if (9 === (int) $pveMajor
+            && ($this->legacyRetention($policy['desiredRetention'] ?? null)
+                || $this->legacyRetention($policy['approvedDeletionRetention'] ?? null))) {
+            return 'retention_incompatible';
+        }
+        return null;
+    }
+
+    private function legacyRetention(mixed $retention): bool
+    {
+        return is_array($retention) && array_key_exists('maxfiles', $retention);
     }
 
     /** @param array<string,mixed> $row */
@@ -360,7 +404,7 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
         }
         $reserved = $this->decimal($db->fetchOne('SELECT COALESCE(SUM(reserved_bytes),0) FROM backup_capacity_reservations WHERE target_id=:target AND released_at IS NULL', ['target' => $this->binary($row['target_id'] ?? null)]));
         $available = $this->decimal($row['available_bytes'] ?? null);
-        if (null !== ($row['pbs_connection_id'] ?? null)) {
+        if ('pbs' === ($row['target_storage_type'] ?? null)) {
             $pbs = $this->decimal($row['pbs_available_bytes'] ?? null);
             if (null === $pbs) return 'pbs_evidence_invalid';
             if (null === $available || 1 === $this->integer($db->fetchOne('SELECT CAST(:pbs AS DECIMAL(65,0)) < CAST(:pve AS DECIMAL(65,0))', ['pbs' => $pbs, 'pve' => $available]))) {
@@ -392,7 +436,12 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
         // Retention parameters are deletion-capable PVE controls. Desired
         // retention remains in the immutable policy snapshot for planning and
         // display, but only an explicit deletion approval may reach vzdump.
-        $retention = $policy['approvedDeletionRetention'] ?? null;
+        // A PVE PBS storage delegates pruning to PBS. Revalidate the current
+        // storage type here so a missing/corrupt PBS mapping or stale legacy
+        // snapshot can never turn into deletion-capable vzdump parameters.
+        $retention = 'pbs' !== ($row['target_storage_type'] ?? null)
+            ? ($policy['approvedDeletionRetention'] ?? null)
+            : null;
         $legacy = null; $prune = null;
         if (is_array($retention) && isset($retention['maxfiles']) && is_int($retention['maxfiles'])) $legacy = $retention['maxfiles'];
         elseif (is_array($retention) && is_array($retention['prune-backups'] ?? null)) {

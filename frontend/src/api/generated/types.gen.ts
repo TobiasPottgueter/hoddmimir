@@ -1034,7 +1034,9 @@ export type ConfiguredBackupTargetPage = {
 export type PolicyStatus = "draft" | "enabled" | "disabled";
 
 export type PolicyBlockerCode =
-  "configuration_incomplete" | "executor_evidence_missing";
+  | "configuration_incomplete"
+  | "executor_evidence_missing"
+  | "retention_execution_forbidden_for_pbs_target";
 
 export type PolicyRetention = {
   legacyMaxFiles: number | null;
@@ -1112,6 +1114,7 @@ export type ShadowGateCode =
   | "node_enabled"
   | "guest_enabled"
   | "policy_enabled"
+  | "policy_retention_compatible"
   | "target_enabled"
   | "explicit_exclusion_absent"
   | "guest_active"
@@ -1158,6 +1161,7 @@ export type ShadowGateDetailCode =
   | "insufficient_free_space"
   | "concurrency_limit_reached"
   | "invalid_mapping"
+  | "incompatible"
   | "active_request_exists";
 
 export type ShadowEvaluation = {

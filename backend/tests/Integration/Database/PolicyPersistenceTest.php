@@ -179,6 +179,40 @@ final class PolicyPersistenceTest extends DatabaseTestCase
         self::assertSame('guest_override', $continued->items[0]->kind);
     }
 
+    public function testReadModelSuppressesRetentionExecutionAndExposesBlockerAfterTargetDriftsToPbs(): void
+    {
+        $context = $this->seedContext();
+        $this->connection()->insert('backup_policies', $this->policyRow($context, $context['policy'], [
+            'target_id' => $context['target'],
+            'display_name' => 'Drifted PBS policy',
+            'status' => 'enabled',
+            'policy_priority' => 500,
+            'backup_mode' => 'snapshot',
+            'compression' => 'zstd',
+            'maximum_age_seconds' => 3600,
+            'schedule' => 'collector_cycle',
+            'keep_last' => 2,
+            'retention_execution_enabled' => 1,
+        ]));
+        $this->connection()->update('pve_storages', ['storage_type' => 'pbs'], ['id' => $context['storage']]);
+
+        $page = (new DbalPolicyReadModel($this->connection()))->policies(
+            new PolicyListQuery(new PageRequest(10), null, 'enabled'),
+        );
+
+        self::assertCount(1, $page->items);
+        self::assertFalse($page->items[0]->retentionExecutionEnabled);
+        self::assertSame(
+            ['retention_execution_forbidden_for_pbs_target'],
+            array_column($page->items[0]->blockers, 'value'),
+        );
+        self::assertFalse($page->items[0]->toArray()['retentionExecutionEnabled']);
+        self::assertSame(
+            ['retention_execution_forbidden_for_pbs_target'],
+            $page->items[0]->toArray()['blockers'],
+        );
+    }
+
     /** @param array<string, string> $context
      *  @param array<string, mixed> $override
      *  @return array<string, mixed>
@@ -263,7 +297,7 @@ final class PolicyPersistenceTest extends DatabaseTestCase
             'cluster' => random_bytes(16), 'cluster_b' => random_bytes(16),
             'guest' => random_bytes(16), 'guest_b' => random_bytes(16),
             'policy' => random_bytes(16), 'evaluation_run' => random_bytes(16),
-            'target' => random_bytes(16),
+            'target' => random_bytes(16), 'storage' => random_bytes(16),
         ];
         $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
         try {
@@ -296,9 +330,18 @@ final class PolicyPersistenceTest extends DatabaseTestCase
                 'payload_hash' => random_bytes(32), 'decision_count' => 1, 'gate_count' => 2,
                 'started_at' => self::NOW, 'completed_at' => self::NOW, 'persisted_at' => self::NOW,
             ]);
+            $this->connection()->insert('pve_storages', [
+                'id' => $context['storage'], 'connection_id' => $context['connection'],
+                'cluster_id' => $context['cluster'], 'storage_name' => 'local-backup',
+                'storage_type' => 'dir', 'supports_backup' => 1, 'shared' => 0,
+                'disabled' => 0, 'content_json' => '["backup"]',
+                'inventory_state' => 'active', 'first_seen_run_id' => random_bytes(16),
+                'last_seen_run_id' => random_bytes(16), 'first_seen_at' => self::NOW,
+                'last_seen_at' => self::NOW, 'archived_at' => null,
+            ]);
             $this->connection()->insert('backup_targets', [
                 'id' => $context['target'], 'connection_id' => $context['connection'],
-                'cluster_id' => $context['cluster'], 'storage_id' => random_bytes(16),
+                'cluster_id' => $context['cluster'], 'storage_id' => $context['storage'],
                 'display_name' => 'Target', 'status' => 'disabled', 'revision' => 1,
                 'minimum_free_bytes' => null, 'created_at' => self::NOW,
                 'updated_at' => self::NOW, 'disabled_at' => self::NOW,

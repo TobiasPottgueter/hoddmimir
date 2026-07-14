@@ -229,6 +229,67 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         self::assertCount(2, $source->candidates($this->shadowLease()), 'EXISTS must not duplicate candidates.');
     }
 
+    public function testAutomaticShadowSourceNeverApprovesDeletionRetentionForPbsStorageWithoutMapping(): void
+    {
+        $source = new DbalAutomaticShadowEvaluationSource($this->connection());
+        $this->connection()->update('backup_policies', [
+            'retention_execution_enabled' => 0,
+        ], ['id' => self::id('policy')]);
+        $withoutApproval = $this->shadowCandidate($source)->policySnapshotHash;
+
+        $this->connection()->update('backup_policies', [
+            'retention_execution_enabled' => 1,
+        ], ['id' => self::id('policy')]);
+        $nonPbsApproval = $this->shadowCandidate($source)->policySnapshotHash;
+        self::assertNotSame($withoutApproval, $nonPbsApproval);
+
+        $this->connection()->update('pve_storages', [
+            'storage_type' => 'pbs',
+        ], ['id' => self::id('storage')]);
+        self::assertNull($this->connection()->fetchOne(
+            'SELECT pbs_connection_id FROM backup_targets WHERE id = :id',
+            ['id' => self::id('target')],
+        ));
+        $pbsWithoutMapping = $this->shadowCandidate($source);
+        self::assertSame($withoutApproval, $pbsWithoutMapping->policySnapshotHash);
+        self::assertFalse($pbsWithoutMapping->pbsMappingValid);
+        self::assertNull($pbsWithoutMapping->availableBytes);
+        self::assertNull($pbsWithoutMapping->capacityObservedAt);
+        self::assertNull($pbsWithoutMapping->pbsObservedAt);
+    }
+
+    public function testAutomaticShadowSourceBlocksPveNineLegacyPolicyAndGuestOverrideDrift(): void
+    {
+        $this->connection()->update('proxmox_capability_snapshots', [
+            'version_major' => 9,
+            'raw_version' => '9.0.0',
+        ], ['connection_id' => self::id('connection')]);
+        $source = new DbalAutomaticShadowEvaluationSource($this->connection());
+        $this->connection()->update('backup_policies', [
+            'legacy_maxfiles' => 7,
+            'keep_last' => null,
+        ], ['id' => self::id('policy')]);
+        self::assertFalse($this->shadowCandidate($source)->policyRetentionCompatible);
+
+        $this->connection()->update('backup_policies', [
+            'legacy_maxfiles' => null,
+            'keep_last' => 1,
+        ], ['id' => self::id('policy')]);
+        $this->connection()->insert('backup_policy_guest_overrides', [
+            'id' => self::id('legacy-override'),
+            'policy_id' => self::id('policy'),
+            'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'),
+            'guest_id' => self::id('guest'),
+            'legacy_maxfiles' => 3,
+            'status' => 'active',
+            'revision' => 1,
+            'created_at' => self::format($this->now),
+            'updated_at' => self::format($this->now),
+        ]);
+        self::assertFalse($this->shadowCandidate($source)->policyRetentionCompatible);
+    }
+
     public function testStaleRevalidationDefersWithoutLeakingResources(): void
     {
         $store = $this->store();
@@ -487,6 +548,98 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         self::assertNotNull($prepared->payload->pruneBackups);
         self::assertSame(3, $prepared->payload->pruneBackups->keepLast);
         self::assertSame(7, $prepared->payload->pruneBackups->keepDaily);
+    }
+
+    public function testPreSubmitBlocksCurrentPbsStorageWithoutMappingBeforePayloadConstruction(): void
+    {
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":[]}';
+        $store = $this->store();
+        $store->promote(new ShadowPromotion(
+            self::id('request-pbs-race'), self::id('decision-a'), $this->now,
+            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
+        self::assertNotNull($claim);
+        $this->seedBackupCredential();
+        $this->connection()->update('backup_requests', [
+            'resolved_policy_json' => $policy,
+            'resolved_policy_hash' => hash('sha256', $policy, true),
+        ], ['id' => $claim->id]);
+        $this->connection()->update('pve_storages', [
+            'storage_type' => 'pbs',
+        ], ['id' => self::id('storage')]);
+        $submission = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
+        $prepared = $submission->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
+            $claim->id,
+            self::id('pbs-race-run'),
+            $claim->claimToken,
+            $claim->claimFence,
+            $this->now,
+        ));
+
+        self::assertSame(SubmissionPreparationStatus::Blocked, $prepared->status);
+        self::assertSame('pbs_evidence_invalid', $prepared->blockerCode);
+        self::assertNull($prepared->submission);
+        $this->assertPreSubmitBlockerPersisted(
+            $claim->id,
+            'pbs_evidence_invalid',
+            $claim->claimFence,
+        );
+    }
+
+    public function testPreSubmitBlocksQueuedLegacySnapshotAfterPveEightToNineUpgrade(): void
+    {
+        $this->connection()->update('proxmox_capability_snapshots', [
+            'version_major' => 8,
+            'raw_version' => '8.4.0',
+        ], ['connection_id' => self::id('connection')]);
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":{"maxfiles":7},"failureNotificationRecipients":[]}';
+        $store = $this->store();
+        $store->promote(new ShadowPromotion(
+            self::id('request-pve-upgrade'), self::id('decision-a'), $this->now,
+            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
+        self::assertNotNull($claim);
+        $this->seedBackupCredential();
+        $this->connection()->update('backup_requests', [
+            'resolved_policy_json' => $policy,
+            'resolved_policy_hash' => hash('sha256', $policy, true),
+        ], ['id' => $claim->id]);
+        $this->connection()->update('proxmox_capability_snapshots', [
+            'version_major' => 9,
+            'raw_version' => '9.0.0',
+            'last_observed_at' => self::format($this->now->modify('+1 second')),
+        ], ['connection_id' => self::id('connection')]);
+
+        $submission = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
+        $prepared = $submission->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
+            $claim->id,
+            self::id('pve-upgrade-run'),
+            $claim->claimToken,
+            $claim->claimFence,
+            $this->now,
+        ));
+
+        self::assertSame(SubmissionPreparationStatus::Blocked, $prepared->status);
+        self::assertSame('retention_incompatible', $prepared->blockerCode);
+        self::assertNull($prepared->submission);
+        $this->assertPreSubmitBlockerPersisted(
+            $claim->id,
+            'retention_incompatible',
+            $claim->claimFence,
+        );
+    }
+
+    public function testPreparedSubmissionSuppressesApprovedDeletionRetentionForValidPbsMapping(): void
+    {
+        $this->seedPbsShadowEvidence();
+        $prepared = $this->prepareSubmissionForPolicy(
+            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":[]}',
+        );
+
+        self::assertNull($prepared->payload->legacyMaxFiles);
+        self::assertNull($prepared->payload->pruneBackups);
     }
 
     public function testPreSubmitFreshnessAcceptsTheExactMicrosecondBoundary(): void
@@ -1093,6 +1246,9 @@ SQL, ['guest' => self::id('guest')]);
         $this->connection()->update('backup_targets', [
             'pbs_connection_id' => $connection, 'pbs_datastore_id' => $datastore,
         ], ['id' => self::id('target')]);
+        $this->connection()->update('pve_storages', [
+            'storage_type' => 'pbs',
+        ], ['id' => self::id('storage')]);
     }
 
     private function seedBackupCredential(): void
@@ -1105,6 +1261,97 @@ SQL, ['guest' => self::id('guest')]);
             'envelope_version' => 1, 'key_id' => 'test-key', 'revision' => 1,
             'created_at' => $now, 'updated_at' => $now,
         ]);
+    }
+
+    private function assertPreSubmitBlockerPersisted(
+        string $requestId,
+        string $blockerCode,
+        int $claimFence,
+    ): void {
+        $request = $this->connection()->fetchAssociative(<<<'SQL'
+SELECT state, available_at, attempt, origin, claim_token, claim_fence,
+       lease_owner, lease_issued_at, lease_expires_at, run_id,
+       terminal_code, terminal_at, retry_disposition, submission_provenance,
+       updated_at
+FROM backup_requests
+WHERE id = :id
+SQL, ['id' => $requestId]);
+        self::assertIsArray($request);
+        self::assertSame('retry_wait', $request['state']);
+        self::assertSame(self::format($this->now->modify('+120 seconds')), $request['available_at']);
+        self::assertSame('1', $this->numeric($request['attempt']));
+        self::assertSame('automatic', $request['origin']);
+        self::assertNull($request['claim_token']);
+        self::assertSame((string) $claimFence, $this->numeric($request['claim_fence']));
+        self::assertNull($request['lease_owner']);
+        self::assertNull($request['lease_issued_at']);
+        self::assertNull($request['lease_expires_at']);
+        self::assertNull($request['run_id']);
+        self::assertNull($request['terminal_code']);
+        self::assertNull($request['terminal_at']);
+        self::assertSame('not_applicable', $request['retry_disposition']);
+        self::assertSame('not_submitted', $request['submission_provenance']);
+        self::assertSame(self::format($this->now), $request['updated_at']);
+        self::assertSame('1', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_requests WHERE root_request_id = :id',
+            ['id' => $requestId],
+        )), 'A pre-submit blocker reschedules the same request instead of creating a retry attempt.');
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_requests WHERE root_request_id = :id AND attempt > 1',
+            ['id' => $requestId],
+        )));
+
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT slots_used FROM backup_node_slots WHERE node_id = :id',
+            ['id' => self::id('node')],
+        )));
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT slots_used FROM backup_target_slots WHERE target_id = :id',
+            ['id' => self::id('target')],
+        )));
+        $reservation = $this->connection()->fetchAssociative(<<<'SQL'
+SELECT reserved_bytes, released_at
+FROM backup_capacity_reservations
+WHERE request_id = :id
+SQL, ['id' => $requestId]);
+        self::assertIsArray($reservation);
+        self::assertSame('1000', $this->numeric($reservation['reserved_bytes']));
+        self::assertSame(self::format($this->now), $reservation['released_at']);
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_capacity_reservations WHERE request_id = :id AND released_at IS NULL',
+            ['id' => $requestId],
+        )));
+
+        $event = $this->connection()->fetchAssociative(<<<'SQL'
+SELECT event_type, state, claim_fence, occurred_at, detail_code
+FROM backup_request_events
+WHERE request_id = :id
+ORDER BY sequence_no DESC
+LIMIT 1
+SQL, ['id' => $requestId]);
+        self::assertIsArray($event);
+        self::assertSame('pre_submit_blocked', $event['event_type']);
+        self::assertSame('retry_wait', $event['state']);
+        self::assertSame((string) $claimFence, $this->numeric($event['claim_fence']));
+        self::assertSame(self::format($this->now), $event['occurred_at']);
+        self::assertSame($blockerCode, $event['detail_code']);
+        self::assertSame('1', $this->numeric($this->connection()->fetchOne(
+            "SELECT COUNT(*) FROM backup_request_events WHERE request_id = :id AND event_type = 'pre_submit_blocked'",
+            ['id' => $requestId],
+        )));
+
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_runs WHERE request_id = :id',
+            ['id' => $requestId],
+        )));
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_problem_states WHERE root_request_id = :id',
+            ['id' => $requestId],
+        )), 'An operational pre-submit deferral must not open a durable backup problem.');
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_notification_outbox WHERE root_request_id = :id',
+            ['id' => $requestId],
+        )), 'An operational pre-submit deferral must not enqueue a failure notification.');
     }
 
     private function seedFixture(): void
@@ -1143,6 +1390,14 @@ SQL, ['guest' => self::id('guest')]);
         $this->connection()->insert('proxmox_connections', [
             'id' => $connection, 'display_name' => 'Queue test', 'product' => 'pve', 'enabled' => 1,
             'revision' => 1, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $capabilities = '{"profile":"queue-test"}';
+        $this->connection()->insert('proxmox_capability_snapshots', [
+            'id' => self::id('pve-capability'), 'connection_id' => $connection, 'product' => 'pve',
+            'version_major' => 8, 'version_minor' => 0, 'raw_version' => '8.4.0',
+            'profile_version' => 1, 'capabilities_json' => $capabilities,
+            'snapshot_hash' => hash('sha256', $capabilities, true),
+            'first_observed_at' => $now, 'last_observed_at' => $now,
         ]);
         $this->connection()->insert('inventory_sync_runs', [
             'id' => $run, 'cycle_token' => $cycle, 'collector_fencing_token' => 1,
@@ -1354,7 +1609,7 @@ SQL, ['guest' => self::id('guest')]);
                 'backup_policy_guest_overrides', 'backup_policy_assignments', 'backup_policies',
                 'backup_target_allowed_nodes', 'backup_targets', 'guest_placements', 'guests',
                 'pve_node_storage_state', 'pve_storages', 'pve_nodes', 'pve_clusters',
-                'inventory_sync_runs', 'proxmox_connections', 'collector_cycles',
+                'proxmox_capability_snapshots', 'inventory_sync_runs', 'proxmox_connections', 'collector_cycles',
                 'collector_schedule', 'worker_heartbeats',
             ] as $table) {
                 $this->connection()->executeStatement('DELETE FROM '.$table);

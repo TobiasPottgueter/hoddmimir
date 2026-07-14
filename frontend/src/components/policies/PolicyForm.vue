@@ -47,6 +47,12 @@ const retentionExecutionEnabled = ref(false);
 const failureNotificationRecipients = ref("");
 const validationError = ref<string | null>(null);
 
+function targetUsesPbs(candidateTargetId: string | null | undefined): boolean {
+  return props.targets.some(
+    (target) => target.id === candidateTargetId && target.storageType === "pbs",
+  );
+}
+
 const clusterOptions = computed(() => {
   const options = props.clusters.map((cluster) => ({
     value: cluster.id,
@@ -87,6 +93,7 @@ const targetOptions = computed(() => {
   }
   return [{ value: "", label: "Kein Ziel (Entwurf)" }, ...options];
 });
+const retentionExecutionBlocked = computed(() => targetUsesPbs(targetId.value));
 
 const modeOptions: Array<{
   label: string;
@@ -140,13 +147,18 @@ watch(
     keepMonthly.value = policy?.desiredRetention?.keepMonthly ?? null;
     keepYearly.value = policy?.desiredRetention?.keepYearly ?? null;
     retentionExecutionEnabled.value =
-      policy?.retentionExecutionEnabled ?? false;
+      (policy?.retentionExecutionEnabled ?? false) &&
+      !targetUsesPbs(policy?.targetId);
     failureNotificationRecipients.value =
       policy?.failureNotificationRecipients.join("\n") ?? "";
     validationError.value = null;
   },
   { immediate: true },
 );
+
+watch(retentionExecutionBlocked, (blocked) => {
+  if (blocked) retentionExecutionEnabled.value = false;
+});
 
 function nullable(value: string): string | null {
   const trimmed = value.trim();
@@ -195,7 +207,8 @@ function submit(): void {
       keepWeekly: keepWeekly.value,
       keepMonthly: keepMonthly.value,
       keepYearly: keepYearly.value,
-      retentionExecutionEnabled: retentionExecutionEnabled.value,
+      retentionExecutionEnabled:
+        !retentionExecutionBlocked.value && retentionExecutionEnabled.value,
       failureNotificationRecipients: recipients,
     },
     props.policy?.id ?? null,
@@ -304,10 +317,21 @@ function submit(): void {
         ></label
       >
       <label class="configuration-form__check"
-        ><Checkbox v-model="retentionExecutionEnabled" binary /><span
-          >Retention-Ausführung aktivieren</span
-        ></label
+        ><Checkbox
+          v-model="retentionExecutionEnabled"
+          binary
+          :disabled="retentionExecutionBlocked"
+        /><span>Retention-Ausführung aktivieren</span></label
       >
+      <Message
+        v-if="retentionExecutionBlocked"
+        class="configuration-form__wide"
+        severity="info"
+        :closable="false"
+      >
+        Bei PBS-Backupzielen wird die Retention auf PBS verwaltet. Hoddmímir
+        sendet deshalb keine löschwirksamen Retention-Parameter an vzdump.
+      </Message>
     </div>
     <div class="configuration-form__actions">
       <Button

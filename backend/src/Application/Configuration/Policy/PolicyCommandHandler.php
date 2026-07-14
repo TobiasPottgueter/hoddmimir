@@ -62,6 +62,9 @@ final readonly class PolicyCommandHandler
             }
             array_push($blockers, ...$this->observationBlockers($evidence->target, $now, 'target'));
             array_push($blockers, ...$this->observationBlockers($evidence->executor, $now, 'executor'));
+            if ($evidence->pbsTarget && $evidence->retentionExecutionEnabled) {
+                $blockers[] = 'retention_execution_forbidden_for_pbs_target';
+            }
             if (null !== $evidence->pveMajor) {
                 array_push($blockers, ...array_map(static fn ($blocker): string => $blocker->value, $policy->activationBlockers($evidence->pveMajor)));
             }

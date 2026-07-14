@@ -81,6 +81,7 @@ final readonly class DbalBackupOperationCommandRepository implements BackupOpera
 
         $row = $this->connection->fetchAssociative(<<<'SQL'
 SELECT policy.*, target.revision AS target_revision, target.status AS target_status,
+       storage.storage_type AS target_storage_type,
        guest.connection_id AS guest_connection_id, guest.cluster_id AS guest_cluster_id,
        guest.inventory_state AS guest_state, guest.is_template, guest.provisioned_size_bytes,
        placement.node_id, placement.placement_revision, placement.observed_at AS placement_observed_at,
@@ -94,6 +95,7 @@ SELECT policy.*, target.revision AS target_revision, target.status AS target_sta
         ORDER BY capability.last_observed_at DESC, capability.id DESC LIMIT 1) AS pve_major
 FROM backup_policies policy
 JOIN backup_targets target ON target.connection_id = policy.connection_id AND target.cluster_id = policy.cluster_id AND target.id = policy.target_id
+JOIN pve_storages storage ON storage.connection_id = target.connection_id AND storage.cluster_id = target.cluster_id AND storage.id = target.storage_id
 JOIN guests guest ON guest.connection_id = policy.connection_id AND guest.cluster_id = policy.cluster_id AND guest.id = :guest_id
 LEFT JOIN guest_placements placement ON placement.guest_id = guest.id
 LEFT JOIN backup_policy_guest_overrides guest_override ON guest_override.connection_id = guest.connection_id
@@ -128,7 +130,9 @@ SQL, ['guest_id' => $command->guestId, 'policy_id' => $command->policyId],
             $policy, $pveMajor,
             null === ($row['guest_backup_mode'] ?? null) ? null : BackupMode::from($this->text($row['guest_backup_mode'])),
             null === ($row['guest_compression'] ?? null) ? null : Compression::from($this->text($row['guest_compression'])),
-            $this->retention($row, 'guest_'), 1 === $this->integer($row['retention_execution_enabled'] ?? null),
+            $this->retention($row, 'guest_'),
+            1 === $this->integer($row['retention_execution_enabled'] ?? null),
+            'pbs' !== ($row['target_storage_type'] ?? null),
         );
         $resolved = $resolvedPolicy->canonicalJson();
         $id = $command->subjectId;

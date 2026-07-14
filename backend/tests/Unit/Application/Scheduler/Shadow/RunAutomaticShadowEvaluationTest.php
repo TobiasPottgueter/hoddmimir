@@ -42,7 +42,8 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
             'placement_present', 'placement_fresh', 'target_node_allowed', 'target_storage_enabled',
             'target_storage_active', 'capacity_fresh', 'minimum_free_space', 'node_concurrency',
             'target_concurrency', 'pbs_mapping_valid',
-            'inventory_fresh', 'executor_authorization_fresh', 'executor_authorized', 'active_request_absent',
+            'inventory_fresh', 'executor_authorization_fresh', 'executor_authorized',
+            'policy_retention_compatible', 'active_request_absent',
         ], array_map(static fn ($gate) => $gate->result->code->value, $decision->gates));
         self::assertSame('missing', $decision->gates[20]->result->detailCode->value);
         self::assertSame('missing', $decision->gates[21]->result->detailCode->value);
@@ -109,8 +110,23 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
 
         $decision = $store->batches[0]->decisions[0];
         self::assertSame(DecisionOutcome::Deduplicated, $decision->outcome);
-        self::assertSame('active_request_absent', $decision->gates[22]->result->code->value);
-        self::assertSame('active_request_exists', $decision->gates[22]->result->detailCode->value);
+        self::assertSame('active_request_absent', $decision->gates[23]->result->code->value);
+        self::assertSame('active_request_exists', $decision->gates[23]->result->detailCode->value);
+    }
+
+    public function testIncompatiblePolicyRetentionBlocksBeforePromotion(): void
+    {
+        $store = new CapturingShadowStore();
+        $this->service(
+            new RecordingAutomaticShadowSource([$this->candidate(policyRetentionCompatible: false)]),
+            $store,
+            new DateTimeImmutable('2026-07-12T10:05:00Z'),
+        )->execute($this->lease());
+
+        $decision = $store->batches[0]->decisions[0];
+        self::assertSame(DecisionOutcome::Blocked, $decision->outcome);
+        self::assertSame('policy_retention_compatible', $decision->gates[22]->result->code->value);
+        self::assertSame('incompatible', $decision->gates[22]->result->detailCode->value);
     }
 
     public function testNodeAndTargetConcurrencyBlockIndependentlyInStableOrder(): void
@@ -200,7 +216,7 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
             $source = new RecordingAutomaticShadowSource([$this->candidate(...$case)]);
             $store = new CapturingShadowStore();
             $this->service($source, $store, new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
-            self::assertCount(23, $store->batches[0]->decisions[0]->gates);
+            self::assertCount(24, $store->batches[0]->decisions[0]->gates);
         }
     }
 
@@ -241,12 +257,13 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         bool $activeRequestAbsent = true,
         bool $nodeConcurrencyAvailable = true,
         bool $targetConcurrencyAvailable = true,
+        bool $policyRetentionCompatible = true,
     ): AutomaticShadowCandidate {
         $id = static fn (string $value): string => substr(hash('sha256', $value, true), 0, 16);
         $at = new DateTimeImmutable('2026-07-12T10:00:00Z');
         return new AutomaticShadowCandidate(
             $id('connection'), true, $id('cluster'), true, $id('guest'), $guestActive, $guestTemplate, $at,
-            $placementPresent ? $id('node') : null, true, $placementPresent ? 2 : null, $placementPresent ? $at : null, $id('policy'), 3, true, hash('sha256', 'policy', true),
+            $placementPresent ? $id('node') : null, true, $placementPresent ? 2 : null, $placementPresent ? $at : null, $id('policy'), 3, true, $policyRetentionCompatible, hash('sha256', 'policy', true),
             true, false, $id('target'), 4, true, true, true, true, $at,
             null === $availableBytes ? null : new UInt64Decimal((string) $availableBytes),
             null === $minimumFreeBytes ? null : new UInt64Decimal((string) $minimumFreeBytes),

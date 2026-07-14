@@ -59,9 +59,14 @@ The application builder emits only guest-scoped fields:
 - optionally legacy `maxfiles` on PVE 7 or 8.
 
 `prune-backups` and `maxfiles` are mutually exclusive. `maxfiles` is rejected
-for PVE 9 and must never be emitted there. Root-only scheduled-job controls,
-including mail, script, temporary-directory, removal, node-selection, and
-bandwidth-policy fields, are not part of this contract.
+for PVE 9 and must never be emitted there. Both deletion-capable fields require
+an explicit retention-execution approval and are permitted only for non-PBS
+targets such as local, directory, NFS, or CIFS storage. For a PVE storage of
+type `pbs`, retention is owned exclusively by PBS prune jobs and the submission
+builder must emit neither field, even when an older policy snapshot contains an
+approval or the PBS mapping is missing or inconsistent. Root-only scheduled-job
+controls, including mail, script, temporary-directory, removal, node-selection,
+and bandwidth-policy fields, are not part of this contract.
 
 ## Credentials, TLS, and sensitive data
 

@@ -15,6 +15,8 @@ final readonly class PolicyActivationEvidence
         ?DateTimeImmutable $pveObservedAt,
         public ActivationEvidenceObservation $target,
         public ActivationEvidenceObservation $executor,
+        public bool $pbsTarget = false,
+        public bool $retentionExecutionEnabled = false,
     ) {
         $this->pveObservedAt = $pveObservedAt?->setTimezone(new DateTimeZone('UTC'));
     }

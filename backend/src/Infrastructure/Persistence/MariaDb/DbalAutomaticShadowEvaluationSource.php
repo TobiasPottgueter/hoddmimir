@@ -69,12 +69,13 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
               OR (assignment.scope = 'node' AND assignment.node_id = placement.node_id)
               OR (assignment.scope = 'guest' AND assignment.guest_id = guest.id))) AS explicitly_excluded,
        target.id AS target_id, target.revision AS target_revision, target.status AS target_status, target.pbs_connection_id,
+       storage.storage_type AS target_storage_type,
        target.minimum_free_bytes, target.fixed_parallel_limit,
        EXISTS(SELECT 1 FROM backup_target_allowed_nodes allowed WHERE allowed.target_id = target.id AND allowed.node_id = placement.node_id) AS target_node_allowed,
        storage.disabled AS storage_disabled, storage.inventory_state AS storage_state,
        node_storage.enabled AS storage_enabled, node_storage.active AS storage_active,
        node_storage.available_bytes, pbs_capacity.available_bytes AS pbs_available_bytes,
-       CASE WHEN target.pbs_connection_id IS NULL THEN node_storage.observed_at
+       CASE WHEN storage.storage_type <> 'pbs' THEN node_storage.observed_at
             WHEN node_storage.observed_at IS NULL OR pbs_capacity.observed_at IS NULL THEN NULL
             ELSE LEAST(node_storage.observed_at, pbs_capacity.observed_at) END AS capacity_observed_at,
        CASE WHEN node_slot.node_id IS NULL THEN 1
@@ -83,7 +84,8 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
             WHEN target_slot.target_id IS NULL THEN 1
             ELSE target_slot.slot_limit = target.fixed_parallel_limit
               AND target_slot.slots_used < target_slot.slot_limit END AS target_concurrency_available,
-       (target.pbs_connection_id IS NULL OR (target.pbs_datastore_id IS NOT NULL AND mapping.storage_id IS NOT NULL
+       (storage.storage_type <> 'pbs' OR (target.pbs_connection_id IS NOT NULL
+         AND target.pbs_datastore_id IS NOT NULL AND mapping.storage_id IS NOT NULL
          AND EXISTS(SELECT 1 FROM proxmox_connections pbs_connection
            WHERE pbs_connection.id = target.pbs_connection_id
              AND pbs_connection.product = 'pbs' AND pbs_connection.enabled = 1)
@@ -193,6 +195,7 @@ SQL, [
             if (!is_string($value) || 16 !== strlen($value)) { throw new RuntimeException('MariaDB returned an invalid shadow identifier.'); }
             return $value;
         };
+        $policyEvidence = $this->resolvedPolicyEvidence($row);
         return new AutomaticShadowCandidate(
             $binary($row['connection_id'] ?? null), $this->bool($row, 'connection_enabled'),
             $binary($row['cluster_id'] ?? null), 'active' === ($row['cluster_state'] ?? null),
@@ -203,8 +206,7 @@ SQL, [
             'online' === ($row['api_status'] ?? null) && 'active' === ($row['node_state'] ?? null),
             $this->int($row['placement_revision'] ?? null), $this->date($row['placement_observed_at'] ?? null),
             $binary($row['policy_id'] ?? null), $this->int($row['policy_revision'] ?? null) ?? 0,
-            'enabled' === ($row['policy_status'] ?? null),
-            $this->resolvedPolicyHash($row),
+            'enabled' === ($row['policy_status'] ?? null), $policyEvidence['compatible'], $policyEvidence['hash'],
             $this->bool($row, 'selection_included'), $this->bool($row, 'explicitly_excluded'),
             $binary($row['target_id'] ?? null), $this->int($row['target_revision'] ?? null) ?? 0,
             'enabled' === ($row['target_status'] ?? null), $this->bool($row, 'target_node_allowed'),
@@ -214,7 +216,9 @@ SQL, [
             $this->effectiveCapacity($row), $this->decimal($row['minimum_free_bytes'] ?? null),
             $this->bool($row, 'node_concurrency_available'), $this->bool($row, 'target_concurrency_available'),
             $this->bool($row, 'pbs_mapping_valid'),
-            null === ($row['pbs_connection_id'] ?? null) ? $this->date($row['inventory_observed_at'] ?? null) : $this->date($row['pbs_observed_at'] ?? null),
+            'pbs' !== ($row['target_storage_type'] ?? null)
+                ? $this->date($row['inventory_observed_at'] ?? null)
+                : $this->date($row['pbs_observed_at'] ?? null),
             $this->date($row['executor_observed_at'] ?? null),
             $this->bool($row, 'executor_authorized'), $this->bool($row, 'active_request_absent'),
             $this->date($row['last_success_at'] ?? null), $this->int($row['maximum_age_seconds'] ?? null),
@@ -253,7 +257,8 @@ SQL, [
     private function effectiveCapacity(array $row): ?UInt64Decimal {
         $pve = $this->decimal($row['available_bytes'] ?? null);
         if (null === $pve) return null;
-        if (null === ($row['pbs_available_bytes'] ?? null)) return $pve;
+        if ('pbs' !== ($row['target_storage_type'] ?? null)) return $pve;
+        if (null === ($row['pbs_available_bytes'] ?? null)) return null;
         $pbs = $this->decimal($row['pbs_available_bytes']);
         return null !== $pbs && $pbs->lessThanOrEqual($pve) ? $pbs : $pve;
     }
@@ -262,26 +267,43 @@ SQL, [
         $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s.u', $value, new DateTimeZone('UTC'));
         return false === $date ? null : $date;
     }
-    /** @param array<string, mixed> $row */
-    private function resolvedPolicyHash(array $row): string {
+    /** @param array<string, mixed> $row
+     *  @return array{hash: string, compatible: bool}
+     */
+    private function resolvedPolicyEvidence(array $row): array {
         $policyRetention = $this->retention($row, '');
         $guestRetention = $this->retention($row, 'guest_');
         $retention = $guestRetention ?? $policyRetention ?? throw new RuntimeException('An enabled policy lacks retention.');
+        $pveMajor = $this->int($row['pve_major'] ?? null) ?? 0;
+        if ($pveMajor < 7 || $pveMajor > 9 || !$retention->supportsPveMajor($pveMajor)) {
+            $evidence = json_encode([
+                'policy' => bin2hex($this->binary($row['policy_id'] ?? null)),
+                'revision' => $this->int($row['policy_revision'] ?? null) ?? 0,
+                'pveMajor' => $pveMajor,
+                'retention' => $retention->signature(),
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            return ['hash' => hash('sha256', "incompatible-policy-retention\0".$evidence, true), 'compatible' => false];
+        }
         $resolved = new ResolvedBackupPolicy(
             new PolicyId($this->binary($row['policy_id'] ?? null)),
             new PolicyRevision($this->int($row['policy_revision'] ?? null) ?? 0),
             new BackupTargetId($this->binary($row['target_id'] ?? null)),
-            $this->int($row['pve_major'] ?? null) ?? 0,
+            $pveMajor,
             BackupMode::from($this->text($row['guest_backup_mode'] ?? $row['backup_mode'] ?? null)),
             Compression::from($this->text($row['guest_compression'] ?? $row['compression'] ?? null)),
             $retention,
-            $this->bool($row, 'retention_execution_enabled') ? $retention : null,
+            $this->bool($row, 'retention_execution_enabled') && 'pbs' !== ($row['target_storage_type'] ?? null)
+                ? $retention
+                : null,
             new PolicyPriority($this->int($row['policy_priority'] ?? null) ?? -1),
             new PolicyThresholds($this->int($row['maximum_age_seconds'] ?? null), $this->decimal($row['bytes_written_threshold'] ?? null)?->value, $this->int($row['cooldown_seconds'] ?? null)),
             Schedule::from($this->text($row['schedule'] ?? null)),
             $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),
         );
-        return hex2bin($resolved->snapshotHash()) ?: throw new RuntimeException('The resolved policy hash is invalid.');
+        return [
+            'hash' => hex2bin($resolved->snapshotHash()) ?: throw new RuntimeException('The resolved policy hash is invalid.'),
+            'compatible' => true,
+        ];
     }
     private function failureRecipients(mixed $value): FailureNotificationRecipients {
         if (!is_string($value)) throw new RuntimeException('Policy failure recipients are invalid.');

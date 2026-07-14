@@ -56,6 +56,9 @@ describe("usePolicies", () => {
     expect(policyBlockerLabel("configuration_incomplete")).toContain(
       "unvollständig",
     );
+    expect(
+      policyBlockerLabel("retention_execution_forbidden_for_pbs_target"),
+    ).toContain("PBS-Ziele");
     for (const [scope, label] of [
       ["global", "Global"],
       ["connection", "Verbindung"],

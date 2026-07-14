@@ -92,6 +92,50 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
         )));
     }
 
+    public function testManualPolicySnapshotUsesStorageTypeToSuppressPbsDeletionApproval(): void
+    {
+        $clock = new FrozenClock(new DateTimeImmutable('2026-07-13T00:00:00Z'));
+        $this->seedQaFixture($clock);
+        $repository = new DbalBackupOperationCommandRepository(
+            $this->connection(),
+            new SystemSecurityIdentifierGenerator(),
+            $clock,
+            new PolicyResolver(),
+        );
+        $principal = new AuthenticatedPrincipal(
+            new UserId(self::USER),
+            new NormalizedUsername('qa-admin'),
+            [Permission::BackupOperationsManage],
+        );
+        $this->connection()->update('backup_policies', [
+            'retention_execution_enabled' => 1,
+        ], ['id' => self::uuid('80000000-0000-4000-8000-000000000001')]);
+        $this->connection()->update('pve_storages', [
+            'storage_type' => 'pbs',
+        ], ['id' => self::uuid('60000000-0000-4000-8000-000000000001')]);
+
+        $pbsRequest = self::uuid('c3000000-0000-4000-8000-000000000001');
+        $result = $repository->execute(new BackupOperationCommand(
+            BackupOperationCommandType::ManualRequest,
+            $pbsRequest,
+            self::uuid('80000000-0000-4000-8000-000000000001'),
+            self::uuid('50000000-0000-4000-8000-000000000101'),
+            1,
+            'pbs-retention-manual',
+            'operation-pbs001',
+        ), $principal);
+        self::assertSame(BackupOperationCommandStatus::Applied, $result->status);
+        $pbsSnapshotJson = $this->connection()->fetchOne(
+            'SELECT resolved_policy_json FROM backup_requests WHERE id = :id',
+            ['id' => $pbsRequest],
+        );
+        self::assertIsString($pbsSnapshotJson);
+        $pbsSnapshot = json_decode($pbsSnapshotJson, true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($pbsSnapshot);
+        self::assertNotNull($pbsSnapshot['desiredRetention']);
+        self::assertNull($pbsSnapshot['approvedDeletionRetention']);
+    }
+
     public function testConcurrentPolicyUpdateMakesTheStaleManualRequestConflict(): void
     {
         if (!function_exists('pcntl_fork')) {

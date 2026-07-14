@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import PrimeVue from "primevue/config";
+import Checkbox from "primevue/checkbox";
 import Select from "primevue/select";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +9,7 @@ import type {
   ConfiguredPolicy,
   PveClusterResource,
 } from "@/api/generated/types.gen";
-import { OTHER_UUID, UUID } from "@/test/fixtures";
+import { OTHER_UUID, PBS_DATASTORE_UUID, UUID } from "@/test/fixtures";
 import PolicyForm from "./PolicyForm.vue";
 
 const policy = {
@@ -80,6 +81,14 @@ const target = {
   allowedNodes: [],
   canEnable: true,
   blockers: [],
+} satisfies ConfiguredBackupTarget;
+const pbsTarget = {
+  ...target,
+  id: PBS_DATASTORE_UUID,
+  displayName: "PBS-Ziel",
+  storageType: "pbs",
+  pbsConnectionId: null,
+  pbsDatastoreId: null,
 } satisfies ConfiguredBackupTarget;
 
 describe("PolicyForm", () => {
@@ -161,5 +170,79 @@ describe("PolicyForm", () => {
     await wrapper.get("form").trigger("submit");
     expect(wrapper.text()).toContain("eindeutige E-Mail-Empfänger");
     expect(wrapper.emitted("submit")).toBeUndefined();
+  });
+
+  it("unterdrückt die Retention-Ausführung bei einem PBS-Ziel auch ohne Mapping", async () => {
+    const wrapper = mount(PolicyForm, {
+      props: {
+        policy: {
+          ...policy,
+          targetId: PBS_DATASTORE_UUID,
+          targetName: "PBS-Ziel",
+          retentionExecutionEnabled: true,
+        },
+        targets: [target, pbsTarget],
+        clusters: [cluster],
+        pending: false,
+      },
+      global: { plugins: [PrimeVue] },
+    });
+
+    const retentionCheckbox = wrapper.findAllComponents(Checkbox)[1];
+    expect(retentionCheckbox?.props("disabled")).toBe(true);
+    expect(wrapper.text()).toContain(
+      "Bei PBS-Backupzielen wird die Retention auf PBS verwaltet.",
+    );
+
+    retentionCheckbox?.vm.$emit("update:modelValue", true);
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")?.[0]?.[0]).toMatchObject({
+      targetId: PBS_DATASTORE_UUID,
+      retentionExecutionEnabled: false,
+    });
+  });
+
+  it("lässt die Retention-Ausführung für ein Nicht-PBS-Ziel explizit zu", async () => {
+    const wrapper = mount(PolicyForm, {
+      props: { policy, targets: [target], clusters: [cluster], pending: false },
+      global: { plugins: [PrimeVue] },
+    });
+
+    const retentionCheckbox = wrapper.findAllComponents(Checkbox)[1];
+    expect(retentionCheckbox?.props("disabled")).toBe(false);
+    retentionCheckbox?.vm.$emit("update:modelValue", true);
+    await wrapper.vm.$nextTick();
+    await wrapper.get("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0]?.[0]).toMatchObject({
+      targetId: UUID,
+      retentionExecutionEnabled: true,
+    });
+  });
+
+  it("setzt die Freigabe beim Wechsel auf ein PBS-Ziel zurück", async () => {
+    const wrapper = mount(PolicyForm, {
+      props: {
+        policy: { ...policy, retentionExecutionEnabled: true },
+        targets: [target, pbsTarget],
+        clusters: [cluster],
+        pending: false,
+      },
+      global: { plugins: [PrimeVue] },
+    });
+
+    const retentionCheckbox = wrapper.findAllComponents(Checkbox)[1];
+    expect(retentionCheckbox?.props("disabled")).toBe(false);
+    wrapper
+      .findAllComponents(Select)[1]
+      ?.vm.$emit("update:modelValue", PBS_DATASTORE_UUID);
+    await wrapper.vm.$nextTick();
+
+    expect(retentionCheckbox?.props("disabled")).toBe(true);
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")?.[0]?.[0]).toMatchObject({
+      targetId: PBS_DATASTORE_UUID,
+      retentionExecutionEnabled: false,
+    });
   });
 });

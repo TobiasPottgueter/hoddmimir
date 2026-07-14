@@ -25,6 +25,7 @@ final readonly class AutomaticShadowCandidate
         public string $policyId,
         public int $policyRevision,
         public bool $policyEnabled,
+        public bool $policyRetentionCompatible,
         public string $policySnapshotHash,
         public bool $selectionIncluded,
         public bool $explicitlyExcluded,

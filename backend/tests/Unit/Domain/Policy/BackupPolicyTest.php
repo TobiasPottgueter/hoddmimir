@@ -140,13 +140,14 @@ final class BackupPolicyTest extends TestCase
             null,
             null,
             false,
+            true,
         );
     }
 
     public function testResolverKeepsDesiredRetentionSeparateFromDeletionApproval(): void
     {
         $enabled = self::completeDraft(self::pruneRetention())->activate(9);
-        $resolved = (new PolicyResolver())->resolve($enabled, 9, null, null, null, false);
+        $resolved = (new PolicyResolver())->resolve($enabled, 9, null, null, null, false, true);
 
         self::assertSame(BackupMode::Snapshot, $resolved->mode);
         self::assertSame(Compression::Zstd, $resolved->compression);
@@ -172,6 +173,7 @@ final class BackupPolicyTest extends TestCase
             Compression::Gzip,
             $guestRetention,
             true,
+            true,
         );
 
         self::assertSame(BackupMode::Stop, $resolved->mode);
@@ -181,12 +183,23 @@ final class BackupPolicyTest extends TestCase
         self::assertSame(['maxfiles' => 5], $resolved->snapshot()['approvedDeletionRetention']);
     }
 
+    public function testPbsStorageTargetNeverReceivesApprovedDeletionRetention(): void
+    {
+        $enabled = self::completeDraft(self::pruneRetention())->activate(9);
+
+        $resolved = (new PolicyResolver())->resolve($enabled, 9, null, null, null, true, false);
+
+        self::assertSame(self::pruneRetention()->signature(), $resolved->desiredRetention->signature());
+        self::assertNull($resolved->approvedDeletionRetention);
+        self::assertNull($resolved->snapshot()['approvedDeletionRetention']);
+    }
+
     public function testResolverNeverCarriesLegacyMaxfilesToPveNine(): void
     {
         $enabled = self::completeDraft(RetentionPolicy::legacyMaxFiles(2))->activate(7);
 
         $this->expectException(DomainException::class);
-        (new PolicyResolver())->resolve($enabled, 9, null, null, null, false);
+        (new PolicyResolver())->resolve($enabled, 9, null, null, null, false, true);
     }
 
     public function testGuestRetentionMustAlsoMatchThePveMajor(): void
@@ -201,6 +214,7 @@ final class BackupPolicyTest extends TestCase
             null,
             RetentionPolicy::legacyMaxFiles(2),
             false,
+            true,
         );
     }
 

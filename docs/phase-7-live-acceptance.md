@@ -225,7 +225,9 @@ kontrollierte ACL-, Token-, Node- und Transportfehler. Benötigt werden eine
 ausdrückliche Schreib-/Fault-Injection-Freigabe, sichere Labziele, ein
 HTTPS-Matrix-Webhook und das technische Aktivierungs-Acknowledgement. Eine
 löschwirksame Retention bleibt ohne ihre eigene ausdrückliche Genehmigung
-verboten.
+verboten. Selbst mit dieser Genehmigung darf sie nur auf Nicht-PBS-Zielen
+wirksam werden. Bei PBS-Zielen werden weder `maxfiles` noch `prune-backups`
+gesendet; dort bleiben die PBS-Prune-Jobs alleinige Retention-Autorität.
 
 ## Noch benötigte externe Inputs
 

@@ -52,7 +52,8 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
         $sql = <<<'SQL'
             SELECT policy.*, connection.display_name AS connection_name,
                    COALESCE(cluster.external_name, connection.display_name) AS cluster_name,
-                   target.display_name AS target_name
+                   target.display_name AS target_name,
+                   storage.storage_type AS target_storage_type
             FROM backup_policies AS policy
             JOIN proxmox_connections AS connection ON connection.id = policy.connection_id
             JOIN pve_clusters AS cluster
@@ -60,6 +61,9 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             LEFT JOIN backup_targets AS target
               ON target.connection_id = policy.connection_id
              AND target.cluster_id = policy.cluster_id AND target.id = policy.target_id
+            LEFT JOIN pve_storages AS storage
+              ON storage.connection_id = target.connection_id
+             AND storage.cluster_id = target.cluster_id AND storage.id = target.storage_id
             SQL;
         if ([] !== $where) {
             $sql .= ' WHERE '.implode(' AND ', $where);
@@ -174,6 +178,8 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
     /** @param array<string, mixed> $row */
     private function policy(array $row): ConfiguredPolicy
     {
+        $retentionExecutionEnabled = $this->boolean($row, 'retention_execution_enabled');
+        $pbsTarget = 'pbs' === ($row['target_storage_type'] ?? null);
         $incomplete = null === ($row['target_id'] ?? null) || null === ($row['policy_priority'] ?? null)
             || null === ($row['backup_mode'] ?? null) || null === ($row['compression'] ?? null)
             || null === ($row['schedule'] ?? null)
@@ -182,6 +188,9 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
         $blockers = $incomplete ? [PolicyBlockerCode::ConfigurationIncomplete] : [];
         if ('enabled' !== ($row['status'] ?? null)) {
             $blockers[] = PolicyBlockerCode::ExecutorEvidenceMissing;
+        }
+        if ($pbsTarget && $retentionExecutionEnabled) {
+            $blockers[] = PolicyBlockerCode::RetentionExecutionForbiddenForPbsTarget;
         }
 
         return new ConfiguredPolicy(
@@ -203,7 +212,7 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             $this->nullableInteger($row['cooldown_seconds'] ?? null),
             $this->nullableText($row['schedule'] ?? null),
             $this->retention($row),
-            $this->boolean($row, 'retention_execution_enabled'),
+            $retentionExecutionEnabled && !$pbsTarget,
             $this->nullableDate($row['disabled_at'] ?? null),
             $blockers,
             $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),

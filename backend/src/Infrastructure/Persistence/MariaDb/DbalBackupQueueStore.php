@@ -333,6 +333,7 @@ SELECT connection.enabled AS connection_enabled,
        target.minimum_free_bytes,
        target.fixed_parallel_limit,
        target.pbs_connection_id,
+       storage.storage_type AS target_storage_type,
        allowed.node_id AS allowed_node_id,
        storage.supports_backup, storage.last_seen_at AS storage_observed_at,
        storage.disabled AS storage_disabled,
@@ -459,7 +460,7 @@ SQL, ['id' => $row['id']]);
                 return $field.'_stale';
             }
         }
-        if (null !== ($evidence['pbs_connection_id'] ?? null)) {
+        if ('pbs' === ($evidence['target_storage_type'] ?? null)) {
             if (1 !== $this->nullableInteger($evidence['pbs_connection_enabled'] ?? null)
                 || 1 !== $this->nullableInteger($evidence['pbs_writes'] ?? null)
                 || 'active' !== ($evidence['pbs_state'] ?? null)
@@ -492,7 +493,7 @@ SQL, ['id' => $row['id']]);
     {
         $pve = $this->decimal($evidence['available_bytes'] ?? null)
             ?? throw new RuntimeException('PVE capacity evidence is missing.');
-        if (null === ($evidence['pbs_connection_id'] ?? null)) {
+        if ('pbs' !== ($evidence['target_storage_type'] ?? null)) {
             return $pve;
         }
         $pbs = $this->decimal($evidence['pbs_available_bytes'] ?? null)
@@ -506,7 +507,7 @@ SQL, ['id' => $row['id']]);
     {
         $pve = $this->date($evidence['capacity_observed_at'] ?? null)
             ?? throw new RuntimeException('PVE capacity timestamp is missing.');
-        if (null === ($evidence['pbs_connection_id'] ?? null)) {
+        if ('pbs' !== ($evidence['target_storage_type'] ?? null)) {
             return $this->format($pve);
         }
         $pbs = $this->date($evidence['pbs_capacity_observed_at'] ?? null)

@@ -149,6 +149,19 @@ final class ConfigurationCommandTest extends TestCase
             $handler->handle($this->command(ConfigurationCommandType::PolicyEnable), $this->principal())->blockers);
         $evidence->value = new PolicyActivationEvidence(9, new DateTimeImmutable('2026-07-12T12:00:00Z'), $this->observation(true), $this->observation(true));
         self::assertSame(ConfigurationCommandStatus::Applied, $handler->handle($this->command(ConfigurationCommandType::PolicyEnable), $this->principal())->status);
+        $evidence->value = new PolicyActivationEvidence(
+            9,
+            new DateTimeImmutable('2026-07-12T12:00:00Z'),
+            $this->observation(true),
+            $this->observation(true),
+            true,
+            true,
+        );
+        self::assertSame(
+            ['retention_execution_forbidden_for_pbs_target'],
+            $handler->handle($this->command(ConfigurationCommandType::PolicyEnable), $this->principal())->blockers,
+        );
+        $evidence->value = new PolicyActivationEvidence(9, new DateTimeImmutable('2026-07-12T12:00:00Z'), $this->observation(true), $this->observation(true));
         self::assertSame(ConfigurationCommandStatus::Applied, $handler->handle($this->command(ConfigurationCommandType::PolicyUpdate), $this->principal())->status);
         foreach ([
             new PolicyActivationEvidence(9, new DateTimeImmutable('2026-07-12T11:54:59Z'), $this->observation(true), $this->observation(true)),

@@ -90,6 +90,7 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             $this->freshness->evaluate(GateCode::InventoryFresh, GateScope::PbsMapping, $target, $now, $candidate->pbsObservedAt),
             $this->freshness->evaluate(GateCode::ExecutorAuthorizationFresh, GateScope::Authorization, $target, $now, $candidate->executorObservedAt),
             $this->flag(GateCode::ExecutorAuthorized, GateScope::Authorization, $target, $candidate->executorAuthorized, null === $candidate->executorObservedAt ? GateDetailCode::Missing : GateDetailCode::Unauthorized),
+            $this->flag(GateCode::PolicyRetentionCompatible, GateScope::Policy, $policy, $candidate->policyRetentionCompatible, GateDetailCode::Incompatible),
             $this->flag(GateCode::ActiveRequestAbsent, GateScope::Request, $guest, $candidate->activeRequestAbsent, GateDetailCode::ActiveRequestExists),
         ];
 

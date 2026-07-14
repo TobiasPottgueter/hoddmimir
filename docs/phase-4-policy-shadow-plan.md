@@ -406,6 +406,10 @@ Status: lokal abgeschlossen.
 - Gewünschte Retention erzeugt ohne separates
   `retention_execution_enabled`, passende Permission, Capability und E2E-Gate
   keinerlei löschwirksame VZDump-/Prune-Parameter.
+- Bei einem PVE-Storage vom Typ `pbs` bleibt die löschwirksame Retention immer
+  gesperrt und wird ausschließlich durch PBS-Prune-Jobs ausgeführt. Für
+  Nicht-PBS-Ziele ist sie ausschließlich als explizites Opt-in zulässig;
+  Legacy-`maxfiles` bleibt auf PVE 9 verboten.
 - Die Shadow-Auswertung persistiert eine Entscheidung je anwendbarem
   Gast-/Policy-/Ziel-Tupel. Für die spätere Queue gewinnt je Gast der höchste
   fachliche Grund, danach explizite Policy-Priorität und schließlich stabile

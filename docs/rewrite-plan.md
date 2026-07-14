@@ -422,7 +422,15 @@ Eligibility und Priorisierung werden als reine Domain-Services implementiert:
 6. Node- und Storage-Concurrency sowie Mindestfreiplatz prüfen.
 7. Idempotent enqueuen; eine Unique-Constraint verhindert Dubletten pro Policy, Gast und Planzeitpunkt.
 
-Retention und Kompression werden im Policy-Snapshot vollständig modelliert. PBS-Pruning wird bevorzugt über PBS-Retention/Prune-Jobs administriert. Eine Löschwirkung durch Backup-Parameter wird erst nach separater Rechte-, Capability- und E2E-Prüfung aktiviert.
+Retention und Kompression werden im Policy-Snapshot vollständig modelliert.
+Bei einem PVE-Storage vom Typ `pbs` liegt die löschwirksame Aufbewahrung
+ausschließlich bei den PBS-Prune-Jobs; Hoddmímir sendet für solche Ziele weder
+`maxfiles` noch `prune-backups` an `vzdump`. Bei Nicht-PBS-Zielen wie lokalem,
+NFS- oder CIFS-Storage bleiben diese Parameter für die notwendige
+Aufbewahrungssteuerung verfügbar, werden aber nur nach einer separaten,
+ausdrücklichen Retention-Ausführungsgenehmigung erzeugt. Die Voreinstellung ist
+für jedes Ziel fail-closed. Legacy-`maxfiles` ist zusätzlich auf PVE 9 immer
+unzulässig.
 
 ## 8. Teststrategie und verpflichtende Quality Gates
 

@@ -18,5 +18,6 @@ enum GateDetailCode: string
     case InsufficientFreeSpace = 'insufficient_free_space';
     case ConcurrencyLimitReached = 'concurrency_limit_reached';
     case InvalidMapping = 'invalid_mapping';
+    case Incompatible = 'incompatible';
     case ActiveRequestExists = 'active_request_exists';
 }

@@ -17,6 +17,8 @@ const statusLabels = {
 const blockerLabels = {
   configuration_incomplete: "Konfiguration ist unvollständig",
   executor_evidence_missing: "Executor-Evidenz fehlt",
+  retention_execution_forbidden_for_pbs_target:
+    "Retention-Ausführung ist für PBS-Ziele nicht zulässig",
 } satisfies Record<PolicyBlockerCode, string>;
 
 const scopeLabels = {

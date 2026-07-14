@@ -39,7 +39,11 @@ final class PolicyReadApiTest extends WebTestCase
         $item = $items[0] ?? null;
         self::assertIsArray($item);
         self::assertSame(false, $item['canEnable'] ?? null);
-        self::assertSame(['executor_evidence_missing'], $item['blockers'] ?? null);
+        self::assertSame(false, $item['retentionExecutionEnabled'] ?? null);
+        self::assertSame([
+            'executor_evidence_missing',
+            'retention_execution_forbidden_for_pbs_target',
+        ], $item['blockers'] ?? null);
         $page = $payload['page'] ?? null;
         self::assertIsArray($page);
         self::assertIsString($page['nextCursor'] ?? null);
@@ -127,7 +131,11 @@ final class PolicyReadModelFake implements PolicyReadModel
         return new PolicyPage($query->page, [new ConfiguredPolicy(
             PolicyReadApiTest::ID, 1, 'draft', 'Nightly', PolicyReadApiTest::ID, 'PVE',
             PolicyReadApiTest::OTHER, 'cluster-a', null, null, null, null, null, null,
-            null, null, null, null, false, null, [PolicyBlockerCode::ExecutorEvidenceMissing],
+            null, null, null, null, false, null, [
+                PolicyBlockerCode::ExecutorEvidenceMissing,
+                PolicyBlockerCode::RetentionExecutionForbiddenForPbsTarget,
+            ],
+            failureNotificationRecipients: [],
         )], PageCursor::resource($query->cursorContext(), 'Nightly', PolicyReadApiTest::ID));
     }
 

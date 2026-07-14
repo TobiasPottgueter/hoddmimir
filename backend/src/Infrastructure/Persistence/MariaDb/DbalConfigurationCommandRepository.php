@@ -219,6 +219,10 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
             }
             $now = $this->now();
             $data = $this->policyData($command);
+            $blockers = $this->policyRetentionBlockers($data);
+            if ([] !== $blockers) {
+                return ConfigurationCommandResult::blocked(...$blockers);
+            }
             $data += ['id' => $command->subjectId, 'status' => 'draft', 'revision' => 1,
                 'created_at' => $now, 'updated_at' => $now, 'disabled_at' => null];
             $this->connection->insert('backup_policies', $data, $this->policyTypes());
@@ -239,17 +243,93 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
                 return ConfigurationCommandResult::blocked('immutable_context_mismatch');
             }
             $data = $this->policyData($command);
+            $data['id'] = $command->subjectId;
+            $blockers = $this->policyRetentionBlockers($data);
+            if ([] !== $blockers) {
+                return ConfigurationCommandResult::blocked(...$blockers);
+            }
             unset($data['connection_id'], $data['cluster_id']);
             $data += ['revision' => $next, 'updated_at' => $this->now()];
             $this->connection->update('backup_policies', $data, ['id' => $command->subjectId], $this->policyTypes() + ['id' => ParameterType::BINARY]);
         } else {
             $enabled = ConfigurationCommandType::PolicyEnable === $command->type;
+            if ($enabled) {
+                $blockers = $this->policyRetentionBlockers($row);
+                if ([] !== $blockers) {
+                    return ConfigurationCommandResult::blocked(...$blockers);
+                }
+            }
             $now = $this->now();
             $this->connection->update('backup_policies', ['status' => $enabled ? 'enabled' : 'disabled',
                 'revision' => $next, 'updated_at' => $now, 'disabled_at' => $enabled ? null : $now],
                 ['id' => $command->subjectId], ['id' => ParameterType::BINARY]);
         }
         return new ConfigurationCommandResult(ConfigurationCommandStatus::Applied, $next);
+    }
+
+    /** @param array<string, mixed> $policyData
+     *  @return list<string>
+     */
+    private function policyRetentionBlockers(array $policyData, bool $includeExistingGuestOverrides = true): array
+    {
+        $targetId = $policyData['target_id'] ?? null;
+        $connectionId = $policyData['connection_id'] ?? null;
+        $clusterId = $policyData['cluster_id'] ?? null;
+        if (!is_string($targetId) || 16 !== strlen($targetId)
+            || !is_string($connectionId) || 16 !== strlen($connectionId)
+            || !is_string($clusterId) || 16 !== strlen($clusterId)) {
+            return [];
+        }
+
+        $target = $this->connection->fetchAssociative(<<<'SQL'
+SELECT storage.storage_type,
+       (SELECT capability.version_major
+          FROM proxmox_capability_snapshots capability
+         WHERE capability.connection_id = target.connection_id AND capability.product = 'pve'
+         ORDER BY capability.last_observed_at DESC, capability.id DESC
+         LIMIT 1) AS pve_major
+FROM backup_targets target
+JOIN pve_storages storage
+  ON storage.connection_id = target.connection_id
+ AND storage.cluster_id = target.cluster_id
+ AND storage.id = target.storage_id
+WHERE target.id = :target_id
+  AND target.connection_id = :connection_id
+  AND target.cluster_id = :cluster_id
+FOR UPDATE
+SQL, [
+            'target_id' => $targetId,
+            'connection_id' => $connectionId,
+            'cluster_id' => $clusterId,
+        ], [
+            'target_id' => ParameterType::BINARY,
+            'connection_id' => ParameterType::BINARY,
+            'cluster_id' => ParameterType::BINARY,
+        ]);
+        if (false === $target) {
+            return [];
+        }
+
+        $blockers = [];
+        if ('pbs' === ($target['storage_type'] ?? null)
+            && 1 === $this->integer($policyData['retention_execution_enabled'] ?? null)) {
+            $blockers[] = 'retention_execution_forbidden_for_pbs_target';
+        }
+        $pveMajor = $target['pve_major'] ?? null;
+        $legacyRetentionConfigured = null !== ($policyData['legacy_maxfiles'] ?? null);
+        $policyId = $policyData['id'] ?? null;
+        if ($includeExistingGuestOverrides && !$legacyRetentionConfigured && is_string($policyId) && 16 === strlen($policyId)) {
+            $legacyRetentionConfigured = 1 === $this->integer($this->connection->fetchOne(
+                "SELECT EXISTS(SELECT 1 FROM backup_policy_guest_overrides WHERE policy_id = :policy_id AND status = 'active' AND legacy_maxfiles IS NOT NULL)",
+                ['policy_id' => $policyId],
+                ['policy_id' => ParameterType::BINARY],
+            ));
+        }
+        if ($legacyRetentionConfigured && (is_int($pveMajor) || is_string($pveMajor)) && 9 === (int) $pveMajor) {
+            $blockers[] = 'retention_incompatible';
+        }
+
+        return $blockers;
     }
 
     private function selection(ConfigurationCommand $command): ConfigurationCommandResult
@@ -265,6 +345,19 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
         }
         /** @var list<mixed> $entries */
         $entries = $command->payload['entries'];
+        if (ConfigurationCommandType::GuestOverrideUpsert === $command->type) {
+            foreach ($entries as $entry) {
+                if (!is_array($entry)) {
+                    throw new RuntimeException('A selection command entry is invalid.');
+                }
+                $retentionData = $policy;
+                $retentionData['legacy_maxfiles'] = $entry['legacyMaxfiles'] ?? null;
+                $blockers = $this->policyRetentionBlockers($retentionData, false);
+                if ([] !== $blockers) {
+                    return ConfigurationCommandResult::blocked(...$blockers);
+                }
+            }
+        }
         $now = $this->now();
         foreach ($entries as $entry) {
             if (!is_array($entry)) {

@@ -152,7 +152,11 @@ UPID ohne diese Zusatzrechte lesen und stoppen. Fremde Tasks, root-only
 VZDump-Parameter und Parameter mit `Sys.Modify`-Bedarf bleiben verboten.
 Löschwirksame `maxfiles`-/`prune-backups`-Parameter dürfen nur aus der separat
 freigegebenen `approvedDeletionRetention` entstehen; ohne die explizite
-Retention-Ausführungsgenehmigung bleiben sie im Startrequest verboten.
+Retention-Ausführungsgenehmigung bleiben sie im Startrequest verboten. Für ein
+PVE-Storage vom Typ `pbs` bleibt diese Genehmigung grundsätzlich gesperrt:
+Hoddmímir sendet dort niemals einen Löschparameter, weil die Aufbewahrung durch
+die PBS-Prune-Jobs gesteuert wird. Nur Nicht-PBS-Ziele wie lokaler, NFS- oder
+CIFS-Storage können die ausdrücklich aktivierte Lösch-Retention verwenden.
 
 Ein versehentlich nicht privilegiengetrennter Token erbt die Vereinigungsmenge
 des Basisbenutzers. Die daraus entstehenden zusätzlichen effektiven Rechte

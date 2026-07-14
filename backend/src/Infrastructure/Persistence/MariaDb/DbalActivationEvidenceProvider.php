@@ -97,9 +97,11 @@ SELECT policy.target_id,
        (SELECT last_observed_at FROM proxmox_capability_snapshots capability
          WHERE capability.connection_id=policy.connection_id AND capability.product='pve'
          ORDER BY capability.last_observed_at DESC, capability.id DESC LIMIT 1) AS pve_observed_at,
-       target.status AS target_status, target.updated_at AS target_observed_at
+       target.status AS target_status, target.updated_at AS target_observed_at,
+       storage.storage_type, policy.retention_execution_enabled
 FROM backup_policies policy
 LEFT JOIN backup_targets target ON target.id=policy.target_id
+LEFT JOIN pve_storages storage ON storage.id=target.storage_id
 WHERE policy.id=:policy_id
 SQL, ['policy_id' => $id->binary()], ['policy_id' => ParameterType::BINARY]);
         if (false === $row) {
@@ -118,6 +120,8 @@ SQL, ['policy_id' => $id->binary()], ['policy_id' => ParameterType::BINARY]);
             null === ($row['pve_observed_at'] ?? null) ? null : $this->date($row['pve_observed_at']),
             $target,
             $executor,
+            'pbs' === ($row['storage_type'] ?? null),
+            $this->boolean($row['retention_execution_enabled'] ?? null),
         );
     }
 

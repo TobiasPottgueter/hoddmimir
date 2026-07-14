@@ -105,6 +105,173 @@ final class ConfigurationCommandRepositoryTest extends DatabaseTestCase
         self::assertSame('node', $this->connection()->fetchOne('SELECT scope FROM backup_policy_assignments WHERE id = ?', [self::ASSIGNMENT]));
     }
 
+    public function testPolicyWritesAndEnableFailClosedForPbsStorageWithoutMapping(): void
+    {
+        $this->seedContext();
+        $repository = new DbalConfigurationCommandRepository($this->connection());
+        $principal = new AuthenticatedPrincipal(new UserId(self::USER), new NormalizedUsername('admin'), [Permission::BackupConfigurationManage]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetCreate,
+            self::TARGET,
+            0,
+            'pbs-retention-target',
+            random_bytes(16),
+            $this->targetPayload('PBS target without mapping'),
+        ), $principal)->status);
+        $this->connection()->update('pve_storages', ['storage_type' => 'pbs'], ['id' => self::STORAGE]);
+
+        $blockedCreate = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate,
+            self::POLICY,
+            0,
+            'pbs-retention-create',
+            random_bytes(16),
+            array_replace($this->policyPayload('PBS policy'), ['retentionExecutionEnabled' => true]),
+        ), $principal);
+        self::assertSame(ConfigurationCommandStatus::Blocked, $blockedCreate->status);
+        self::assertSame(['retention_execution_forbidden_for_pbs_target'], $blockedCreate->blockers);
+        self::assertSame(0, $this->connection()->fetchOne('SELECT COUNT(*) FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        $this->connection()->update('pve_storages', ['storage_type' => 'dir'], ['id' => self::STORAGE]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate,
+            self::POLICY,
+            0,
+            'pbs-retention-safe-create',
+            random_bytes(16),
+            $this->policyPayload('Safe policy'),
+        ), $principal)->status);
+        $this->connection()->update('pve_storages', ['storage_type' => 'pbs'], ['id' => self::STORAGE]);
+
+        $blockedUpdate = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyUpdate,
+            self::POLICY,
+            1,
+            'pbs-retention-update',
+            random_bytes(16),
+            array_replace($this->policyPayload('Unsafe update'), ['retentionExecutionEnabled' => true]),
+        ), $principal);
+        self::assertSame(ConfigurationCommandStatus::Blocked, $blockedUpdate->status);
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        $this->connection()->update('backup_policies', ['retention_execution_enabled' => 1], ['id' => self::POLICY]);
+        $activationEvidence = (new \App\Infrastructure\Persistence\MariaDb\DbalActivationEvidenceProvider($this->connection()))
+            ->policyEvidence(new \App\Domain\Policy\PolicyId(self::POLICY));
+        self::assertTrue($activationEvidence->pbsTarget);
+        self::assertTrue($activationEvidence->retentionExecutionEnabled);
+        $blockedEnable = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyEnable,
+            self::POLICY,
+            1,
+            'pbs-retention-enable',
+            random_bytes(16),
+        ), $principal);
+        self::assertSame(ConfigurationCommandStatus::Blocked, $blockedEnable->status);
+        self::assertSame(['retention_execution_forbidden_for_pbs_target'], $blockedEnable->blockers);
+        self::assertSame('draft', $this->connection()->fetchOne('SELECT status FROM backup_policies WHERE id = ?', [self::POLICY]));
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+    }
+
+    public function testPveNinePolicyWritesRejectLegacyMaxfilesWithoutChangingRevision(): void
+    {
+        $this->seedContext();
+        $this->seedPveCapability(9);
+        $repository = new DbalConfigurationCommandRepository($this->connection());
+        $principal = new AuthenticatedPrincipal(new UserId(self::USER), new NormalizedUsername('admin'), [Permission::BackupConfigurationManage]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetCreate,
+            self::TARGET,
+            0,
+            'pve9-retention-target',
+            random_bytes(16),
+            $this->targetPayload('PVE 9 target'),
+        ), $principal)->status);
+
+        $legacyPayload = array_replace($this->policyPayload('Legacy'), [
+            'legacyMaxfiles' => 7,
+            'keepAll' => null,
+            'keepLast' => null,
+        ]);
+        $blockedCreate = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate,
+            self::POLICY,
+            0,
+            'pve9-retention-create',
+            random_bytes(16),
+            $legacyPayload,
+        ), $principal);
+        self::assertSame(['retention_incompatible'], $blockedCreate->blockers);
+        self::assertSame(0, $this->connection()->fetchOne('SELECT COUNT(*) FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate,
+            self::POLICY,
+            0,
+            'pve9-retention-safe-create',
+            random_bytes(16),
+            $this->policyPayload('Safe'),
+        ), $principal)->status);
+        $blockedOverride = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::GuestOverrideUpsert,
+            self::POLICY,
+            1,
+            'pve9-retention-override',
+            random_bytes(16),
+            ['entries' => [[
+                'id' => self::OVERRIDE,
+                'guestId' => self::GUEST,
+                'backupMode' => 'snapshot',
+                'compression' => 'zstd',
+                'legacyMaxfiles' => 2,
+                'keepAll' => null,
+                'keepLast' => null,
+                'keepHourly' => null,
+                'keepDaily' => null,
+                'keepWeekly' => null,
+                'keepMonthly' => null,
+                'keepYearly' => null,
+            ]]],
+        ), $principal);
+        self::assertSame(['retention_incompatible'], $blockedOverride->blockers);
+        self::assertSame(0, $this->connection()->fetchOne('SELECT COUNT(*) FROM backup_policy_guest_overrides WHERE policy_id = ?', [self::POLICY]));
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        $blockedUpdate = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyUpdate,
+            self::POLICY,
+            1,
+            'pve9-retention-update',
+            random_bytes(16),
+            $legacyPayload,
+        ), $principal);
+        self::assertSame(['retention_incompatible'], $blockedUpdate->blockers);
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        $now = '2026-07-12 12:00:00.000000';
+        $this->connection()->insert('backup_policy_guest_overrides', [
+            'id' => self::OVERRIDE,
+            'policy_id' => self::POLICY,
+            'connection_id' => self::CONNECTION,
+            'cluster_id' => self::CLUSTER,
+            'guest_id' => self::GUEST,
+            'legacy_maxfiles' => 2,
+            'status' => 'active',
+            'revision' => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        $blockedEnable = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyEnable,
+            self::POLICY,
+            1,
+            'pve9-retention-enable',
+            random_bytes(16),
+        ), $principal);
+        self::assertSame(['retention_incompatible'], $blockedEnable->blockers);
+        self::assertSame('draft', $this->connection()->fetchOne('SELECT status FROM backup_policies WHERE id = ?', [self::POLICY]));
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+    }
+
     public function testCompleteTargetPolicySelectionAndGuestOverrideLifecycle(): void
     {
         $this->seedContext();
@@ -246,5 +413,23 @@ final class ConfigurationCommandRepositoryTest extends DatabaseTestCase
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS=1');
         }
+    }
+
+    private function seedPveCapability(int $major): void
+    {
+        $payload = json_encode(['major' => $major], JSON_THROW_ON_ERROR);
+        $this->connection()->insert('proxmox_capability_snapshots', [
+            'id' => str_repeat('v', 16),
+            'connection_id' => self::CONNECTION,
+            'product' => 'pve',
+            'version_major' => $major,
+            'version_minor' => 0,
+            'raw_version' => $major.'.0',
+            'profile_version' => 1,
+            'capabilities_json' => $payload,
+            'snapshot_hash' => hash('sha256', $payload, true),
+            'first_observed_at' => '2026-07-12 12:00:00.000000',
+            'last_observed_at' => '2026-07-12 12:00:00.000000',
+        ]);
     }
 }

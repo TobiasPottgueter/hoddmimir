@@ -14,6 +14,7 @@ const gateLabels: Record<ShadowGateCode, string> = {
   node_enabled: "Node aktiviert",
   guest_enabled: "Gast aktiviert",
   policy_enabled: "Policy aktiviert",
+  policy_retention_compatible: "Retention mit PVE-Version kompatibel",
   target_enabled: "Backup-Ziel aktiviert",
   explicit_exclusion_absent: "Keine explizite Ausnahme",
   guest_active: "Gast aktiv",
@@ -73,6 +74,7 @@ const detailLabels: Record<ShadowGateDetailCode, string> = {
   insufficient_free_space: "Zu wenig freier Speicher",
   concurrency_limit_reached: "Parallelitätsgrenze erreicht",
   invalid_mapping: "Ungültige Zuordnung",
+  incompatible: "Nicht kompatibel",
   active_request_exists: "Aktive Anforderung vorhanden",
 };
 

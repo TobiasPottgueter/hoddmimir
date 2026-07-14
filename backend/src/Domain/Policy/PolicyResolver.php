@@ -16,6 +16,7 @@ final readonly class PolicyResolver
         ?Compression $guestCompression,
         ?RetentionPolicy $guestRetention,
         bool $deletionEffectApproved,
+        bool $deletionEffectAllowedForTarget,
     ): ResolvedBackupPolicy {
         if (!$policy->status->executable()) {
             throw new DomainException('Only enabled backup policies can be resolved.');
@@ -50,7 +51,7 @@ final readonly class PolicyResolver
             $guestMode ?? $mode,
             $guestCompression ?? $compression,
             $retention,
-            $deletionEffectApproved ? $retention : null,
+            $deletionEffectApproved && $deletionEffectAllowedForTarget ? $retention : null,
             $priority,
             $thresholds,
             $schedule,
