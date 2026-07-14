@@ -9,7 +9,7 @@
         "ext-iconv": "*",
         "symfony/console": "^7.4",
         "symfony/framework-bundle": "^7.4",
-        "symfony/runtime": "^7.4"
+        "symfony/runtime": "^8.1"
     },
     "require-dev": {
         "phpstan/phpstan": "^2.1",
