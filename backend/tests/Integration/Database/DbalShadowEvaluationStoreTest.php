@@ -39,7 +39,10 @@ use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
 use DateTimeImmutable;
 use DateTimeZone;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\AbstractMigration;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Psr\Log\NullLogger;
 use Throwable;
 
 final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
@@ -71,7 +74,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
 
         $row = $this->connection()->fetchAssociative('SELECT * FROM scheduler_decisions');
         self::assertIsArray($row);
-        self::assertSame('eligible', $row['outcome']);
+        self::assertSame('deduplicated', $row['outcome']);
         self::assertSame('never_backed_up', $row['reason']);
         self::assertSame('300', $this->numericString($row['priority'] ?? null));
         self::assertSame('1', $this->numericString($row['placement_revision'] ?? null));
@@ -309,7 +312,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         ));
         $this->assertConstraintViolation(fn () => $this->connection()->update(
             'scheduler_decision_gates',
-            ['passed' => 0],
+            ['passed' => 1],
             ['decision_id' => $decisionId, 'gate_ordinal' => 1],
         ));
         $this->assertConstraintViolation(fn () => $this->connection()->update(
@@ -317,6 +320,31 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             ['code' => 'start_backup'],
             ['decision_id' => $decisionId, 'gate_ordinal' => 1],
         ));
+    }
+
+    public function testAutomaticPromotionMigrationDownUpPreservesCurrentShadowEvidenceAndConstraints(): void
+    {
+        (new DbalShadowEvaluationStore($this->connection()))->persist(
+            $this->lease,
+            $this->batch('migration-roundtrip'),
+        );
+
+        try {
+            $downSql = $this->executeAutomaticPromotionMigration(false);
+            self::assertSame([], $downSql, 'The expand migration must not contract live evidence during an old-image rollback.');
+            $this->assertAutomaticPromotionMigrationState();
+
+            $upSql = $this->executeAutomaticPromotionMigration(true);
+            self::assertCount(1, $upSql);
+            self::assertStringContainsString('DROP CONSTRAINT chk_scheduler_decision_gates_code', $upSql[0]);
+            self::assertStringContainsString('DROP CONSTRAINT chk_scheduler_decision_gates_detail', $upSql[0]);
+            self::assertStringContainsString('ADD CONSTRAINT chk_scheduler_decision_gates_code', $upSql[0]);
+            self::assertStringContainsString('ADD CONSTRAINT chk_scheduler_decision_gates_detail', $upSql[0]);
+            $this->assertAutomaticPromotionMigrationState();
+        } finally {
+            $this->cleanupCommittedFixture();
+            $this->synchronizeImplicitDdlCommit();
+        }
     }
 
     public function testConcurrentIdenticalWritersConvergeOnOneRun(): void
@@ -368,7 +396,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             $this->clusterId,
             $guestId ?? $this->guestId,
             new ShadowPlacementEvidence($this->nodeId, 1, $placementObservedAt),
-            DecisionOutcome::Eligible,
+            $withPromotion ? DecisionOutcome::Eligible : DecisionOutcome::Deduplicated,
             new ReasonPriority(BackupReason::NeverBackedUp, Priority::NeverBackedUp),
             new ShadowPolicyEvidence(self::id('policy'), 1, hash('sha256', $withPromotion ? $policyJson : 'policy', true)),
             new ShadowTargetEvidence(self::id('target'), 1),
@@ -376,12 +404,12 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             $this->now->modify('-3 seconds'),
             $this->now->modify('-3 seconds'),
             [new OrderedShadowGate(1, new GateResult(
-                GateCode::PlacementPresent,
-                true,
-                GateScope::Placement,
+                $withPromotion ? GateCode::PlacementPresent : GateCode::HigherRankedCandidateAbsent,
+                $withPromotion,
+                $withPromotion ? GateScope::Placement : GateScope::Request,
                 new GateSubjectId(($guestId ?? $this->guestId)->binary()),
                 $placementObservedAt,
-                GateDetailCode::Passed,
+                $withPromotion ? GateDetailCode::Passed : GateDetailCode::HigherRankedCandidate,
             ))],
         );
 
@@ -640,6 +668,89 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             }
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
+    /** @return list<string> */
+    private function executeAutomaticPromotionMigration(bool $up): array
+    {
+        $path = dirname(__DIR__, 3).'/migrations/Version20260715000100.php';
+        require_once $path;
+        $class = 'DoctrineMigrations\\'.pathinfo($path, PATHINFO_FILENAME);
+        if (!is_a($class, AbstractMigration::class, true)) {
+            self::fail('The automatic-promotion migration did not load as a Doctrine migration.');
+        }
+        $migration = new $class($this->connection(), new NullLogger());
+        if ($up) {
+            $migration->up(new Schema());
+        } else {
+            $migration->down(new Schema());
+        }
+
+        $statements = [];
+        foreach ($migration->getSql() as $query) {
+            $statements[] = $query->getStatement();
+            self::assertSame([], $query->getParameters());
+            self::assertSame([], $query->getTypes());
+            $this->connection()->executeStatement($query->getStatement());
+        }
+
+        return $statements;
+    }
+
+    private function assertAutomaticPromotionMigrationState(): void
+    {
+        $row = $this->connection()->fetchAssociative(<<<'SQL'
+SELECT decision.outcome, gate.code, gate.detail_code
+FROM scheduler_decisions decision
+JOIN scheduler_decision_gates gate ON gate.decision_id = decision.id
+WHERE decision.id = :decision_id
+SQL, ['decision_id' => self::bytes('decision-migration-roundtrip')]);
+        self::assertIsArray($row);
+        self::assertSame('deduplicated', $row['outcome']);
+        self::assertSame('higher_ranked_candidate_absent', $row['code']);
+        self::assertSame('higher_ranked_candidate', $row['detail_code']);
+
+        $checks = $this->connection()->fetchAllKeyValue(<<<'SQL'
+SELECT CONSTRAINT_NAME, CHECK_CLAUSE
+FROM information_schema.CHECK_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA = DATABASE()
+  AND CONSTRAINT_NAME IN (
+      'chk_scheduler_decision_gates_code',
+      'chk_scheduler_decision_gates_detail'
+  )
+ORDER BY CONSTRAINT_NAME
+SQL);
+        self::assertCount(2, $checks);
+        $codeCheck = $checks['chk_scheduler_decision_gates_code'] ?? null;
+        $detailCheck = $checks['chk_scheduler_decision_gates_detail'] ?? null;
+        self::assertIsString($codeCheck);
+        self::assertIsString($detailCheck);
+        self::assertStringContainsString('higher_ranked_candidate_absent', $codeCheck);
+        self::assertStringContainsString('higher_ranked_candidate', $detailCheck);
+
+        self::assertSame('0', $this->numericString($this->connection()->fetchOne(<<<'SQL'
+SELECT NON_UNIQUE
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'backup_requests'
+  AND INDEX_NAME = 'uq_backup_requests_shadow_decision'
+LIMIT 1
+SQL)));
+    }
+
+    private function synchronizeImplicitDdlCommit(): void
+    {
+        if (!$this->connection()->isTransactionActive()) {
+            return;
+        }
+        try {
+            $this->connection()->commit();
+        } catch (\Doctrine\DBAL\Exception $failure) {
+            if (!str_contains($failure->getMessage(), 'There is no active transaction')) {
+                throw $failure;
+            }
+            self::addToAssertionCount(1);
         }
     }
 

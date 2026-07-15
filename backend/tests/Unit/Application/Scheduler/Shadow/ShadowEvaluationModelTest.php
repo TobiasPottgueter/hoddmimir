@@ -244,10 +244,11 @@ final class ShadowEvaluationModelTest extends TestCase
 
     public function testBatchNormalizesTimesSortsDecisionsAndHashesCanonicalContent(): void
     {
-        $first = $this->eligibleDecision(1);
-        $second = $this->eligibleDecision(2);
-        $batch = $this->batch([$second, $first]);
-        $same = $this->batch([$first, $second]);
+        $first = $this->eligibleDecision(1, 12);
+        $second = $this->eligibleDecision(2, 13);
+        $promotions = [$this->promotion($first, 1), $this->promotion($second, 2)];
+        $batch = $this->batch([$second, $first], promotions: array_reverse($promotions));
+        $same = $this->batch([$first, $second], promotions: $promotions);
 
         self::assertSame([$first->id, $second->id], array_column($batch->decisions, 'id'));
         self::assertSame('2026-07-12T12:00:00+00:00', $batch->startedAt->format('c'));
@@ -255,7 +256,7 @@ final class ShadowEvaluationModelTest extends TestCase
         self::assertSame(4, $batch->gateCount());
         self::assertSame(32, strlen($batch->contentHash()));
         self::assertSame($batch->contentHash(), $same->contentHash());
-        self::assertNotSame($batch->contentHash(), $this->batch([$first, $second], evaluatorVersion: 2)->contentHash());
+        self::assertNotSame($batch->contentHash(), $this->batch([$first, $second], evaluatorVersion: 2, promotions: $promotions)->contentHash());
     }
 
     public function testBatchAllowsAnEmptyEvaluation(): void
@@ -273,7 +274,68 @@ final class ShadowEvaluationModelTest extends TestCase
         $batch = $this->batch([$decision], promotions: [$promotion]);
 
         self::assertSame([$promotion], $batch->promotions);
-        self::assertNotSame($this->batch([$decision])->contentHash(), $batch->contentHash());
+        self::assertNotSame(
+            $this->batch([$decision], promotions: [$this->promotion($decision, 2)])->contentHash(),
+            $batch->contentHash(),
+        );
+    }
+
+    public function testBatchRequiresExactlyOnePromotionForEveryEligibleWinner(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('exactly one automatic promotion');
+
+        $this->batch([$this->eligibleDecision(1)]);
+    }
+
+    public function testBatchRejectsASecondEligibleDecisionForTheSameGuest(): void
+    {
+        $first = $this->eligibleDecision(1);
+        $second = $this->eligibleDecision(2);
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('only one eligible winner per guest');
+
+        $this->batch(
+            [$first, $second],
+            promotions: [$this->promotion($first, 1)],
+        );
+    }
+
+    public function testBatchAllowsUnpromotedBlockedAndDeduplicatedDecisionsBesideTheWinner(): void
+    {
+        $winner = $this->eligibleDecision(2);
+        $promotion = $this->promotion($winner, 1);
+        $blocked = $this->decision(
+            DecisionOutcome::Blocked,
+            null,
+            null,
+            null,
+            null,
+            [new OrderedShadowGate(1, $this->gate(false))],
+        );
+        $deduplicated = new ShadowDecision(
+            new ShadowDecisionId(str_repeat("\x03", 16)),
+            $winner->connectionId,
+            $winner->clusterId,
+            $winner->guestId,
+            $winner->placement,
+            DecisionOutcome::Deduplicated,
+            $winner->reasonPriority,
+            $winner->policy,
+            $winner->target,
+            $winner->inventoryObservedAt,
+            $winner->capacityObservedAt,
+            $winner->writeStateObservedAt,
+            [new OrderedShadowGate(1, $this->gate(false))],
+        );
+
+        $batch = $this->batch(
+            [$winner, $blocked, $deduplicated],
+            promotions: [$promotion],
+        );
+
+        self::assertCount(3, $batch->decisions);
+        self::assertSame([$promotion], $batch->promotions);
     }
 
     #[DataProvider('invalidBatchPromotionProvider')]
@@ -416,13 +478,13 @@ final class ShadowEvaluationModelTest extends TestCase
         );
     }
 
-    private function eligibleDecision(int $idByte): ShadowDecision
+    private function eligibleDecision(int $idByte, int $guestByte = 12): ShadowDecision
     {
         return new ShadowDecision(
             new ShadowDecisionId(str_repeat(pack('C', $idByte), 16)),
             $this->inventoryId(10),
             $this->inventoryId(11),
-            $this->inventoryId(12),
+            $this->inventoryId($guestByte),
             $this->placement(),
             DecisionOutcome::Eligible,
             $this->reason(),

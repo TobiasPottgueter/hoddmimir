@@ -101,25 +101,25 @@ final class DbalShadowEvaluationStoreTest extends TestCase
         self::assertSame('missing', $blockedGate['detail_code']);
         self::assertNull($blockedGate['observed_at']);
 
-        $eligible = current(array_filter($decisions, static fn (array $row): bool => 'eligible' === $row['outcome']));
-        self::assertIsArray($eligible);
-        self::assertContains($eligible['decision_ordinal'], [1, 2]);
-        self::assertNotSame($blocked['decision_ordinal'], $eligible['decision_ordinal']);
-        self::assertSame('eligible', $eligible['outcome']);
-        self::assertSame(300, $eligible['priority']);
-        self::assertSame('never_backed_up', $eligible['reason']);
-        self::assertSame(9, $eligible['placement_revision']);
-        self::assertSame(3, $eligible['policy_revision']);
-        self::assertSame(4, $eligible['target_revision']);
-        self::assertSame(hash('sha256', 'policy', true), $eligible['policy_snapshot_hash']);
-        self::assertSame('2026-07-12 10:00:10.000000', $eligible['capacity_observed_at']);
-        self::assertSame('2026-07-12 10:00:20.000000', $eligible['write_state_observed_at']);
+        $deduplicated = current(array_filter($decisions, static fn (array $row): bool => 'deduplicated' === $row['outcome']));
+        self::assertIsArray($deduplicated);
+        self::assertContains($deduplicated['decision_ordinal'], [1, 2]);
+        self::assertNotSame($blocked['decision_ordinal'], $deduplicated['decision_ordinal']);
+        self::assertSame('deduplicated', $deduplicated['outcome']);
+        self::assertSame(300, $deduplicated['priority']);
+        self::assertSame('never_backed_up', $deduplicated['reason']);
+        self::assertSame(9, $deduplicated['placement_revision']);
+        self::assertSame(3, $deduplicated['policy_revision']);
+        self::assertSame(4, $deduplicated['target_revision']);
+        self::assertSame(hash('sha256', 'policy', true), $deduplicated['policy_snapshot_hash']);
+        self::assertSame('2026-07-12 10:00:10.000000', $deduplicated['capacity_observed_at']);
+        self::assertSame('2026-07-12 10:00:20.000000', $deduplicated['write_state_observed_at']);
 
-        $eligibleGate = current(array_filter($gates, static fn (array $row): bool => 'connection_enabled' === $row['code']));
-        self::assertIsArray($eligibleGate);
-        self::assertSame(1, $eligibleGate['passed']);
-        self::assertSame('passed', $eligibleGate['detail_code']);
-        self::assertSame('2026-07-12 10:00:00.000000', $eligibleGate['observed_at']);
+        $deduplicationGate = current(array_filter($gates, static fn (array $row): bool => 'higher_ranked_candidate_absent' === $row['code']));
+        self::assertIsArray($deduplicationGate);
+        self::assertSame(0, $deduplicationGate['passed']);
+        self::assertSame('higher_ranked_candidate', $deduplicationGate['detail_code']);
+        self::assertSame('2026-07-12 10:00:00.000000', $deduplicationGate['observed_at']);
     }
 
     public function testPersistsAnEmptyEvaluationWithoutChildRows(): void
@@ -339,11 +339,11 @@ final class DbalShadowEvaluationStoreTest extends TestCase
             1,
             new DateTimeImmutable('2026-07-12T10:00:00Z'),
             new DateTimeImmutable('2026-07-12T10:01:00Z'),
-            $decisions ?? [$this->eligibleDecision(), $this->blockedDecision()],
+            $decisions ?? [$this->deduplicatedDecision(), $this->blockedDecision()],
         );
     }
 
-    private function eligibleDecision(): ShadowDecision
+    private function deduplicatedDecision(): ShadowDecision
     {
         return new ShadowDecision(
             new ShadowDecisionId(self::bytes('decision-z')),
@@ -351,7 +351,7 @@ final class DbalShadowEvaluationStoreTest extends TestCase
             self::id('cluster'),
             self::id('guest-z'),
             new ShadowPlacementEvidence(self::id('node'), 9, new DateTimeImmutable('2026-07-12T10:00:00Z')),
-            DecisionOutcome::Eligible,
+            DecisionOutcome::Deduplicated,
             new ReasonPriority(BackupReason::NeverBackedUp, Priority::NeverBackedUp),
             new ShadowPolicyEvidence(self::id('policy'), 3, hash('sha256', 'policy', true)),
             new ShadowTargetEvidence(self::id('target'), 4),
@@ -359,12 +359,12 @@ final class DbalShadowEvaluationStoreTest extends TestCase
             new DateTimeImmutable('2026-07-12T10:00:10Z'),
             new DateTimeImmutable('2026-07-12T10:00:20Z'),
             [new OrderedShadowGate(1, new GateResult(
-                GateCode::ConnectionEnabled,
-                true,
-                GateScope::Connection,
+                GateCode::HigherRankedCandidateAbsent,
+                false,
+                GateScope::Request,
                 new GateSubjectId(self::id('connection')->binary()),
                 new DateTimeImmutable('2026-07-12T12:00:00+02:00'),
-                GateDetailCode::Passed,
+                GateDetailCode::HigherRankedCandidate,
             ))],
         );
     }

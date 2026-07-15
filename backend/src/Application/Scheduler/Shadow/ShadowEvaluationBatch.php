@@ -52,8 +52,21 @@ final readonly class ShadowEvaluationBatch
         ksort($byId, SORT_STRING);
         $this->decisions = array_values($byId);
 
+        $eligibleByDecision = [];
+        $eligibleByGuest = [];
+        foreach ($byId as $decisionHex => $decision) {
+            if (\App\Domain\Scheduler\DecisionOutcome::Eligible !== $decision->outcome) {
+                continue;
+            }
+            $guestHex = bin2hex($decision->guestId->binary());
+            if (isset($eligibleByGuest[$guestHex])) {
+                throw new InvalidArgumentException('A shadow batch may contain only one eligible winner per guest.');
+            }
+            $eligibleByDecision[$decisionHex] = true;
+            $eligibleByGuest[$guestHex] = true;
+        }
+
         $promotionByDecision = [];
-        $promotedGuests = [];
         foreach ($promotions as $promotion) {
             // @phpstan-ignore instanceof.alwaysTrue (enforce the declared runtime boundary)
             if (!$promotion instanceof AutomaticShadowPromotion) {
@@ -65,16 +78,14 @@ final readonly class ShadowEvaluationBatch
                 || isset($promotionByDecision[$decisionHex])) {
                 throw new InvalidArgumentException('Every automatic promotion must reference one unique eligible decision.');
             }
-            $guestHex = bin2hex($decision->guestId->binary());
-            if (isset($promotedGuests[$guestHex])) {
-                throw new InvalidArgumentException('A shadow batch may promote only one winner per guest.');
-            }
             $policyHash = $decision->policy?->snapshotHash();
             if (null === $policyHash || !hash_equals($policyHash, $promotion->resolvedPolicyHash())) {
                 throw new InvalidArgumentException('The promotion policy evidence differs from its shadow decision.');
             }
             $promotionByDecision[$decisionHex] = $promotion;
-            $promotedGuests[$guestHex] = true;
+        }
+        if (count($promotionByDecision) !== count($eligibleByDecision)) {
+            throw new InvalidArgumentException('Every eligible shadow winner must have exactly one automatic promotion.');
         }
         ksort($promotionByDecision, SORT_STRING);
         $this->promotions = array_values($promotionByDecision);
