@@ -46,6 +46,24 @@ returns the complete ACL tree only when the caller has `Sys.Audit` on
 token. Each ACL path is compared separately with the scan and backup token's
 own effective matrix; the backup token never needs ACL-list permission.
 
+The PVE-7 source at the pinned `f96a4de` revision enumerates `/pools` instead
+of `/pool` in `RPCEnvironment::get_effective_permissions()`. PVE 8 and 9 use
+the correct singular path. The dedicated
+`7/onboarding-evidence-missing-pool-root.json` fixture preserves only this
+compatibility case: the unscoped `/pool` row is absent while the unscoped `/`
+row contains the complete scanner role. Hoddmímir reconstructs PVE-7 scanner
+`/pool` `Pool.Audit` only when that root grant, an exact scoped `/pool` read,
+and a separate scoped child read all report propagation. No other missing root,
+PVE major, or backup permission receives this fallback.
+
+The ACL list is global rather than identity-scoped. Explicit token and user
+`NoAccess` is therefore attributed only to the token being checked or its
+owning user; unrelated users and tokens do not deny that credential. Group
+membership is not part of these read-only probes, so every group `NoAccess` is
+conservatively relevant. Relevant rows remain explicit negative permissions. A
+denial inside `/pool`, or a propagated denial inherited from an ancestor,
+prevents the PVE-7 fallback.
+
 The Viewer return schema for `GET /storage` declares only a small part of the
 record that the official implementation returns. The `storage-config.json`
 and `storage-node-*.json` fixtures therefore also follow the official

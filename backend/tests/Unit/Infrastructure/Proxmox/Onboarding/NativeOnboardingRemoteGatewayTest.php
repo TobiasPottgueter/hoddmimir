@@ -228,7 +228,7 @@ final class NativeOnboardingRemoteGatewayTest extends TestCase
         }
     }
 
-    public function testPvePropagationRequiresTheChildProbeAndAclSubtreeGapsBecomeNegativeEvidence(): void
+    public function testPvePropagationRequiresTheChildProbeAndNoAccessIsCredentialScoped(): void
     {
         $factory = new RecordingPveOnboardingClientFactory(static function (string $method, string $url, array $options): MockResponse {
             $queryString = parse_url($url, PHP_URL_QUERY);
@@ -269,7 +269,12 @@ final class NativeOnboardingRemoteGatewayTest extends TestCase
         self::assertNotNull($backup);
         self::assertFalse(self::permission($scan->permissions, '/vms', 'VM.Audit')->propagated);
         self::assertFalse(self::permission($scan->permissions, '/vms/123', 'VM.Audit')->granted);
-        self::assertFalse(self::permission($backup->permissions, '/vms/123', 'VM.Backup')->granted);
+        self::assertTrue(self::permission($backup->permissions, '/vms', 'VM.Backup')->granted);
+        self::assertSame([], array_values(array_filter(
+            $backup->permissions,
+            static fn (OnboardingPermission $permission): bool => '/vms/123' === $permission->path
+                && 'VM.Backup' === $permission->privilege,
+        )));
     }
 
     #[DataProvider('ambiguousPveAclAndScopedResponses')]

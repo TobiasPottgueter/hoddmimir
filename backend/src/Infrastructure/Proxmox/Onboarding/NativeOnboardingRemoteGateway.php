@@ -122,11 +122,22 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
             $command,
             OnboardingCredentialKind::Backup,
         );
-        $aclPaths = $this->pveProbe(
-            fn (): array => $this->pveAclPaths($scan->get(['access', 'acl'])),
+        $aclEvidence = $this->pveProbe(
+            fn (): array => $this->pveAclEvidence($scan->get(['access', 'acl'])),
             $command,
             OnboardingCredentialKind::Scan,
         );
+        $scanPoolRootPropagation = 7 === $scanVersion->major
+            ? $this->pveProbe(
+                fn (): bool => $this->pveScopedPropagation(
+                    $scan->get(['access', 'permissions'], ['path' => '/pool']),
+                    '/pool',
+                    'Pool.Audit',
+                ),
+                $command,
+                OnboardingCredentialKind::Scan,
+            )
+            : null;
         $scanPropagation = $this->pvePropagationEvidence(
             $scan,
             self::PVE_SCAN_PROPAGATION_PROBES,
@@ -142,14 +153,22 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
         $scanPermissions = $this->pvePermissions(
             $scanMatrix,
             $scanPropagation,
-            $aclPaths,
+            $aclEvidence,
             self::PVE_SCAN_PROPAGATION_PROBES,
+            $scanVersion->major,
+            OnboardingCredentialKind::Scan,
+            $command->credential(OnboardingCredentialKind::Scan)->tokenId,
+            $scanPoolRootPropagation,
         );
         $backupPermissions = $this->pvePermissions(
             $backupMatrix,
             $backupPropagation,
-            $aclPaths,
+            $aclEvidence,
             self::PVE_BACKUP_PROPAGATION_PROBES,
+            $backupVersion->major,
+            OnboardingCredentialKind::Backup,
+            $command->credential(OnboardingCredentialKind::Backup)->tokenId,
+            null,
         );
 
         return new OnboardingRemoteEvidence(true, [
@@ -298,11 +317,20 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
     /**
      * @param array<string, array<string, bool>> $matrix
      * @param array<string, array<string, bool>> $propagation
-     * @param list<string>                       $aclPaths
+     * @param list<array{path: string, type: 'group'|'token'|'user', ugid: string, propagated: bool}> $aclEvidence explicit NoAccess ACLs
      * @param list<array{string, string, string}> $required
      * @return list<OnboardingPermission>
      */
-    private function pvePermissions(array $matrix, array $propagation, array $aclPaths, array $required): array
+    private function pvePermissions(
+        array $matrix,
+        array $propagation,
+        array $aclEvidence,
+        array $required,
+        int $major,
+        OnboardingCredentialKind $credential,
+        string $identity,
+        ?bool $pveSevenPoolRootPropagation,
+    ): array
     {
         $result = [];
         foreach ($matrix as $path => $privileges) {
@@ -317,20 +345,103 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
             }
         }
 
-        $evidencePaths = array_fill_keys([...array_keys($matrix), ...$aclPaths], true);
-        foreach (array_keys($evidencePaths) as $path) {
+        // The unscoped matrix is already evaluated for this credential. A
+        // listed descendant that lacks a privilege required for its family is
+        // therefore explicit negative evidence, not an unknown path. Preserve
+        // it so the verifier can report a partial-visibility gap.
+        foreach ($matrix as $path => $privileges) {
             foreach ($required as [$familyRoot, $privilege]) {
-                if (!$this->isPathInFamily($path, $familyRoot) || isset($matrix[$path][$privilege])) {
-                    continue;
+                if ($this->isPathInFamily($path, $familyRoot)
+                    && !isset($privileges[$privilege])) {
+                    $result[] = new OnboardingPermission($path, $privilege, false, false);
                 }
-                // The ACL path is known to exist, but PVE's effective matrix
-                // omitted the required privilege (and can omit the whole path
-                // after NoAccess). Preserve that negative evidence explicitly.
-                $result[] = new OnboardingPermission($path, $privilege, false, false);
             }
         }
 
+        $relevantNoAccess = [];
+        foreach ($aclEvidence as $row) {
+            if (!$this->pveNoAccessAppliesToIdentity($row, $identity)) {
+                continue;
+            }
+            $relevantNoAccess[] = $row;
+            foreach ($required as [$familyRoot, $privilege]) {
+                if ($this->pveAclAffectsFamily($row, $familyRoot)) {
+                    $result[] = new OnboardingPermission($row['path'], $privilege, false, false);
+                }
+            }
+        }
+
+        foreach ($required as [$familyRoot, $privilege]) {
+            if (7 !== $major
+                || OnboardingCredentialKind::Scan !== $credential
+                || '/pool' !== $familyRoot
+                || 'Pool.Audit' !== $privilege
+                || isset($matrix[$familyRoot][$privilege])
+                || true !== ($matrix['/']['Pool.Audit'] ?? null)
+                || true !== $pveSevenPoolRootPropagation
+                || true !== ($propagation[$familyRoot][$privilege] ?? null)
+                || $this->pveFamilyHasNegativeEvidence($matrix, $relevantNoAccess, $familyRoot, $privilege)) {
+                continue;
+            }
+
+            // PVE 7 enumerates `/pools` rather than `/pool` in its unscoped
+            // defaults. The correct root grant plus exact-root and child
+            // scoped probes jointly prove this one compatibility gap.
+            $result[] = new OnboardingPermission($familyRoot, $privilege, true, true);
+        }
+
         return $result;
+    }
+
+    /**
+     * @param array<string, array<string, bool>> $matrix
+     * @param list<array{path: string, type: 'group'|'token'|'user', ugid: string, propagated: bool}> $aclEvidence
+     */
+    private function pveFamilyHasNegativeEvidence(
+        array $matrix,
+        array $aclEvidence,
+        string $familyRoot,
+        string $privilege,
+    ): bool {
+        foreach ($matrix as $path => $privileges) {
+            if ($this->isPathInFamily($path, $familyRoot)
+                && (!isset($privileges[$privilege]) || !$privileges[$privilege])) {
+                return true;
+            }
+        }
+        foreach ($aclEvidence as $row) {
+            if ($this->isPathInFamily($row['path'], $familyRoot)
+                || ($row['propagated'] && $this->isPathInFamily($familyRoot, $row['path']))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array{path: string, type: 'group'|'token'|'user', ugid: string, propagated: bool} $row */
+    private function pveNoAccessAppliesToIdentity(array $row, string $identity): bool
+    {
+        $owner = explode('!', $identity, 2)[0];
+
+        if ('token' === $row['type']) {
+            return $row['ugid'] === $identity;
+        }
+        if ('user' === $row['type']) {
+            return $row['ugid'] === $owner;
+        }
+
+        // ACL rows are global and this read-only onboarding probe does not
+        // enumerate the owning user's group memberships. Any group-level
+        // NoAccess must therefore be treated as potentially applicable.
+        return true;
+    }
+
+    /** @param array{path: string, type: 'group'|'token'|'user', ugid: string, propagated: bool} $row */
+    private function pveAclAffectsFamily(array $row, string $familyRoot): bool
+    {
+        return $this->isPathInFamily($row['path'], $familyRoot)
+            || ($row['propagated'] && $this->isPathInFamily($familyRoot, $row['path']));
     }
 
     /**
@@ -369,8 +480,8 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
         return true === ($matrix[$path][$privilege] ?? null);
     }
 
-    /** @return list<string> */
-    private function pveAclPaths(mixed $data): array
+    /** @return list<array{path: string, type: 'group'|'token'|'user', ugid: string, propagated: bool}> explicit NoAccess ACLs */
+    private function pveAclEvidence(mixed $data): array
     {
         if (!is_array($data)) {
             throw PveReadFailure::for(PveReadFailureCode::InvalidResponse);
@@ -378,7 +489,7 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
         if (count($data) > self::MAXIMUM_PVE_ACL_ROWS) {
             throw PveReadFailure::for(PveReadFailureCode::InvalidResponse);
         }
-        $paths = [];
+        $noAccess = [];
         $rows = [];
         foreach ($data as $row) {
             if (!$row instanceof stdClass) {
@@ -408,11 +519,23 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
                 throw PveReadFailure::for(PveReadFailureCode::InvalidResponse);
             }
             $rows[$key] = true;
-            $paths[$path] = true;
+            if ('NoAccess' === $role) {
+                /** @var 'group'|'token'|'user' $type */
+                $noAccess[] = [
+                    'path' => $path,
+                    'type' => $type,
+                    'ugid' => $ugid,
+                    'propagated' => 1 === $propagate,
+                ];
+            }
         }
 
-        $result = array_keys($paths);
-        sort($result, SORT_STRING);
+        usort($noAccess, static fn (array $left, array $right): int => [
+            $left['path'], $left['type'], $left['ugid'], $left['propagated'],
+        ] <=> [
+            $right['path'], $right['type'], $right['ugid'], $right['propagated'],
+        ]);
+        $result = $noAccess;
         return $result;
     }
 
