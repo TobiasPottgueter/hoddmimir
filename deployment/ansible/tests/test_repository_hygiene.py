@@ -9,6 +9,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 IGNORED_PRODUCTION_MAIN = Path(
     "deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/main.yml",
 )
+IGNORED_LAB_FILES = (
+    Path("deployment/ansible/inventories/lab/hosts.yml"),
+    Path("deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/main.yml"),
+    Path("deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml"),
+)
 
 
 class RepositoryProductionHygieneTest(unittest.TestCase):
@@ -62,6 +67,35 @@ class RepositoryProductionHygieneTest(unittest.TestCase):
             self.assertRegex(line, r"@sha256:[0-9a-f]{64}$")
         self.assertIn(".example.invalid", text)
         self.assertNotRegex(text, r":(?:latest|dev|[0-9]+(?:\.[0-9]+)*)$")
+
+    def test_real_lab_configuration_is_ignored_and_examples_are_isolated(self) -> None:
+        for relative in IGNORED_LAB_FILES:
+            with self.subTest(path=relative):
+                tracked = subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", str(relative)],
+                    cwd=REPOSITORY_ROOT,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(0, tracked.returncode)
+                ignored = subprocess.run(
+                    ["git", "check-ignore", "--quiet", str(relative)],
+                    cwd=REPOSITORY_ROOT,
+                    check=False,
+                )
+                self.assertEqual(0, ignored.returncode)
+
+        example = REPOSITORY_ROOT / "deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/main.example.yml"
+        text = example.read_text(encoding="utf-8")
+        self.assertIn("hoddmimir_deployment_profile: lab", text)
+        self.assertIn("hoddmimir_manage_https: false", text)
+        self.assertIn("hoddmimir_project_name: hoddmimir-lab", text)
+        self.assertIn("hoddmimir_database_name: hoddmimir_lab", text)
+        self.assertIn("hoddmimir_backup_execution_required_ack: ENABLE_LAB_BACKUPS", text)
+        image_lines = [line for line in text.splitlines() if re.match(r"hoddmimir_.*_image:", line)]
+        self.assertEqual(4, len(image_lines))
+        for line in image_lines:
+            self.assertRegex(line, r"@sha256:[0-9a-f]{64}$")
 
     @staticmethod
     def repository_files() -> list[Path]:

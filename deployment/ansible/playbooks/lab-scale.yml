@@ -1,0 +1,78 @@
+---
+- name: Scale only the isolated Hoddmímir lab backup worker
+  hosts: hoddmimir_hosts
+  gather_facts: false
+  become: false
+  vars:
+    hoddmimir_backup_execution_activation_ack: "{{ lookup('ansible.builtin.env', 'ENABLE_LAB_BACKUPS') }}"
+  tasks:
+    - name: Run deployment preflight including lab execution guards
+      ansible.builtin.import_role:
+        name: hoddmimir
+        tasks_from: preflight
+
+    - name: Require the explicit lab activation and one or two workers
+      ansible.builtin.assert:
+        that:
+          - hoddmimir_backup_execution_enabled | bool
+          - hoddmimir_matrix_notifications_enabled | bool
+          - hoddmimir_backup_execution_activation_ack == 'ENABLE_LAB_BACKUPS'
+          - hoddmimir_lab_backup_worker_replicas | int in [1, 2]
+        fail_msg: Scaling requires enabled lab backups, Matrix delivery, the exact ENABLE_LAB_BACKUPS acknowledgement, and one or two replicas.
+
+    - name: Scale only the backup worker and wait for health
+      ansible.builtin.command:
+        argv:
+          - "{{ hoddmimir_docker_executable }}"
+          - compose
+          - --file
+          - "{{ hoddmimir_compose_file }}"
+          - up
+          - --detach
+          - --no-deps
+          - --wait
+          - --wait-timeout
+          - "{{ hoddmimir_compose_wait_timeout_seconds | string }}"
+          - --scale
+          - "backup-worker={{ hoddmimir_lab_backup_worker_replicas | int }}"
+          - backup-worker
+      changed_when: true
+
+    - name: Read running lab backup worker container IDs
+      ansible.builtin.command:
+        argv:
+          - "{{ hoddmimir_docker_executable }}"
+          - compose
+          - --file
+          - "{{ hoddmimir_compose_file }}"
+          - ps
+          - --quiet
+          - --filter
+          - status=running
+          - backup-worker
+      register: hoddmimir_lab_backup_worker_ids
+      changed_when: false
+
+    - name: Require the exact running backup worker count
+      ansible.builtin.assert:
+        that:
+          - hoddmimir_lab_backup_worker_ids.stdout_lines | length == hoddmimir_lab_backup_worker_replicas | int
+        fail_msg: The running lab backup worker count differs from the requested scale.
+
+    - name: Read every scaled backup worker health status
+      ansible.builtin.command:
+        argv:
+          - "{{ hoddmimir_docker_executable }}"
+          - inspect
+          - --format
+          - "{{ '{{.State.Health.Status}}' }}"
+          - "{{ item }}"
+      loop: "{{ hoddmimir_lab_backup_worker_ids.stdout_lines }}"
+      register: hoddmimir_lab_backup_worker_health
+      changed_when: false
+
+    - name: Require every scaled backup worker to be healthy
+      ansible.builtin.assert:
+        that:
+          - hoddmimir_lab_backup_worker_health.results | map(attribute='stdout') | unique | list == ['healthy']
+        fail_msg: At least one scaled lab backup worker is not healthy.

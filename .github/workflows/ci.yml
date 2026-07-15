@@ -117,13 +117,19 @@ jobs:
         run: ansible-lint .
 
       - name: Parse example inventory
-        run: ansible-inventory --inventory inventories/production/hosts.example.yml --list >/dev/null
+        run: |
+          ansible-inventory --inventory inventories/production/hosts.example.yml --list >/dev/null
+          ansible-inventory --inventory inventories/lab/hosts.example.yml --list >/dev/null
 
       - name: Check playbook syntax
         run: |
           ansible-playbook --inventory inventories/production/hosts.example.yml playbooks/bootstrap.yml --syntax-check
           ansible-playbook --inventory inventories/production/hosts.example.yml playbooks/deploy.yml --syntax-check
           ansible-playbook --inventory inventories/production/hosts.example.yml playbooks/verify.yml --syntax-check
+          ansible-playbook --inventory inventories/lab/hosts.example.yml playbooks/lab-deploy.yml --syntax-check
+          ansible-playbook --inventory inventories/lab/hosts.example.yml playbooks/lab-verify.yml --syntax-check
+          ansible-playbook --inventory inventories/lab/hosts.example.yml playbooks/lab-down.yml --syntax-check
+          ansible-playbook --inventory inventories/lab/hosts.example.yml playbooks/lab-scale.yml --syntax-check
 
       - name: Test deployment behavior
         run: python -m unittest discover -s tests -p 'test_*.py' -v

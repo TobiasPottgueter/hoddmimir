@@ -1,0 +1,21 @@
+---
+- name: Require the fixed isolated lab namespace
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_deployment_profile == 'lab'
+      - not (hoddmimir_manage_https | bool)
+      - hoddmimir_project_name == 'hoddmimir-lab'
+      - hoddmimir_install_directory == '/opt/hoddmimir-lab'
+      - hoddmimir_secrets_directory == '/etc/hoddmimir-lab/secrets'
+      - hoddmimir_compose_file == '/opt/hoddmimir-lab/compose.yaml'
+      - hoddmimir_migration_compose_file == '/opt/hoddmimir-lab/compose.migration.yaml'
+      - hoddmimir_environment_file == '/opt/hoddmimir-lab/runtime.env'
+      - hoddmimir_mariadb_init_script == '/opt/hoddmimir-lab/10-create-app-users.sh'
+      - hoddmimir_transaction_lock_file == '/opt/hoddmimir-lab/.deployment-transaction.lock'
+      - hoddmimir_database_name == 'hoddmimir_lab'
+      - hoddmimir_web_port | int != 8080
+      - hoddmimir_backup_execution_required_ack == 'ENABLE_LAB_BACKUPS'
+      - >-
+        hoddmimir_backup_execution_activation_ack
+        in ['', 'ENABLE_LAB_BACKUPS']
+    fail_msg: The lab profile must use its fixed isolated project, paths, database, port, lock, HTTPS setting, and acknowledgement.

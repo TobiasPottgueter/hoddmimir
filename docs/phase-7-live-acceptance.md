@@ -288,6 +288,7 @@ dokumentieren und begründet keine Produktionsfreigabe.
 | Datum      | Kandidat  | Ereignis                                          | Ergebnis                                                               | Verbleibende Grenze                                              |
 | ---------- | --------- | ------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 13.07.2026 | `d88d38a` | Alpine-Deployment-Host mit Ansible gebootstrapped | Python 3.12.13, Docker 29.5.2, Compose 2.40.3, Docker/OpenRC gestartet | kein Anwendungsdeploy, keine Live-Matrix, keine Backupausführung |
+| 15.07.2026 | offen | Isolierten Lab-Deploymentvertrag lokal vorbereitet | getrennte Projekt-, Pfad-, DB-, Netz-, Port-, Secret- und Lock-Grenzen mit Lab-Ack; keine reale Ausführung | lokaler Kandidat und Gates noch festzulegen; kein Lab-Deploy und kein Backupstart |
 
 ## Vorläufiges Urteil
 

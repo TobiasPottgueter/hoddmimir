@@ -1,0 +1,35 @@
+---
+- name: Stop isolated Hoddmímir lab without deleting data
+  hosts: hoddmimir_hosts
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Reject a non-lab inventory before stopping services
+      ansible.builtin.import_role:
+        name: hoddmimir
+        tasks_from: lab-profile
+
+    - name: Inspect the installed lab Compose file
+      ansible.builtin.stat:
+        path: "{{ hoddmimir_compose_file }}"
+        follow: false
+      register: hoddmimir_lab_compose
+
+    - name: Require a regular non-symlink lab Compose file
+      ansible.builtin.assert:
+        that:
+          - hoddmimir_lab_compose.stat.exists
+          - hoddmimir_lab_compose.stat.isreg
+          - not hoddmimir_lab_compose.stat.islnk
+        fail_msg: The isolated lab Compose file is missing or unsafe; nothing was stopped.
+
+    - name: Stop only the isolated lab project and retain every volume
+      ansible.builtin.command:
+        argv:
+          - "{{ hoddmimir_docker_executable }}"
+          - compose
+          - --file
+          - "{{ hoddmimir_compose_file }}"
+          - down
+          - --remove-orphans
+      changed_when: true

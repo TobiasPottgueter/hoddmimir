@@ -95,6 +95,7 @@ make api-schema-drift-test
 make supply-chain
 
 make inventory
+make lab-secrets-test
 make lint
 make syntax
 make deployment-test

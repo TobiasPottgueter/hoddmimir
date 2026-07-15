@@ -267,6 +267,76 @@ class PreflightTest(unittest.TestCase):
                 self.assertNotEqual(0, result.returncode)
                 self.assertNotIn(value, result.stdout + result.stderr)
 
+    def test_disabled_host_https_needs_no_public_identity_or_dns_token(self) -> None:
+        variables = valid_variables()
+        variables["hoddmimir_manage_https"] = False
+        variables.pop("hoddmimir_public_domain")
+        variables.pop("hoddmimir_acme_email")
+        variables.pop("hoddmimir_hetzner_dns_api_token")
+
+        self.assertEqual(0, self.run_preflight(variables).returncode)
+
+    def test_host_https_switch_must_be_a_boolean(self) -> None:
+        variables = valid_variables()
+        variables["hoddmimir_manage_https"] = "false"
+
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_isolated_lab_profile_uses_its_own_ack_and_needs_no_https_identity(self) -> None:
+        variables = valid_variables()
+        variables.update({
+            "hoddmimir_deployment_profile": "lab",
+            "hoddmimir_manage_https": False,
+            "hoddmimir_project_name": "hoddmimir-lab",
+            "hoddmimir_install_directory": "/opt/hoddmimir-lab",
+            "hoddmimir_secrets_directory": "/etc/hoddmimir-lab/secrets",
+            "hoddmimir_database_name": "hoddmimir_lab",
+            "hoddmimir_web_port": 18080,
+            "hoddmimir_backup_execution_required_ack": "ENABLE_LAB_BACKUPS",
+        })
+        variables.pop("hoddmimir_public_domain")
+        variables.pop("hoddmimir_acme_email")
+        variables.pop("hoddmimir_hetzner_dns_api_token")
+
+        self.assertEqual(0, self.run_preflight(variables).returncode)
+
+    def test_lab_profile_rejects_production_namespaces_and_acknowledgement(self) -> None:
+        variables = valid_variables()
+        variables.update({
+            "hoddmimir_deployment_profile": "lab",
+            "hoddmimir_manage_https": False,
+            "hoddmimir_backup_execution_required_ack": "ENABLE_PRODUCTION_BACKUPS",
+        })
+
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_lab_execution_requires_its_exact_ack_and_real_matrix_delivery(self) -> None:
+        variables = valid_variables()
+        variables.update({
+            "hoddmimir_deployment_profile": "lab",
+            "hoddmimir_manage_https": False,
+            "hoddmimir_project_name": "hoddmimir-lab",
+            "hoddmimir_install_directory": "/opt/hoddmimir-lab",
+            "hoddmimir_secrets_directory": "/etc/hoddmimir-lab/secrets",
+            "hoddmimir_database_name": "hoddmimir_lab",
+            "hoddmimir_web_port": 18080,
+            "hoddmimir_backup_execution_enabled": True,
+            "hoddmimir_backup_execution_required_ack": "ENABLE_LAB_BACKUPS",
+            "hoddmimir_backup_execution_activation_ack": "ENABLE_LAB_BACKUPS",
+            "hoddmimir_matrix_notifications_enabled": True,
+            "hoddmimir_matrix_webhook_url": "https://matrix.example.test/hook/lab",
+        })
+
+        self.assertEqual(0, self.run_preflight(variables).returncode)
+        variables["hoddmimir_backup_execution_activation_ack"] = "ENABLE_PRODUCTION_BACKUPS"
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_production_profile_rejects_the_lab_acknowledgement(self) -> None:
+        variables = valid_variables()
+        variables["hoddmimir_backup_execution_required_ack"] = "ENABLE_LAB_BACKUPS"
+
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
     def test_requires_one_canonical_private_24_bridge_and_in_range_gateway(self) -> None:
         invalid = (
             ("172.31.253.0/16", "172.31.253.1"),
@@ -804,7 +874,7 @@ class DeploymentStagingIsolationTest(unittest.TestCase):
 
 class HostHttpsAnsibleContractTest(unittest.TestCase):
     def test_fresh_host_creates_https_runtime_parents_before_executor_copy(self) -> None:
-        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "https-setup.yml").read_text(encoding="utf-8")
         self.assertLess(
             tasks.index("Create required HTTPS runtime parent directories"),
             tasks.index("Install recoverable HTTPS transaction executor"),
@@ -837,10 +907,13 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
             self.assertEqual(0o555, stat.S_IMODE(executor.stat().st_mode))
 
     def test_https_role_keeps_caddy_outside_compose_and_acme_identity_isolated(self) -> None:
-        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "https-setup.yml").read_text(encoding="utf-8")
+        activation = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "https-activate.yml").read_text(encoding="utf-8")
+        role_tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
         defaults = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "defaults" / "main.yml").read_text(encoding="utf-8")
         compose = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "templates" / "compose.yaml.j2").read_text(encoding="utf-8")
-        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
+        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify-https.yml").read_text(encoding="utf-8")
+        common_verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
 
         for package in ("caddy", "caddy-openrc", "iproute2", "lego", "openssl"):
             self.assertIn(f"  - {package}", defaults)
@@ -851,21 +924,21 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
         self.assertIn('mode: "0440"', tasks)
         self.assertIn("group: \"{{ hoddmimir_acme_group }}\"", tasks)
         self.assertIn("no_log: true", tasks)
-        self.assertIn("--candidate-caddyfile={{ hoddmimir_caddy_candidate_file }}", tasks)
+        self.assertIn("--candidate-caddyfile={{ hoddmimir_caddy_candidate_file }}", activation)
         self.assertIn("Enable the Caddy OpenRC service without starting it", tasks)
         self.assertIn("Enable and start the Alpine periodic scheduler", tasks)
         self.assertLess(
-            tasks.index("Enable the Caddy OpenRC service without starting it"),
-            tasks.index("Issue or renew the public certificate and activate host Caddy"),
+            role_tasks.index("ansible.builtin.import_tasks: https-setup.yml"),
+            role_tasks.index("ansible.builtin.import_tasks: https-activate.yml"),
         )
-        self.assertNotIn("notify:", tasks)
+        self.assertNotIn("notify:", tasks + activation)
         self.assertIn("Check public HTTPS API health with full certificate verification", verify)
         self.assertIn("validate_certs: true", verify)
-        self.assertIn("Require exactly four running services", verify)
+        self.assertIn("Require exactly four running services", common_verify)
 
     def test_token_is_only_passed_to_lego_through_file_environment(self) -> None:
         transaction = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "files" / "https_transaction.py").read_text(encoding="utf-8")
-        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "https-setup.yml").read_text(encoding="utf-8")
 
         self.assertIn('"HETZNER_API_TOKEN_FILE": str(token_file)', transaction)
         self.assertNotIn('"HETZNER_API_TOKEN":', transaction)
@@ -877,11 +950,7 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
         self.assertNotIn("hoddmimir_hetzner_dns_api_token }}\"\n      -", tasks)
 
     def test_failed_https_transaction_does_not_parse_empty_stdout_as_json(self) -> None:
-        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
-        https_task = tasks.split(
-            "- name: Issue or renew the public certificate and activate host Caddy",
-            maxsplit=1,
-        )[1]
+        https_task = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "https-activate.yml").read_text(encoding="utf-8")
 
         self.assertIn("hoddmimir_https_transaction.rc == 0 and", https_task)
         self.assertIn("default('{}') | from_json", https_task)
@@ -903,7 +972,7 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
         self.assertIn("failed=0", result.stdout)
 
     def test_listener_verification_uses_the_configured_non_default_web_port(self) -> None:
-        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
+        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify-https.yml").read_text(encoding="utf-8")
         listener_contract = verify.split(
             "- name: Require public TLS listeners and loopback-only application and admin listeners",
             maxsplit=1,
@@ -924,6 +993,43 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
             f"127.0.0.1:{configured_port}",
             listener_contract.replace("{{ hoddmimir_web_port }}", str(configured_port)),
         )
+
+    def test_https_management_defaults_on_and_every_entrypoint_is_fail_closed(self) -> None:
+        defaults = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "defaults" / "main.yml").read_text(encoding="utf-8")
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")
+        preflight = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "preflight.yml").read_text(encoding="utf-8")
+
+        self.assertIn("hoddmimir_manage_https: true", defaults)
+        self.assertEqual(2, tasks.count("when: hoddmimir_manage_https | bool"))
+        self.assertIn("ansible.builtin.import_tasks: https-setup.yml", tasks)
+        self.assertIn("ansible.builtin.import_tasks: https-activate.yml", tasks)
+        self.assertEqual(1, verify.count("when: hoddmimir_manage_https | bool"))
+        self.assertIn("ansible.builtin.import_tasks: verify-https.yml", verify)
+        self.assertEqual(2, preflight.count("when: hoddmimir_manage_https | bool"))
+        self.assertIn("hoddmimir_manage_https is boolean", preflight)
+
+    def test_disabled_https_tasks_are_skipped_without_resolving_secrets_or_host_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as local_temp:
+            environment = os.environ.copy()
+            environment["ANSIBLE_LOCAL_TEMP"] = local_temp
+            result = run(
+                [
+                    "ansible-playbook",
+                    "--inventory",
+                    "localhost,",
+                    "--check",
+                    "--tags",
+                    "hoddmimir_https",
+                    "tests/playbooks/https-disabled.yml",
+                ],
+                env=environment,
+            )
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("changed=0", result.stdout)
+        self.assertIn("failed=0", result.stdout)
+        self.assertNotIn("hoddmimir_hetzner_dns_api_token is undefined", result.stdout + result.stderr)
 
 class DeploymentTransactionTest(unittest.TestCase):
     def setUp(self) -> None:

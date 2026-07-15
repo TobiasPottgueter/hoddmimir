@@ -1,14 +1,19 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test fault-harness-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test lab-inventory lab-secrets lab-secrets-test lab-deploy lab-verify lab-down lab-scale app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test fault-harness-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
 ANSIBLE_EXAMPLE_INVENTORY := inventories/production/hosts.example.yml
 ANSIBLE_PRODUCTION_INVENTORY := inventories/production/hosts.yml
+ANSIBLE_LAB_EXAMPLE_INVENTORY := inventories/lab/hosts.example.yml
+ANSIBLE_LAB_INVENTORY := inventories/lab/hosts.yml
 ANSIBLE_VAULT_PASSWORD_FILE ?= $(CURDIR)/.secrets/production/ansible_vault_password
+ANSIBLE_LAB_VAULT_PASSWORD_FILE ?= $(CURDIR)/.secrets/lab/ansible_vault_password
 ANSIBLE_LOCAL_VAULT_ARGS = $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),)
 ANSIBLE_VAULT_ARGS ?= $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),--ask-vault-pass)
+ANSIBLE_LAB_VAULT_ARGS ?= $(if $(wildcard $(ANSIBLE_LAB_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_LAB_VAULT_PASSWORD_FILE),--ask-vault-pass)
+LAB_BACKUP_WORKER_REPLICAS ?= 2
 INFECTION_THREADS ?= max
 REUSE_MUTATION_COVERAGE ?= 0
 MUTATION_IMAGE := hoddmimir-backend-mutation:local
@@ -27,6 +32,16 @@ production-secrets: ## Generate distinct local production secrets and encrypted 
 
 production-secrets-test: ## Verify safe, idempotent production secret initialization
 	sh scripts/tests/test-init-production-secrets.sh
+
+lab-inventory: ## Generate the ignored isolated lab Ansible inventory
+	./scripts/init-ansible-lab-inventory.sh
+
+lab-secrets: ## Generate distinct local lab secrets and encrypted Ansible Vault
+	./scripts/init-lab-secrets.sh
+
+lab-secrets-test: ## Verify safe, idempotent lab inventory and secret initialization
+	sh scripts/tests/test-init-ansible-lab-inventory.sh
+	sh scripts/tests/test-init-lab-secrets.sh
 
 app-secret-staging-test: ## Verify fail-closed non-root secret staging in native Linux containers
 	sh scripts/tests/test-app-secret-staging.sh
@@ -144,8 +159,13 @@ syntax: ## Check all Ansible playbooks without remote access
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) --list >/dev/null
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-deploy.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-verify.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-down.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-scale.yml --syntax-check
 
-deployment-test: production-secrets-test ## Run isolated deployment contract and rollback tests
+deployment-test: production-secrets-test lab-secrets-test ## Run isolated deployment contract and rollback tests
 	cd $(ANSIBLE_DIRECTORY) && python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ping: inventory ## Test Ansible connectivity to the configured deployment host
@@ -159,3 +179,15 @@ deploy: inventory ## Deploy the pinned production images to the deployment host
 
 verify: inventory ## Verify the deployed services and API health
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_PRODUCTION_INVENTORY) playbooks/verify.yml $(ANSIBLE_VAULT_ARGS)
+
+lab-deploy: lab-inventory lab-secrets ## Deploy the isolated lab; ENABLE_LAB_BACKUPS must explicitly acknowledge enabled execution
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_INVENTORY) playbooks/lab-deploy.yml $(ANSIBLE_LAB_VAULT_ARGS)
+
+lab-verify: lab-inventory ## Verify the isolated lab services and loopback API health
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_INVENTORY) playbooks/lab-verify.yml $(ANSIBLE_LAB_VAULT_ARGS)
+
+lab-down: lab-inventory ## Stop only the isolated lab without deleting volumes
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_INVENTORY) playbooks/lab-down.yml $(ANSIBLE_LAB_VAULT_ARGS)
+
+lab-scale: lab-inventory ## Scale only the lab backup worker to one or two replicas with the exact lab acknowledgement
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_INVENTORY) playbooks/lab-scale.yml $(ANSIBLE_LAB_VAULT_ARGS) --extra-vars "hoddmimir_lab_backup_worker_replicas=$(LAB_BACKUP_WORKER_REPLICAS)"

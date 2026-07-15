@@ -10,8 +10,10 @@ hoddmimir_transaction_lock_file: "{{ hoddmimir_install_directory }}/.deployment-
 hoddmimir_staging_prefix: .deployment-staging-
 hoddmimir_docker_executable: docker
 hoddmimir_python_executable: /usr/bin/python3
+hoddmimir_deployment_profile: production
 
 # The real production values belong in the ignored production group vars.
+hoddmimir_manage_https: true
 hoddmimir_public_domain: ""
 hoddmimir_acme_email: ""
 hoddmimir_acme_dns_provider: hetzner

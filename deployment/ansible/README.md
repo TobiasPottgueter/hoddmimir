@@ -43,6 +43,56 @@ The Make targets use `.secrets/production/ansible_vault_password`
 non-interactively when it exists. Set `ANSIBLE_VAULT_ARGS` explicitly only
 when an operator intentionally uses a different Vault identity.
 
+### Isolated Phase-7 lab stack
+
+The lab stack can coexist on the same Alpine host without sharing application
+state with production. Create ignored mode-`0600` configuration in
+`.secrets/lab/deployment.env` with `DEPLOYMENT_HOST`, `DEPLOYMENT_USER`,
+`HODDMIMIR_LAB_DOCKER_SUBNET`, `HODDMIMIR_LAB_DOCKER_GATEWAY`, and optionally
+`HODDMIMIR_LAB_WEB_PORT`, then run:
+
+```sh
+make lab-inventory
+make lab-secrets
+make lab-deploy
+make lab-verify
+```
+
+The generator fixes the lab project to `hoddmimir-lab`, its files to
+`/opt/hoddmimir-lab`, its Docker secrets to `/etc/hoddmimir-lab/secrets`, and
+its database to `hoddmimir_lab`. Its bridge, loopback WebApp port, Compose
+volume, staging directories, and deployment lock are separate as well. The
+role rejects a lab inventory that attempts to use the production project,
+paths, database, port `8080`, HTTPS management, or production activation
+acknowledgement. The existing production Caddy and certificate state are not
+touched.
+
+The lab initializer generates material distinct from development and
+production, writes the ignored Vault encrypted, and never stores a plaintext
+Matrix URL. Initially the Vault contains the disabled placeholder. Configure a
+real HTTPS webhook only through `ansible-vault edit` before enabling Matrix and
+backup execution in the ignored lab `main.yml`; a later initializer run accepts
+that valid encrypted URL while verifying every other Vault value.
+
+Execution remains fail-closed unless the operator supplies the exact lab-only
+acknowledgement for that invocation:
+
+```sh
+ENABLE_LAB_BACKUPS=ENABLE_LAB_BACKUPS make lab-deploy
+ENABLE_LAB_BACKUPS=ENABLE_LAB_BACKUPS LAB_BACKUP_WORKER_REPLICAS=2 make lab-scale
+```
+
+`lab-scale` accepts only one or two replicas and changes only
+`backup-worker`; it verifies the exact running count and every container's
+health. Return to one replica immediately after the isolated double-claim
+test. `make lab-down` stops only the lab Compose project with
+`--remove-orphans` and deliberately never deletes its MariaDB volume.
+
+The lab WebApp remains loopback-only. When host HTTPS is disabled, access it
+through an SSH tunnel using `http://localhost:<lab-port>` so the production
+runtime's Secure cookie remains on a browser-local origin; never publish the
+lab port as cleartext.
+
 Set the application image references in the ignored `inventories/production/group_vars/hoddmimir_hosts/main.yml` to immutable Hoddmímir release digests (`image@sha256:...`). Empty or mutable values fail the production pinning assertion. Authenticate Docker to a private registry before deployment without putting registry credentials in this repository.
 
 The manual publish option of the existing `Hoddmímir CI` workflow publishes
@@ -115,6 +165,14 @@ validates Caddy, starts or gracefully reloads it, and finally calls the public
 readiness, validation, start or reload failure restores the prior Caddyfile,
 certificate, key, ACME state and service state. The same locked transaction is
 installed in `/etc/periodic/daily`; OpenRC `crond` is enabled and running.
+
+Host HTTPS management defaults to `hoddmimir_manage_https: true`. A separate
+lab stack that intentionally reuses a host must set it to `false`; that deploy
+then neither installs nor manages Caddy/lego packages, ACME identities or
+files, certificate renewal, Caddy/crond services, public listeners, or HTTPS
+verification. The WebApp remains bound to its configured loopback port and is
+still checked through `hoddmimir_healthcheck_url`. Disabling this flag never
+removes or stops HTTPS state that another stack owns.
 
 `hoddmimir_collector_grid_width_seconds` is the collector's only cadence
 setting, defaults to 120, and is validated against the Application range of one

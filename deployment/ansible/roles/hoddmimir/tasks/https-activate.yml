@@ -1,0 +1,29 @@
+---
+- name: Issue or renew the public certificate and activate host Caddy
+  ansible.builtin.command:
+    argv:
+      - "{{ hoddmimir_python_executable }}"
+      - "{{ hoddmimir_https_transaction_executable }}"
+      - "--domain={{ hoddmimir_public_domain }}"
+      - "--email={{ hoddmimir_acme_email }}"
+      - "--health-url={{ hoddmimir_https_healthcheck_url }}"
+      - "--token-file={{ hoddmimir_hetzner_dns_api_token_file }}"
+      - "--candidate-caddyfile={{ hoddmimir_caddy_candidate_file }}"
+      - "--caddyfile={{ hoddmimir_caddyfile }}"
+      - "--certificate-file={{ hoddmimir_certificate_file }}"
+      - "--certificate-key-file={{ hoddmimir_certificate_key_file }}"
+      - "--lego-state-directory={{ hoddmimir_lego_state_directory }}"
+      - "--renew-before-days={{ hoddmimir_acme_renew_before_days }}"
+      - "--acme-user={{ hoddmimir_acme_user }}"
+      - "--acme-group={{ hoddmimir_acme_group }}"
+      - "--caddy-group={{ hoddmimir_caddy_group }}"
+      - "--caddy-executable={{ hoddmimir_caddy_executable }}"
+      - "--lego-executable={{ hoddmimir_lego_executable }}"
+      - "--openssl-executable={{ hoddmimir_openssl_executable }}"
+      - "--rc-service-executable={{ hoddmimir_rc_service_executable }}"
+      - "--caddy-service={{ hoddmimir_caddy_service }}"
+      - "--lock-file={{ hoddmimir_https_transaction_lock_file }}"
+  register: hoddmimir_https_transaction
+  changed_when: >-
+    hoddmimir_https_transaction.rc == 0 and
+    ((hoddmimir_https_transaction.stdout | default('{}') | from_json).changed | default(false) | bool)

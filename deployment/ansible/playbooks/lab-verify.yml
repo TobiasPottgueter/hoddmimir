@@ -1,0 +1,15 @@
+---
+- name: Verify isolated Hoddmímir lab
+  hosts: hoddmimir_hosts
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Reject a non-lab inventory before verification
+      ansible.builtin.import_role:
+        name: hoddmimir
+        tasks_from: lab-profile
+
+    - name: Run Hoddmímir verification
+      ansible.builtin.include_role:
+        name: hoddmimir
+        tasks_from: verify

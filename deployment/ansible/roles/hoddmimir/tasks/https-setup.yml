@@ -1,0 +1,93 @@
+---
+- name: Install host HTTPS packages
+  ansible.builtin.package:
+    name: "{{ hoddmimir_https_packages }}"
+    state: present
+
+- name: Create dedicated ACME runtime group
+  ansible.builtin.group:
+    name: "{{ hoddmimir_acme_group }}"
+    system: true
+    state: present
+
+- name: Create dedicated nologin ACME runtime user
+  ansible.builtin.user:
+    name: "{{ hoddmimir_acme_user }}"
+    group: "{{ hoddmimir_acme_group }}"
+    home: "{{ hoddmimir_acme_home }}"
+    create_home: false
+    shell: /sbin/nologin
+    system: true
+    state: present
+
+- name: Create private ACME state directory
+  ansible.builtin.file:
+    path: "{{ hoddmimir_acme_home }}"
+    state: directory
+    owner: "{{ hoddmimir_acme_user }}"
+    group: "{{ hoddmimir_acme_group }}"
+    mode: "0700"
+
+- name: Create root-managed ACME secret directory
+  ansible.builtin.file:
+    path: "{{ hoddmimir_acme_secret_directory }}"
+    state: directory
+    owner: root
+    group: "{{ hoddmimir_acme_group }}"
+    mode: "0750"
+
+- name: Install root-managed Hetzner DNS API token file
+  ansible.builtin.copy:
+    content: "{{ hoddmimir_hetzner_dns_api_token }}\n"
+    dest: "{{ hoddmimir_hetzner_dns_api_token_file }}"
+    owner: root
+    group: "{{ hoddmimir_acme_group }}"
+    mode: "0440"
+  diff: false
+  no_log: true
+
+- name: Create private Caddy candidate directory
+  ansible.builtin.file:
+    path: "{{ hoddmimir_caddy_candidate_directory }}"
+    state: directory
+    owner: root
+    group: "{{ hoddmimir_caddy_group }}"
+    mode: "0750"
+
+- name: Render separate Caddy configuration candidate
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ hoddmimir_caddy_candidate_file }}"
+    owner: root
+    group: "{{ hoddmimir_caddy_group }}"
+    mode: "0640"
+
+- name: Create required HTTPS runtime parent directories
+  ansible.builtin.import_tasks: https-runtime-directories.yml
+
+- name: Install recoverable HTTPS transaction executor
+  ansible.builtin.copy:
+    src: https_transaction.py
+    dest: "{{ hoddmimir_https_transaction_executable }}"
+    owner: root
+    group: root
+    mode: "0555"
+
+- name: Install daily certificate renewal command
+  ansible.builtin.template:
+    src: hoddmimir-certificate-renew.sh.j2
+    dest: "{{ hoddmimir_certificate_renewal_executable }}"
+    owner: root
+    group: root
+    mode: "0550"
+
+- name: Enable the Caddy OpenRC service without starting it
+  ansible.builtin.service:
+    name: "{{ hoddmimir_caddy_service }}"
+    enabled: true
+
+- name: Enable and start the Alpine periodic scheduler
+  ansible.builtin.service:
+    name: crond
+    enabled: true
+    state: started
