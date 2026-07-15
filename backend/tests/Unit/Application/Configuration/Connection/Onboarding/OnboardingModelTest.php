@@ -382,11 +382,15 @@ final class OnboardingModelTest extends TestCase
     {
         $activate = $this->command(OnboardingMode::Activate, null, 'secret-one');
         $samePayloadNewSecret = $this->command(OnboardingMode::Activate, null, 'secret-two');
+        $sameActivationWithNewServerId = $this->command(OnboardingMode::Activate, null, 'secret-one', str_repeat('d', 16));
         $rotate = $this->command(OnboardingMode::Rotate, str_repeat('e', 16));
+        $sameRotationWithDifferentConnection = $this->command(OnboardingMode::Rotate, str_repeat('e', 16), 'scan-secret', str_repeat('d', 16));
         $update = $this->command(OnboardingMode::EndpointUpdate, str_repeat('e', 16));
         $add = $this->command(OnboardingMode::EndpointAdd);
 
         self::assertSame($activate->payloadHash, $samePayloadNewSecret->payloadHash);
+        self::assertSame($activate->payloadHash, $sameActivationWithNewServerId->payloadHash);
+        self::assertNotSame($rotate->payloadHash, $sameRotationWithDifferentConnection->payloadHash);
         self::assertSame(OnboardingCredentialKind::Scan, $activate->credential(OnboardingCredentialKind::Scan)->kind);
         self::assertSame(str_repeat('e', 16), $rotate->endpointId);
         self::assertSame(str_repeat('e', 16), $update->endpointId);
@@ -518,9 +522,14 @@ final class OnboardingModelTest extends TestCase
         ];
     }
 
-    private function command(OnboardingMode $mode, ?string $endpointId = null, string $scanSecret = 'scan-secret'): OnboardingActivationCommand
+    private function command(
+        OnboardingMode $mode,
+        ?string $endpointId = null,
+        string $scanSecret = 'scan-secret',
+        string $connectionId = 'cccccccccccccccc',
+    ): OnboardingActivationCommand
     {
-        return new OnboardingActivationCommand($mode, str_repeat('c', 16), 0, 'key', str_repeat('r', 16), OnboardingProduct::Pve, 'PVE',
+        return new OnboardingActivationCommand($mode, $connectionId, 0, 'key', str_repeat('r', 16), OnboardingProduct::Pve, 'PVE',
             new OnboardingEndpoint('pve.test', 8006, OnboardingTlsMode::SystemCa, null, null), $this->pveCredentials($scanSecret), $endpointId);
     }
 }

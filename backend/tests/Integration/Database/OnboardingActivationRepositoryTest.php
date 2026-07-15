@@ -79,8 +79,18 @@ final class OnboardingActivationRepositoryTest extends DatabaseTestCase
         self::assertSame(1, $this->connection()->fetchOne("SELECT COUNT(*) FROM audit_events WHERE subject_type = 'connection' AND subject_id = ?", [self::CONNECTION]));
         self::assertSame($sessionId, $this->connection()->fetchOne("SELECT actor_session_id FROM audit_events WHERE subject_type = 'connection' AND subject_id = ?", [self::CONNECTION]));
 
-        $replay = $repository->activate($command, $this->passedPveVerification(), $principal);
+        $lostResponseRetry = $this->pveCommand(
+            OnboardingMode::Activate,
+            0,
+            'activate-pve',
+            'SCAN-SECRET-ONE',
+            'BACKUP-SECRET-ONE',
+            connectionId: 'retry-connection',
+        );
+        self::assertNotSame($command->connectionId, $lostResponseRetry->connectionId);
+        $replay = $repository->activate($lostResponseRetry, $this->passedPveVerification(), $principal);
         self::assertSame(OnboardingMutationStatus::Replayed, $replay->status);
+        self::assertSame(self::CONNECTION, $replay->connectionId);
         self::assertSame(2, $this->connection()->fetchOne('SELECT COUNT(*) FROM proxmox_credentials WHERE connection_id = ?', [self::CONNECTION]));
         self::assertSame(1, $this->connection()->fetchOne('SELECT COUNT(*) FROM proxmox_onboarding_commands WHERE actor_user_id = ?', [self::USER]));
 
@@ -837,11 +847,12 @@ final class OnboardingActivationRepositoryTest extends DatabaseTestCase
         string $backupSecret,
         ?string $endpointId = null,
         string $host = 'pve.example.test',
+        string $connectionId = self::CONNECTION,
     ): OnboardingActivationCommand
     {
         return new OnboardingActivationCommand(
             $mode,
-            self::CONNECTION,
+            $connectionId,
             $revision,
             $key,
             'correlation-id01',

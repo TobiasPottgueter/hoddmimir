@@ -73,7 +73,10 @@ final readonly class OnboardingActivationCommand
         $this->credentials = array_values($byKind);
         $payload = [
             'mode' => $mode->value,
-            'connectionId' => bin2hex($connectionId),
+            // Activation identity is allocated by the server and therefore is
+            // not part of the client's idempotent intent. Existing aggregate
+            // mutations must remain bound to their route connection.
+            'connectionId' => OnboardingMode::Activate === $mode ? null : bin2hex($connectionId),
             'expectedRevision' => $expectedRevision,
             'product' => $product->value,
             'displayName' => $displayName,

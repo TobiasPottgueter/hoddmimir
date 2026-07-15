@@ -15,9 +15,12 @@ use App\Application\Configuration\Connection\Onboarding\OnboardingMutationStatus
 use App\Application\Configuration\Connection\Onboarding\OnboardingVerification;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Security\Auth\AuthenticatedPrincipal;
+use App\Application\Security\Auth\SecurityIdentifierGenerator;
 use App\Domain\Security\Permission;
 use App\Infrastructure\Persistence\MariaDb\DbalConnectionAdministration;
 use App\Infrastructure\Persistence\MariaDb\DbalOnboardingActivationRepository;
+use App\Infrastructure\Proxmox\Onboarding\NativeOnboardingCustomCaValidator;
+use App\Presentation\Http\OnboardingCommandFactory;
 use App\Tests\Fakes\TestHttpRequestAuthenticator;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -87,6 +90,41 @@ final class ConnectionOnboardingApiTest extends WebTestCase
         self::assertNull($pbsVerification['backupPermissions'] ?? null);
         self::assertSame('pbs', $pbsVerification['detectedProduct'] ?? null);
         self::assertSame(2, $this->repository->activations);
+    }
+
+    public function testLostActivationResponseCanBeReplayedAndChangedPayloadConflicts(): void
+    {
+        $repository = $this->repository;
+        $repository->simulateIdempotencyReplay();
+        self::getContainer()->set(
+            OnboardingCommandFactory::class,
+            new OnboardingCommandFactory(new SequentialOnboardingHttpIds(), new NativeOnboardingCustomCaValidator()),
+        );
+
+        $body = $this->pveBody();
+        $this->mutate('/api/v1/connections/onboarding/activate', $body, 'lost-200-retry');
+        self::assertResponseIsSuccessful();
+        $applied = $this->json();
+        self::assertSame('applied', $applied['status'] ?? null);
+
+        // Model a client that did not receive the first successful response.
+        $this->mutate('/api/v1/connections/onboarding/activate', $body, 'lost-200-retry');
+        self::assertResponseIsSuccessful();
+        $replayed = $this->json();
+        self::assertSame('replayed', $replayed['status'] ?? null);
+        self::assertSame($applied['connectionId'] ?? null, $replayed['connectionId'] ?? null);
+        self::assertCount(2, $repository->attemptConnectionIds);
+        self::assertNotSame($repository->attemptConnectionIds[0], $repository->attemptConnectionIds[1]);
+        self::assertSame(1, $repository->applied);
+
+        $changed = $body;
+        $changed['displayName'] = 'PVE QA changed';
+        $this->mutate('/api/v1/connections/onboarding/activate', $changed, 'lost-200-retry');
+        self::assertResponseStatusCodeSame(409);
+        $error = $this->object($this->json()['error'] ?? null);
+        self::assertSame('revision_conflict', $error['code'] ?? null);
+        self::assertSame(1, $error['currentRevision'] ?? null);
+        self::assertSame(1, $repository->applied);
     }
 
     public function testFailuresAreTypedSanitizedAndNeverApplyPartialState(): void
@@ -274,17 +312,58 @@ final class OnboardingApiRepository implements OnboardingActivationRepository
     public int $applied = 0;
     public bool $forceConflict = false;
     public ?OnboardingActivationCommand $lastCommand = null;
+    /** @var list<string> */ public array $attemptConnectionIds = [];
+    private bool $replaySimulation = false;
+    private ?string $idempotencyKey = null;
+    private ?string $payloadHash = null;
+    private ?string $appliedConnectionId = null;
+
+    public function simulateIdempotencyReplay(): void
+    {
+        $this->replaySimulation = true;
+    }
+
     public function activate(OnboardingActivationCommand $command, OnboardingVerification $verification, AuthenticatedPrincipal $principal): OnboardingMutationResult
     {
         ++$this->activations; $this->lastCommand = $command;
+        $this->attemptConnectionIds[] = $command->connectionId;
+        if ($this->replaySimulation && null !== $this->idempotencyKey) {
+            if ($this->idempotencyKey === $command->idempotencyKey
+                && null !== $this->payloadHash
+                && hash_equals($this->payloadHash, $command->payloadHash)) {
+                return new OnboardingMutationResult(
+                    OnboardingMutationStatus::Replayed,
+                    $this->appliedConnectionId ?? throw new \LogicException('The applied connection identifier is unavailable.'),
+                    1,
+                    $verification,
+                );
+            }
+
+            return new OnboardingMutationResult(OnboardingMutationStatus::Conflict, $command->connectionId, 1);
+        }
         if ($this->forceConflict) return new OnboardingMutationResult(OnboardingMutationStatus::Conflict, $command->connectionId, 9);
         if (!$verification->passed()) return new OnboardingMutationResult(OnboardingMutationStatus::Rejected, $command->connectionId, null, $verification);
+        if ($this->replaySimulation) {
+            $this->idempotencyKey = $command->idempotencyKey;
+            $this->payloadHash = $command->payloadHash;
+            $this->appliedConnectionId = $command->connectionId;
+        }
         ++$this->applied;
         return new OnboardingMutationResult(OnboardingMutationStatus::Applied, $command->connectionId, $command->expectedRevision + 1, $verification);
     }
     public function record(OnboardingActivationCommand $command, OnboardingMutationResult $result, AuthenticatedPrincipal $principal): OnboardingMutationResult
     {
         $this->lastCommand = $command; return $result;
+    }
+}
+
+final class SequentialOnboardingHttpIds implements SecurityIdentifierGenerator
+{
+    private int $next = 1;
+
+    public function generate(): string
+    {
+        return pack('N4', 0, 0, 0, $this->next++);
     }
 }
 

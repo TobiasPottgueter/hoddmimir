@@ -637,7 +637,7 @@ SQL,
         bool $lock,
     ): ?OnboardingMutationResult {
         $row = $this->connection->fetchAssociative(
-            'SELECT payload_hash, secret_replay_hash, result_status, result_revision, verification_json FROM proxmox_onboarding_commands WHERE actor_user_id = ? AND idempotency_key = ?'.($lock ? ' FOR UPDATE' : ''),
+            'SELECT connection_id, payload_hash, secret_replay_hash, result_status, result_revision, verification_json FROM proxmox_onboarding_commands WHERE actor_user_id = ? AND idempotency_key = ?'.($lock ? ' FOR UPDATE' : ''),
             [$principal->userId->binary(), $command->idempotencyKey],
             [ParameterType::BINARY, ParameterType::STRING],
         );
@@ -660,7 +660,7 @@ SQL,
             $status = OnboardingMutationStatus::Replayed;
         }
 
-        return new OnboardingMutationResult($status, $command->connectionId, $revision, $verification);
+        return new OnboardingMutationResult($status, $this->binary($row['connection_id']), $revision, $verification);
     }
 
     private function persistIdempotency(
