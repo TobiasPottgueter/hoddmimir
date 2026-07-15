@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible defect in Hoddmímir.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, tokens, private hosts or customer data.
+  - type: input
+    id: version
+    attributes:
+      label: Hoddmímir version
+      description: Release, image digest or commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Collector worker
+        - Backup worker
+        - Web application
+        - Deployment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Add relevant logs or screenshots after removing sensitive data.
