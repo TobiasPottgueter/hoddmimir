@@ -896,12 +896,12 @@ jobs:
                 imageTag: $items[0].imageTag,
                 sourceRef: $items[0].sourceRef,
                 sourceSha: $items[0].sourceSha,
-                images: reduce $items[] as $image ({};
+                images: (reduce $items[] as $image ({};
                   .[$image.target] = {
                     tag: $image.tag,
                     digest: $image.digest,
                     reference: $image.reference
-                  })
+                  }))
               }
           ' artifacts/publication/*.json > artifacts/published-images.json
 

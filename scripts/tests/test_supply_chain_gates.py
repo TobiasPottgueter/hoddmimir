@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 
@@ -440,6 +443,72 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
         self.assertIn(".images.web.reference", self.final_job)
         self.assertIn("artifact-digest", self.final_job)
         self.assertIn("Use only the `@sha256:` references for deployment.", self.final_job)
+
+    def test_combined_publication_manifest_is_valid_jq_and_has_expected_shape(self) -> None:
+        jq = shutil.which("jq")
+        self.assertIsNotNone(jq, "jq is required to validate the publication manifest")
+
+        start = "          jq -s '\n"
+        end = "\n          ' artifacts/publication/*.json > artifacts/published-images.json"
+        self.assertIn(start, self.final_job)
+        program, separator, _ = self.final_job.split(start, maxsplit=1)[1].partition(end)
+        self.assertEqual(end, separator)
+
+        digest_worker = "sha256:" + ("1" * 64)
+        digest_web = "sha256:" + ("2" * 64)
+        inputs = [
+            {
+                "target": "worker",
+                "imageTag": "phase7-test",
+                "sourceRef": "refs/heads/codex/test",
+                "sourceSha": "a" * 40,
+                "tag": "ghcr.io/example/hoddmimir/worker:phase7-test",
+                "digest": digest_worker,
+                "reference": f"ghcr.io/example/hoddmimir/worker@{digest_worker}",
+            },
+            {
+                "target": "web",
+                "imageTag": "phase7-test",
+                "sourceRef": "refs/heads/codex/test",
+                "sourceSha": "a" * 40,
+                "tag": "ghcr.io/example/hoddmimir/web:phase7-test",
+                "digest": digest_web,
+                "reference": f"ghcr.io/example/hoddmimir/web@{digest_web}",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = []
+            for publication in reversed(inputs):
+                path = pathlib.Path(temporary_directory) / f"{publication['target']}.json"
+                path.write_text(json.dumps(publication), encoding="utf-8")
+                paths.append(str(path))
+
+            result = subprocess.run(
+                [jq, "-s", program, *paths],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, msg=result.stderr)
+        self.assertEqual(
+            {
+                "imageTag": "phase7-test",
+                "sourceRef": "refs/heads/codex/test",
+                "sourceSha": "a" * 40,
+                "images": {
+                    publication["target"]: {
+                        "tag": publication["tag"],
+                        "digest": publication["digest"],
+                        "reference": publication["reference"],
+                    }
+                    for publication in inputs
+                },
+            },
+            json.loads(result.stdout),
+        )
 
     def test_anonymous_digest_pull_is_proved_before_references_are_exported(self) -> None:
         proof = self.final_job.index("docker buildx imagetools inspect")
