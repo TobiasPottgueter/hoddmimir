@@ -9,7 +9,7 @@ on: # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
       publish_images:
-        description: Publish worker and web manifests after all release gates
+        description: Publish linux/amd64 worker and web images after all release gates
         required: true
         default: false
         type: boolean
@@ -19,7 +19,7 @@ on: # yamllint disable-line rule:truthy
         default: ""
         type: string
       publication_confirmation:
-        description: Type PUBLISH_MULTIARCH_IMAGES to allow registry writes
+        description: Type PUBLISH_AMD64_IMAGES to allow registry writes
         required: false
         type: string
   schedule:
@@ -112,10 +112,10 @@ jobs:
       - name: Test deployment behavior
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
-  backend:
-    name: Backend
+  backend-validation:
+    name: Backend validation
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -136,9 +136,6 @@ jobs:
       - name: Validate, analyse, and test
         run: composer verify
 
-      - name: Generate coverage foundation report
-        run: make --directory=.. backend-coverage
-
       - name: Audit dependencies
         run: composer audit --locked
 
@@ -146,6 +143,146 @@ jobs:
         run: |
           if composer show saleh7/proxmox-ve_php_api >/dev/null 2>&1; then exit 1; fi
           if composer show netzkultur/proxmoxve-php-api >/dev/null 2>&1; then exit 1; fi
+
+  backend-coverage-foundation:
+    name: Backend coverage foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up pinned Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+          buildkitd-flags: --oci-worker-net bridge
+          cache-binary: false
+
+      - name: Verify split coverage contracts
+        run: make backend-coverage-wrapper-test
+
+      - name: Build the immutable coverage foundation
+        env:
+          HODDMIMIR_BACKEND_COVERAGE_CACHE_SCOPE: backend-coverage-runtime-linux-amd64
+        run: ./scripts/run-backend-coverage.sh foundation
+
+      - name: Retain the exact coverage foundation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-backend-coverage-foundation
+          path: |
+            backend/coverage/coverage-image.docker.tar
+            backend/coverage/coverage-image.id
+            backend/coverage/foundation-manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  backend-coverage-core:
+    name: Backend coverage (core)
+    needs: backend-coverage-foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Restore the exact coverage foundation
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-backend-coverage-foundation
+          path: backend/coverage
+
+      - name: Generate core-owned coverage
+        run: ./scripts/run-backend-coverage.sh core
+
+      - name: Retain core-owned coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-backend-coverage-core
+          path: |
+            backend/coverage/core.clover.xml
+            backend/coverage/core-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  backend-coverage-mariadb:
+    name: Backend coverage (MariaDB)
+    needs: backend-coverage-foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Restore the exact coverage foundation
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-backend-coverage-foundation
+          path: backend/coverage
+
+      - name: Generate MariaDB-owned coverage
+        run: ./scripts/run-backend-coverage.sh mariadb
+
+      - name: Retain MariaDB-owned coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-backend-coverage-mariadb
+          path: |
+            backend/coverage/integration.clover.xml
+            backend/coverage/integration-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  backend:
+    name: Backend
+    if: always()
+    needs:
+      - backend-validation
+      - backend-coverage-core
+      - backend-coverage-mariadb
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Require every backend producer
+        run: |
+          test "${{ needs.backend-validation.result }}" = success
+          test "${{ needs.backend-coverage-core.result }}" = success
+          test "${{ needs.backend-coverage-mariadb.result }}" = success
+
+      - name: Restore the exact coverage foundation
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-backend-coverage-foundation
+          path: backend/coverage
+
+      - name: Restore core-owned coverage evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-backend-coverage-core
+          path: backend/coverage
+
+      - name: Restore MariaDB-owned coverage evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hoddmimir-backend-coverage-mariadb
+          path: backend/coverage
+
+      - name: Compose disjoint reports and enforce unchanged thresholds
+        run: ./scripts/run-backend-coverage.sh compose
+
+      - name: Retain final backend coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hoddmimir-backend-coverage
+          path: backend/coverage/clover.xml
+          if-no-files-found: error
+          retention-days: 30
 
   backend-integration:
     name: Backend Integration
@@ -476,31 +613,15 @@ jobs:
           - artifact: worker
             platform: linux/amd64
             platform_slug: linux-amd64
-          - artifact: worker
-            platform: linux/arm64
-            platform_slug: linux-arm64
           - artifact: web
             platform: linux/amd64
             platform_slug: linux-amd64
-          - artifact: web
-            platform: linux/arm64
-            platform_slug: linux-arm64
           - artifact: mariadb
             platform: linux/amd64
             platform_slug: linux-amd64
-          - artifact: mariadb
-            platform: linux/arm64
-            platform_slug: linux-arm64
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
-      - name: Install pinned QEMU emulation
-        if: matrix.platform == 'linux/arm64'
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-        with:
-          image: tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
-          platforms: arm64
 
       - name: Set up pinned Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
@@ -516,7 +637,7 @@ jobs:
           BUILDX_CACHE_SCOPE_PREFIX: container
           CONTAINER_ARTIFACT: ${{ matrix.artifact }}
           CONTAINER_PLATFORM: ${{ matrix.platform }}
-        run: make container-multiarch
+        run: make container-images
 
       - name: Generate its SBOM and reject high or critical vulnerabilities
         env:
@@ -547,7 +668,7 @@ jobs:
           test "${{ needs.container-validation.result }}" = success
           test "${{ needs.container-images.result }}" = success
 
-      - name: Download all six CycloneDX SBOMs
+      - name: Download all three linux/amd64 CycloneDX SBOMs
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: hoddmimir-container-sbom-*
@@ -559,11 +680,11 @@ jobs:
           set -eu
           actual=$(find artifacts/supply-chain/sbom -type f -name '*.cdx.json' -exec basename {} \; | sort)
           expected=$(printf '%s\n' \
-            mariadb-linux-amd64.cdx.json mariadb-linux-arm64.cdx.json \
-            web-linux-amd64.cdx.json web-linux-arm64.cdx.json \
-            worker-linux-amd64.cdx.json worker-linux-arm64.cdx.json | sort)
+            mariadb-linux-amd64.cdx.json \
+            web-linux-amd64.cdx.json \
+            worker-linux-amd64.cdx.json | sort)
           test "$actual" = "$expected"
-          test "$(printf '%s\n' "$actual" | wc -l | tr -d ' ')" -eq 6
+          test "$(printf '%s\n' "$actual" | wc -l | tr -d ' ')" -eq 3
 
       - name: Retain combined CycloneDX SBOM set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -574,7 +695,7 @@ jobs:
           retention-days: 30
 
   publish-image:
-    name: Publish ${{ matrix.target }} manifest
+    name: Publish ${{ matrix.target }} linux/amd64 image
     if: github.event_name == 'workflow_dispatch' && inputs.publish_images == true
     needs:
       - ansible
@@ -601,7 +722,7 @@ jobs:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
           set -eu
-          test "$CONFIRMATION" = "PUBLISH_MULTIARCH_IMAGES"
+          test "$CONFIRMATION" = "PUBLISH_AMD64_IMAGES"
           printf '%s\n' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
 
       - name: Check out dispatched source
@@ -626,12 +747,6 @@ jobs:
             printf 'image=%s/%s\n' "ghcr.io/$repository" "$TARGET"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Install pinned QEMU emulation
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-        with:
-          image: tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
-          platforms: arm64
-
       - name: Set up pinned Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
@@ -648,7 +763,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish multiarch manifest
+      - name: Publish linux/amd64 image
         id: image
         env:
           DOCKERFILE: ${{ matrix.dockerfile }}
@@ -660,7 +775,7 @@ jobs:
           set -eu
           metadata_file="$RUNNER_TEMP/$TARGET-build-metadata.json"
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/amd64 \
             --target "$TARGET" \
             --file "$DOCKERFILE" \
             --tag "$IMAGE:$IMAGE_TAG" \
@@ -669,9 +784,8 @@ jobs:
             --provenance=mode=max \
             --sbom=true \
             --cache-from "type=gha,scope=container-$TARGET-linux-amd64" \
-            --cache-from "type=gha,scope=container-$TARGET-linux-arm64" \
-            --cache-from "type=gha,scope=publish-$TARGET-multiarch" \
-            --cache-to "type=gha,mode=max,scope=publish-$TARGET-multiarch" \
+            --cache-from "type=gha,scope=publish-$TARGET-linux-amd64" \
+            --cache-to "type=gha,mode=max,scope=publish-$TARGET-linux-amd64" \
             --metadata-file "$metadata_file" \
             --push \
             .
@@ -722,7 +836,7 @@ jobs:
         run: docker logout ghcr.io || true
 
   publish-images:
-    name: Publish worker and web manifests
+    name: Publish worker and web linux/amd64 images
     if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_images == true
     needs: publish-image
     permissions:
@@ -740,7 +854,7 @@ jobs:
           path: artifacts/publication
           merge-multiple: true
 
-      - name: Set up pinned Buildx for anonymous manifest proof
+      - name: Set up pinned Buildx for anonymous digest proof
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
           version: v0.35.0
@@ -749,7 +863,7 @@ jobs:
           buildkitd-flags: --oci-worker-net bridge
           cache-binary: false
 
-      - name: Validate, prove, and combine exactly both manifests
+      - name: Validate, prove, and combine exactly both images
         env:
           EXPECTED_IMAGE_TAG: ${{ inputs.image_tag }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
@@ -800,7 +914,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Summarize published manifests
+      - name: Summarize published images
         env:
           ARTIFACT_DIGEST: ${{ steps.references.outputs.artifact-digest }}
         run: |

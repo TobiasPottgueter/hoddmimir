@@ -25,6 +25,7 @@ Use `Hoddmímir` (NFC) as the user-facing display name and `hoddmimir` as the te
 - Never automatically retry a `vzdump` POST after an ambiguous response.
 - Never disable TLS verification in production code.
 - Never log tokens, passwords, cookies, CSRF values, TOTP data, or decrypted secrets.
+- Mandatory container CI, release publication, and production validation target only `linux/amd64`. Keep Dockerfiles architecture-neutral so optional local builds remain possible, but never add another architecture to a release manifest or required gate without an explicit policy change.
 
 ## Repository layout
 

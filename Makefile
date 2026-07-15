@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-multiarch container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
@@ -69,6 +69,8 @@ backend-integration: migration-wrapper-test backend-integration-wrapper-test mar
 
 backend-coverage-wrapper-test: ## Test owned split coverage cleanup and failure propagation without Docker
 	sh scripts/tests/test-backend-coverage.sh
+	sh scripts/tests/test-backend-coverage-phases.sh
+	python3 -m unittest scripts/tests/test_backend_coverage_workflow.py -v
 
 backend-coverage: backend-coverage-wrapper-test backend-integration-wrapper-test ## Compose disjoint core and MariaDB coverage, then enforce gates
 	./scripts/run-backend-coverage.sh
@@ -110,13 +112,13 @@ supply-chain-contract-test: ## Verify pinned CI supply-chain gates without runni
 secret-scan: ## Scan the complete Git history with the digest-pinned Gitleaks image
 	docker run --rm --volume "$(CURDIR):/repo:ro" --workdir /repo $(GITLEAKS_IMAGE) git --gitleaks-ignore-path /repo/.gitleaksignore --redact --verbose --no-banner /repo
 
-container-multiarch: ## Build production images for amd64 and arm64 without pushing them
+container-images: ## Build the three production images for linux/amd64 without pushing them
 	SUPPLY_CHAIN_DIRECTORY="$(SUPPLY_CHAIN_DIRECTORY)" ./scripts/ci/build-container-images.sh
 
-container-security: ## Scan the exact six platform images and generate CycloneDX SBOMs
+container-security: ## Scan the exact three linux/amd64 images and generate CycloneDX SBOMs
 	TRIVY_IMAGE="$(TRIVY_IMAGE)" SUPPLY_CHAIN_DIRECTORY="$(SUPPLY_CHAIN_DIRECTORY)" ./scripts/ci/scan-container-images.sh
 
-supply-chain: supply-chain-contract-test secret-scan container-multiarch container-security ## Run all local supply-chain acceptance gates
+supply-chain: supply-chain-contract-test secret-scan container-images container-security ## Run all local supply-chain acceptance gates
 
 test: backend-test frontend-test ## Run backend and frontend validation
 

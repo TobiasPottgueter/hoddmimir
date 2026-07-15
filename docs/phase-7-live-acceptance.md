@@ -41,7 +41,7 @@ Kandidaten und die Wiederholung der jeweils betroffenen Gates.
 | Kandidatenidentität         | unveränderliche Git-SHA und veröffentlichter Branch                              | `d88d38a`, belegt     |
 | Lokale Phase-6-Gates        | Coverage, Mutation, MariaDB, Frontend, Browser, Supply Chain und Container-Smoke | getrennt lokal belegt |
 | Deployment-Host-Bootstrap   | Alpine, Python, Docker, Compose und OpenRC auf dem Zielhost                      | belegt, Details unten |
-| Release-Images              | Worker und Web als Multiarch-Registry-Manifeste mit unveränderlichen Digests     | offen                 |
+| Release-Images              | Worker und Web als `linux/amd64`-Registry-Images mit unveränderlichen Digests    | offen                 |
 | Produktionsnaher Deploy     | leere V2-Datenbank, vier gesunde Services und API-Health auf dem Zielhost        | offen                 |
 | Öffentliche HTTPS-Grenze    | Host-Caddy, DNS-01-Zertifikat, strikte TLS-Prüfung und öffentlicher Health-Pfad  | lokal vorbereitet, live offen |
 | Neue V2-Konfiguration       | Administrator/Rollen, PVE-/PBS-Verbindungen, Ziele, Auswahl und Policies         | offen                 |
@@ -79,9 +79,9 @@ Proxmox-Zugangsdaten konfiguriert. Die Backupausführung wurde nicht aktiviert.
       festlegen, falls `d88d38a` nicht unverändert deployt wird.
 - [ ] Alle vom geänderten Arbeitsstand betroffenen lokalen Quality Gates auf
       exakt diesem Kandidaten wiederholen.
-- [ ] Worker und Web für `linux/amd64` und `linux/arm64` als
-      Multiarch-Manifeste in die freigegebene Registry veröffentlichen.
-- [ ] Die tatsächlichen Registry-Manifestdigests, Plattformdigests,
+- [ ] Worker und Web ausschließlich für `linux/amd64` in die freigegebene
+      Registry veröffentlichen.
+- [ ] Die tatsächlichen Registry- und Plattformdigests,
       Trivy-Ergebnisse und CycloneDX-SBOMs dem Kandidaten zuordnen.
 - [ ] Alle vier Produktionsimage-Referenzen einschließlich MariaDB als
       `image@sha256:...` pinnen; lokale OCI-Archivprüfsummen sind kein Ersatz
@@ -236,7 +236,7 @@ Phase 7 kann ohne die folgenden Angaben und Befugnisse nicht wahrheitsgemäß
 abgeschlossen werden:
 
 1. freigegebenes Container-Registry-Ziel samt Authentifizierung und Erlaubnis
-   zum Veröffentlichen der Multiarch-Images;
+   zum Veröffentlichen der `linux/amd64`-Images;
 2. Ansible-Vault-Passphrase beziehungsweise ein sicherer interaktiver
    Bereitstellungsweg sowie ein gültiger geheimer HTTPS-Matrix-Webhook;
 3. benannte, erreichbare und gepatchte PVE-7-, PVE-8-, PVE-9-, PBS-3- und

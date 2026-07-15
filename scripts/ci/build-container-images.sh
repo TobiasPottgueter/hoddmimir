@@ -10,10 +10,20 @@ image_directory="$artifact_directory/images"
 selected_artifact=${CONTAINER_ARTIFACT:-}
 selected_platform=${CONTAINER_PLATFORM:-}
 cache_scope_prefix=${BUILDX_CACHE_SCOPE_PREFIX:-}
+release_platform=linux/amd64
 
 if { test -n "$selected_artifact" && test -z "$selected_platform"; } \
     || { test -z "$selected_artifact" && test -n "$selected_platform"; }; then
     echo 'CONTAINER_ARTIFACT and CONTAINER_PLATFORM must be supplied together.' >&2
+    exit 2
+fi
+
+if test "$(cat "$platform_matrix")" != "$release_platform"; then
+    echo "The production platform matrix must contain only $release_platform." >&2
+    exit 2
+fi
+if test -n "$selected_platform" && test "$selected_platform" != "$release_platform"; then
+    echo "CONTAINER_PLATFORM must be $release_platform for production validation." >&2
     exit 2
 fi
 
@@ -61,7 +71,7 @@ while IFS='|' read -r artifact dockerfile target; do
 done < "$target_matrix"
 
 archive_count=$(find "$image_directory" -type f -name '*.docker.tar' | wc -l | tr -d ' ')
-expected_count=6
+expected_count=3
 if test -n "$selected_artifact"; then
     expected_count=1
 fi

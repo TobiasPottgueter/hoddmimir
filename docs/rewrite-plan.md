@@ -541,7 +541,7 @@ Browser-End-to-End-Tests mit Playwright:
 - Composer- und npm-Sicherheitsaudits;
 - ESLint, TypeScript-Check und Format-Check;
 - OpenAPI-Kompatibilitätsprüfung;
-- Container-Build für amd64 und arm64;
+- verpflichtender Container-Build, Security-Scan und Release ausschließlich für `linux/amd64`; die Dockerfiles bleiben für optionale lokale Builds architekturneutral;
 - SBOM, Vulnerability Scan und Secret Scan;
 - Test der V2-Schema-Installation und internen Schema-Upgrades vor jedem Release.
 

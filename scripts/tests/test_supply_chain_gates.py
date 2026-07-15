@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import pathlib
 import re
+import subprocess
 import unittest
 
 
@@ -11,7 +13,7 @@ TARGETS = {
     ("web", "docker/web/Dockerfile", "web"),
     ("mariadb", "docker/mariadb/Dockerfile", ""),
 }
-PLATFORMS = {"linux/amd64", "linux/arm64"}
+PLATFORMS = {"linux/amd64"}
 
 
 def read(path: str) -> str:
@@ -27,7 +29,7 @@ def matrix_lines(path: str) -> list[str]:
 
 
 class SupplyChainGateContractTest(unittest.TestCase):
-    def test_matrix_defines_exactly_six_platform_artifacts(self) -> None:
+    def test_matrix_defines_exactly_three_amd64_artifacts(self) -> None:
         targets = {
             tuple(line.split("|", maxsplit=2))
             for line in matrix_lines("scripts/ci/container-targets.txt")
@@ -36,7 +38,7 @@ class SupplyChainGateContractTest(unittest.TestCase):
 
         self.assertEqual(TARGETS, targets)
         self.assertEqual(PLATFORMS, platforms)
-        self.assertEqual(6, len(targets) * len(platforms))
+        self.assertEqual(3, len(targets) * len(platforms))
 
     def test_exact_buildx_docker_archives_are_the_only_scanned_inputs(self) -> None:
         build = read("scripts/ci/build-container-images.sh")
@@ -47,6 +49,10 @@ class SupplyChainGateContractTest(unittest.TestCase):
             self.assertIn("container-targets.txt", script)
             self.assertIn("container-platforms.txt", script)
             self.assertIn("$artifact-$platform_slug.docker.tar", script)
+            self.assertIn("release_platform=linux/amd64", script)
+            self.assertIn(
+                'test "$selected_platform" != "$release_platform"', script
+            )
 
         self.assertIn("docker buildx build", build)
         self.assertIn('--output "type=docker,dest=$archive"', build)
@@ -63,7 +69,46 @@ class SupplyChainGateContractTest(unittest.TestCase):
         self.assertIn("./scripts/ci/scan-container-images.sh", makefile)
         self.assertNotIn("docker buildx build", makefile)
 
-    def test_workflow_parallelizes_exactly_six_scanned_platform_images(self) -> None:
+    def test_production_dockerfiles_remain_architecture_neutral(self) -> None:
+        for path in (
+            "docker/php/Dockerfile",
+            "docker/web/Dockerfile",
+            "docker/mariadb/Dockerfile",
+        ):
+            dockerfile = read(path)
+            self.assertNotRegex(dockerfile, r"(?i)(?:amd64|arm64|aarch64|x86_64)")
+            self.assertNotRegex(dockerfile, r"(?i)^FROM\s+--platform=", msg=path)
+
+    def test_scripts_reject_non_release_platform_before_external_io(self) -> None:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "CONTAINER_ARTIFACT": "worker",
+                "CONTAINER_PLATFORM": "linux/arm64",
+                "TRIVY_IMAGE": "example.invalid/trivy:1@sha256:"
+                + ("a" * 64),
+            }
+        )
+
+        for path in (
+            "scripts/ci/build-container-images.sh",
+            "scripts/ci/scan-container-images.sh",
+        ):
+            result = subprocess.run(
+                [str(ROOT / path)],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(2, result.returncode, msg=path)
+            self.assertIn(
+                "CONTAINER_PLATFORM must be linux/amd64 for production validation.",
+                result.stderr,
+            )
+
+    def test_workflow_parallelizes_exactly_three_scanned_amd64_images(self) -> None:
         workflow = read(".github/workflows/ci.yml")
         image_job = workflow.split("\n  container-images:\n", maxsplit=1)[1].split(
             "\n  containers:\n", maxsplit=1
@@ -72,15 +117,17 @@ class SupplyChainGateContractTest(unittest.TestCase):
             "\n  publish-images:\n", maxsplit=1
         )[0]
 
-        self.assertEqual(6, image_job.count("          - artifact:"))
+        self.assertEqual(3, image_job.count("          - artifact:"))
         self.assertIn("fail-fast: false", image_job)
-        self.assertIn("make container-multiarch", image_job)
+        self.assertIn("make container-images", image_job)
         self.assertIn("make container-security", image_job)
         self.assertIn("BUILDX_CACHE_SCOPE_PREFIX: container", image_job)
-        self.assertIn("if: matrix.platform == 'linux/arm64'", image_job)
+        self.assertEqual(3, image_job.count("platform: linux/amd64"))
+        self.assertNotIn("linux/arm64", image_job)
+        self.assertNotIn("docker/setup-qemu-action", image_job)
         self.assertIn("needs.container-images.result", final_job)
         self.assertIn('"$actual" = "$expected"', final_job)
-        self.assertIn('" -eq 6', final_job)
+        self.assertIn('" -eq 3', final_job)
 
     def test_scheduled_mutation_uses_one_foundation_and_disjoint_shards(self) -> None:
         workflow = read(".github/workflows/ci.yml")
@@ -280,7 +327,7 @@ class SupplyChainGateContractTest(unittest.TestCase):
         )
 
         self.assertLess(
-            workflow.index("make container-multiarch"),
+            workflow.index("make container-images"),
             workflow.index("make container-security"),
         )
         self.assertNotRegex(relevant, r"(?i)docker\s+(?:image\s+)?push")
@@ -330,7 +377,7 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
         self.assertIn("contents: read", self.final_job)
         self.assertNotIn("packages: write", self.final_job)
         self.assertIn(
-            'test "$CONFIRMATION" = "PUBLISH_MULTIARCH_IMAGES"',
+            'test "$CONFIRMATION" = "PUBLISH_AMD64_IMAGES"',
             self.build_job,
         )
         self.assertIn("persist-credentials: false", self.build_job)
@@ -357,31 +404,29 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
             publication,
             r"image=moby/buildkit:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
         )
-        self.assertRegex(
-            self.build_job,
-            r"image: tonistiigi/binfmt:[^\s@]+@sha256:[0-9a-f]{64}",
-        )
+        self.assertNotIn("docker/setup-qemu-action", self.build_job)
+        self.assertNotIn("tonistiigi/binfmt", self.build_job)
 
-    def test_exact_worker_and_web_multiarch_manifests_are_published(self) -> None:
+    def test_exact_worker_and_web_amd64_images_are_published(self) -> None:
         self.assertEqual(2, self.build_job.count("          - target:"))
         self.assertIn("target: worker", self.build_job)
         self.assertIn("dockerfile: docker/php/Dockerfile", self.build_job)
         self.assertIn("target: web", self.build_job)
         self.assertIn("dockerfile: docker/web/Dockerfile", self.build_job)
         self.assertEqual(1, self.build_job.count("docker buildx build"))
-        self.assertEqual(1, self.build_job.count("--platform linux/amd64,linux/arm64"))
+        self.assertEqual(1, self.build_job.count("--platform linux/amd64"))
+        self.assertNotIn("linux/arm64", self.build_job)
         self.assertEqual(1, self.build_job.count("--push"))
         self.assertNotIn("docker/mariadb/Dockerfile", self.build_job)
         self.assertIn("--provenance=mode=max", self.build_job)
         self.assertIn("--sbom=true", self.build_job)
         for scope in (
             "container-$TARGET-linux-amd64",
-            "container-$TARGET-linux-arm64",
-            "publish-$TARGET-multiarch",
+            "publish-$TARGET-linux-amd64",
         ):
             self.assertIn(scope, self.build_job)
 
-    def test_manifest_digests_are_validated_and_exported_for_deployment(self) -> None:
+    def test_image_digests_are_validated_and_exported_for_deployment(self) -> None:
         self.assertEqual(
             1,
             self.build_job.count(

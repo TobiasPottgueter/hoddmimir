@@ -46,9 +46,9 @@ when an operator intentionally uses a different Vault identity.
 Set the application image references in the ignored `inventories/production/group_vars/hoddmimir_hosts/main.yml` to immutable Hoddmímir release digests (`image@sha256:...`). Empty or mutable values fail the production pinning assertion. Authenticate Docker to a private registry before deployment without putting registry credentials in this repository.
 
 The manual publish option of the existing `Hoddmímir CI` workflow publishes
-the worker and web runtime images for both `linux/amd64` and `linux/arm64`.
+the worker and web runtime images for `linux/amd64` only.
 The operator selects the GitHub Actions source ref and supplies an OCI tag plus
-the confirmation text `PUBLISH_MULTIARCH_IMAGES`; ordinary CI never publishes.
+the confirmation text `PUBLISH_AMD64_IMAGES`; ordinary CI never publishes.
 The workflow uses the job-scoped `GITHUB_TOKEN` with `packages: write` only
 after the full manual gate set succeeds, records the resolved source commit,
 and uploads `published-images.json`. Copy only its immutable
@@ -57,7 +57,7 @@ human-readable tag is not a deployment pin. The collector and backup worker
 use the same worker image digest with different commands and credentials.
 Both builds carry the repository source label so GHCR links them to this
 repository. Before it emits deployment references, the workflow logs out of
-GHCR and resolves both manifest digests anonymously. This proof is
+GHCR and resolves both image digests anonymously. This proof is
 release-blocking because the deployment host intentionally has no registry
 token. GitHub creates a new personal container package as private by default;
 if the first publication stops at this proof, its owner must make both linked

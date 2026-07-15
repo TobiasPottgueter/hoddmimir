@@ -6,7 +6,11 @@ IMAGE_ID='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
 
 case "${1:-}" in
-    build)
+    build|buildx)
+        if [ "${1:-}" = buildx ]; then
+            test "${2:-}" = build
+            shift
+        fi
         status=${FAKE_COVERAGE_BUILD_STATUS:-0}
         if [ "$status" -eq 0 ]; then
             previous=''
@@ -21,6 +25,21 @@ case "${1:-}" in
         fi
         exit "$status"
         ;;
+    save)
+        status=${FAKE_COVERAGE_SAVE_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            test "${2:-}" = --output
+            mkdir -p "$(dirname -- "$3")"
+            printf 'fake image archive\n' > "$3"
+        fi
+        exit "$status"
+        ;;
+    load)
+        status=${FAKE_COVERAGE_LOAD_STATUS:-0}
+        test "${2:-}" = --input
+        test -s "$3"
+        exit "$status"
+        ;;
     image)
         test "${2:-}" = inspect
         inspect_count=$(grep -c '^image inspect --format {{.Id}} ' "$FAKE_DOCKER_CALL_LOG")
@@ -33,11 +52,23 @@ case "${1:-}" in
         ;;
     run)
         case " $* " in
+    *' tools/compose-owned-coverage.php manifest '*'coverage/foundation-manifest.json '* )
+        status=${FAKE_MANIFEST_STATUS:-0}
+        if [ "$status" -eq 0 ]; then
+            mkdir -p backend/coverage
+            printf '{"image_id":"%s"}\n' "$IMAGE_ID" > backend/coverage/foundation-manifest.json
+        fi
+        exit "$status"
+        ;;
     *' tools/compose-owned-coverage.php manifest '*'coverage/core-manifest.json '* )
         status=${FAKE_MANIFEST_STATUS:-0}
         if [ "$status" -eq 0 ]; then
             mkdir -p backend/coverage
-            printf '{"image_id":"%s"}\n' "$IMAGE_ID" > backend/coverage/core-manifest.json
+            if [ "${FAKE_MANIFEST_MISMATCH:-0}" -eq 1 ]; then
+                printf '{"image_id":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}\n' > backend/coverage/core-manifest.json
+            else
+                printf '{"image_id":"%s"}\n' "$IMAGE_ID" > backend/coverage/core-manifest.json
+            fi
         fi
         exit "$status"
         ;;

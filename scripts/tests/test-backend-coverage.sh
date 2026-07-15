@@ -34,9 +34,18 @@ assert_count() {
     fi
 }
 
-assert_count 1 '^docker build \\' "$SUBJECT"
+assert_count 1 '^        docker build \\' "$SUBJECT"
+assert_count 1 '^        docker buildx build \\' "$SUBJECT"
 grep -F -- '--iidfile "$IMAGE_ID_FILE"' "$SUBJECT" >/dev/null \
     || fail 'coverage wrapper does not capture the immutable image identity'
+grep -F 'docker save --output "$FOUNDATION_ARCHIVE" "$IMAGE_ID"' "$SUBJECT" >/dev/null \
+    || fail 'coverage wrapper does not export the exact coverage image foundation'
+grep -F 'docker load --input "$FOUNDATION_ARCHIVE"' "$SUBJECT" >/dev/null \
+    || fail 'coverage wrapper does not load the exact coverage image foundation'
+grep -F -- '--cache-from "type=gha,scope=$CACHE_SCOPE"' "$SUBJECT" >/dev/null \
+    || fail 'coverage wrapper does not use the stable Buildx cache scope'
+grep -F -- '--cache-to "type=gha,mode=max,scope=$CACHE_SCOPE"' "$SUBJECT" >/dev/null \
+    || fail 'coverage wrapper does not update the stable Buildx cache scope'
 grep -F '"$IMAGE_ID"' "$SUBJECT" >/dev/null \
     || fail 'coverage wrapper does not execute the immutable image identity'
 grep -F 'tools/compose-owned-coverage.php manifest' "$SUBJECT" >/dev/null \
@@ -162,9 +171,9 @@ run_case() {
     fi
 
     for intermediate in \
+        coverage-image.docker.tar coverage-image.id foundation-manifest.json \
         core.cov core.clover.xml core-manifest.json \
-        integration.cov integration.clover.xml integration-manifest.json \
-        coverage-image.id; do
+        integration.cov integration.clover.xml integration-manifest.json; do
         if [ -e "$repository/backend/coverage/$intermediate" ] || [ -L "$repository/backend/coverage/$intermediate" ]; then
             fail "$name retained intermediate artifact $intermediate"
         fi

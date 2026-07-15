@@ -11,6 +11,12 @@ Dieser Nachweis konkretisiert den Test- und Abnahmevertrag aus
 [`rewrite-plan.md`](rewrite-plan.md). Er trennt bereits belegte lokale
 Ergebnisse bewusst von den extern noch ausstehenden Prüfungen.
 
+Hinweis zur aktuellen Releasepolitik: Der unten festgehaltene Multiarch-Lauf
+ist historische Evidenz des damaligen Arbeitsstands. Seit der Umstellung auf
+AMD64-only zählen ausschließlich `linux/amd64`-Builds, -Scans und
+-Veröffentlichungen als verpflichtende Produktions- und Release-Evidenz.
+Die Dockerfiles bleiben für optionale lokale Builds architekturneutral.
+
 ## Arbeitsstandsidentität
 
 - Branch: `codex/policies-shadow-mode`;
@@ -60,9 +66,9 @@ Restore-Nachweise werden durch diesen Phase-6-Nachweis weiterhin nicht belegt.
 | Browser-E2E                      | 19 von 19 Tests auf Desktop- und Mobile-Chromium bestanden                                                                          | belegt                   |
 | Proxmox-API-Schema-Drift         | 20 bestandene Tests                                                                                                                 | belegt                   |
 | Deployment-Automation            | 65 bestandene Tests                                                                                                                 | belegt                   |
-| Multiarch-Container              | 6 Produktionsimages: Worker, Web und MariaDB für `linux/amd64` und `linux/arm64`                                                    | belegt                   |
-| Container-Sicherheit             | 0 HIGH/CRITICAL-Funde in allen 6 Images                                                                                             | belegt                   |
-| SBOM                             | 6 valide CycloneDX-1.6-SBOMs                                                                                                        | belegt                   |
+| Historischer Multiarch-Containerlauf | 6 damalige Images: Worker, Web und MariaDB für `linux/amd64` und `linux/arm64`                                                   | historisch belegt        |
+| Historische Container-Sicherheit | 0 HIGH/CRITICAL-Funde in allen 6 damaligen Images                                                                                   | historisch belegt        |
+| Historische SBOMs                | 6 valide CycloneDX-1.6-SBOMs des damaligen Arbeitsstands                                                                           | historisch belegt        |
 | Secret Scan                      | aktuell 10 Commits sowie der damalige Snapshot aller 1.535 vorhandenen, nicht ignorierten Arbeitsbaumdateien ohne Fund              | belegt                   |
 | Mutation                         | Critical 90,38 %, Global 80,34 %, jeweils 100 % Mutation-Code-Coverage und 0 Timeouts                                               | belegt                   |
 | Finaler Backend-Test             | vollständiger Backend- und Coverage-Gate-Lauf auf dem dokumentierten Arbeitsstand                                                   | belegt                   |
@@ -136,7 +142,9 @@ Die lokale Deployment-Test-Suite umfasst 65 bestandene Tests. Sie prüft die
 vorbereitete Automation, stellt aber keinen tatsächlichen Deploy und keine
 Verbindung zur Deployment-VM dar.
 
-Der Multiarch-Gate-Lauf erzeugte ohne Push genau sechs Produktionsimages:
+Der damalige Multiarch-Gate-Lauf erzeugte ohne Push genau sechs Images. Diese
+Angaben bleiben als historische Evidenz erhalten und definieren nicht mehr den
+aktuellen Releasevertrag:
 
 - Worker für `linux/amd64` und `linux/arm64`;
 - Web für `linux/amd64` und `linux/arm64`;
