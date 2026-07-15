@@ -42,6 +42,27 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
 
     public function execute(CollectorLease $lease): ShadowEvaluationPersistenceResult
     {
+        $runId = new ShadowEvaluationRunId($this->stableId('run', $lease->token->binary()));
+        $committed = $this->persist->committedResult($lease, $runId, $this->evaluatorVersion);
+        if (null !== $committed) {
+            return $committed;
+        }
+
+        try {
+            return $this->evaluate($lease, $runId);
+        } catch (ShadowEvaluationConflict $conflict) {
+            if (ShadowEvaluationConflictCode::ActiveRequestChanged !== $conflict->failureCode) {
+                throw $conflict;
+            }
+
+            return $this->evaluate($lease, $runId);
+        }
+    }
+
+    private function evaluate(
+        CollectorLease $lease,
+        ShadowEvaluationRunId $runId,
+    ): ShadowEvaluationPersistenceResult {
         $startedAt = $this->clock->now();
         /** @var list<array{candidate: AutomaticShadowCandidate, decision: ShadowDecision}> $evaluated */
         $evaluated = [];
@@ -51,7 +72,7 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
         [$decisions, $promotions] = $this->selectWinners($evaluated);
         $finishedAt = $this->clock->now();
         $batch = new ShadowEvaluationBatch(
-            new ShadowEvaluationRunId($this->stableId('run', $lease->token->binary())),
+            $runId,
             $lease->token,
             $this->evaluatorVersion,
             $startedAt,
@@ -78,17 +99,19 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             if (DecisionOutcome::Eligible !== $decision->outcome) {
                 continue;
             }
+            /** @var \App\Domain\Scheduler\ReasonPriority $reasonPriority Eligible decisions enforce this invariant. */
             $reasonPriority = $decision->reasonPriority;
-            if (null === $reasonPriority) {
-                throw new \LogicException('An eligible decision lost its automatic reason.');
-            }
             $reason = $reasonPriority->reason;
             $candidate = $item['candidate'];
+            /** @var ShadowPolicyEvidence $policy Eligible decisions enforce this invariant. */
+            $policy = $decision->policy;
+            /** @var ShadowTargetEvidence $target Eligible decisions enforce this invariant. */
+            $target = $decision->target;
             $eligible = new EligibleBackupCandidate(
                 $decision->id->binary(),
                 $decision->guestId->binary(),
-                $decision->policy?->policyId->binary() ?? throw new \LogicException('An eligible decision lost its policy.'),
-                $decision->target?->targetId->binary() ?? throw new \LogicException('An eligible decision lost its target.'),
+                $policy->policyId->binary(),
+                $target->targetId->binary(),
                 $reason,
                 new PolicyPriority($candidate->policyPriority),
             );
@@ -122,14 +145,16 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             $candidate = $candidateByDecision[$decisionHex];
             $json = $candidate->resolvedPolicyJson;
             if (null === $json) {
-                throw new \LogicException('An eligible winner lacks its canonical resolved policy.');
+                throw new \LogicException('Eligible automatic shadow promotion requires resolved policy JSON.');
             }
+            /** @var ShadowPolicyEvidence $policy Eligible decisions enforce this invariant. */
+            $policy = $decision->policy;
             $decisions[] = $decision;
             $promotions[] = new AutomaticShadowPromotion(
                 $this->stableId('automatic-request', $decision->id->binary()),
                 $decision->id->binary(),
                 $json,
-                $decision->policy?->snapshotHash() ?? throw new \LogicException('An eligible winner lost its policy hash.'),
+                $policy->snapshotHash(),
             );
         }
 

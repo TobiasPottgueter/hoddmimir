@@ -48,6 +48,21 @@ final class PersistShadowEvaluationTest extends TestCase
         self::assertSame([], $store->calls);
     }
 
+    public function testCommittedResultProbeDelegatesStableIdentity(): void
+    {
+        $token = new CollectorCycleToken(str_repeat("\x01", 16));
+        $runId = new ShadowEvaluationRunId(str_repeat("\x03", 16));
+        $store = new RecordingShadowEvaluationStore(ShadowEvaluationPersistenceResult::AlreadyPersisted);
+
+        self::assertSame(
+            ShadowEvaluationPersistenceResult::AlreadyPersisted,
+            (new PersistShadowEvaluation($store))->committedResult($this->lease($token), $runId, 7),
+        );
+        self::assertCount(1, $store->probeCalls);
+        self::assertSame($runId, $store->probeCalls[0][0]);
+        self::assertSame(7, $store->probeCalls[0][1]);
+    }
+
     private function batch(CollectorCycleToken $token): ShadowEvaluationBatch
     {
         return new ShadowEvaluationBatch(
@@ -75,9 +90,21 @@ final class RecordingShadowEvaluationStore implements ShadowEvaluationStore
 {
     /** @var list<array{ShadowEvaluationBatch}> */
     public array $calls = [];
+    /** @var list<array{ShadowEvaluationRunId, int}> */
+    public array $probeCalls = [];
 
     public function __construct(private readonly ShadowEvaluationPersistenceResult $result)
     {
+    }
+
+    public function committedResult(
+        CollectorLease $lease,
+        ShadowEvaluationRunId $runId,
+        int $evaluatorVersion,
+    ): ShadowEvaluationPersistenceResult {
+        $this->probeCalls[] = [$runId, $evaluatorVersion];
+
+        return $this->result;
     }
 
     public function persist(

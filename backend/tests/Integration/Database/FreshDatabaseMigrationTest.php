@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Database;
 
+use App\Domain\Backup\BackupRequestState;
+
 final class FreshDatabaseMigrationTest extends DatabaseTestCase
 {
     private const array EXPECTED_TABLES = [
@@ -130,7 +132,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(28, $versions);
+        self::assertCount(29, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -187,6 +189,42 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260712002200', $versions[26]);
         self::assertIsString($versions[27]);
         self::assertStringEndsWith('Version20260715000100', $versions[27]);
+        self::assertIsString($versions[28]);
+        self::assertStringEndsWith('Version20260715000200', $versions[28]);
+    }
+
+    public function testActiveBackupRequestGuestKeyIsGeneratedAndUnique(): void
+    {
+        $column = $this->connection()->fetchAssociative(<<<'SQL'
+            SELECT EXTRA AS extra, GENERATION_EXPRESSION AS expression
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'backup_requests' AND COLUMN_NAME = 'active_guest_id'
+            SQL);
+        self::assertIsArray($column);
+        self::assertIsString($column['extra']);
+        self::assertIsString($column['expression']);
+        self::assertStringContainsString('STORED GENERATED', strtoupper($column['extra']));
+        $expression = strtolower($column['expression']);
+        preg_match_all("/'([^']+)'/", $expression, $matches);
+        $generatedActiveStates = $matches[1];
+        $domainActiveStates = array_values(array_map(
+            static fn (BackupRequestState $state): string => $state->value,
+            array_filter(
+                BackupRequestState::cases(),
+                static fn (BackupRequestState $state): bool => !$state->isTerminal(),
+            ),
+        ));
+        sort($generatedActiveStates);
+        sort($domainActiveStates);
+        self::assertSame($domainActiveStates, $generatedActiveStates);
+
+        $unique = $this->connection()->fetchOne(<<<'SQL'
+            SELECT COUNT(*) FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'backup_requests'
+              AND INDEX_NAME = 'uq_backup_requests_active_guest' AND NON_UNIQUE = 0
+            SQL);
+        self::assertTrue(is_int($unique) || is_string($unique));
+        self::assertSame('3', (string) $unique);
     }
 
     public function testBackupRunLogsPreserveTheCompleteTypedPveLineBoundary(): void

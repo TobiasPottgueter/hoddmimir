@@ -35,13 +35,16 @@ use RuntimeException;
 final readonly class DbalBackupOperationCommandRepository implements BackupOperationCommandRepository
 {
     private const string DATE_FORMAT = 'Y-m-d H:i:s.u';
+    private DbalBackupRequestGuestGuard $guestGuard;
 
     public function __construct(
         private Connection $connection,
         private SecurityIdentifierGenerator $ids,
         private Clock $clock,
         private PolicyResolver $policyResolver,
-    ) {}
+    ) {
+        $this->guestGuard = new DbalBackupRequestGuestGuard();
+    }
 
     public function execute(BackupOperationCommand $command, AuthenticatedPrincipal $principal): BackupOperationCommandResult
     {
@@ -68,6 +71,19 @@ final readonly class DbalBackupOperationCommandRepository implements BackupOpera
 
     private function manualRequest(BackupOperationCommand $command): BackupOperationCommandResult
     {
+        try {
+            $this->guestGuard->lock($this->connection, [$command->guestId]);
+        } catch (RuntimeException $error) {
+            if ('The guest request guard no longer exists.' !== $error->getMessage()) {
+                throw $error;
+            }
+
+            return $this->blocked('policy_or_guest_missing');
+        }
+        if (null !== $this->guestGuard->activeRequestId($this->connection, $command->guestId)) {
+            return $this->blocked('active_request_exists');
+        }
+
         $lockedPolicyRevision = $this->connection->fetchOne(
             'SELECT revision FROM backup_policies WHERE id = :policy_id FOR UPDATE',
             ['policy_id' => $command->policyId],

@@ -34,13 +34,18 @@ final class EligibilityEvaluatorTest extends TestCase
         self::assertNull($notDue->reasonPriority);
     }
 
-    public function testOnlyAnExistingActiveRequestProducesDeduplicated(): void
+    public function testOnlyExplicitDuplicateFailuresProduceDeduplicated(): void
     {
         $evaluator = new EligibilityEvaluator();
         $duplicate = $this->gate(
             GateCode::ActiveRequestAbsent,
             false,
             GateDetailCode::ActiveRequestExists,
+        );
+        $higherRanked = $this->gate(
+            GateCode::HigherRankedCandidateAbsent,
+            false,
+            GateDetailCode::HigherRankedCandidate,
         );
         $reason = new ReasonPriority(BackupReason::MaxAge, Priority::MaxAge);
 
@@ -50,7 +55,7 @@ final class EligibilityEvaluatorTest extends TestCase
         );
         self::assertSame(
             DecisionOutcome::Deduplicated,
-            $evaluator->evaluate([$duplicate, $duplicate], null)->outcome,
+            $evaluator->evaluate([$duplicate, $higherRanked], null)->outcome,
         );
     }
 

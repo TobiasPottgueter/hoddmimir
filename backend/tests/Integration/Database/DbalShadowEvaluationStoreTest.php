@@ -36,6 +36,7 @@ use App\Domain\Scheduler\Priority;
 use App\Domain\Scheduler\ReasonPriority;
 use App\Infrastructure\Persistence\MariaDb\DbalShadowEvaluationStore;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupRequestGuestGuard;
 use DateTimeImmutable;
 use DateTimeZone;
 use Doctrine\DBAL\DriverManager;
@@ -91,6 +92,39 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         } catch (ShadowEvaluationConflict $conflict) {
             self::assertSame(ShadowEvaluationConflictCode::PayloadMismatch, $conflict->failureCode);
         }
+    }
+
+    public function testCommittedProbeReturnsBeforePayloadReconstructionButKeepsIdentityStrict(): void
+    {
+        $store = new DbalShadowEvaluationStore($this->connection());
+        $batch = $this->batch('run-a');
+        $store->persist($this->lease, $batch);
+
+        self::assertSame(
+            ShadowEvaluationPersistenceResult::AlreadyPersisted,
+            $store->committedResult($this->lease, $batch->runId, 1),
+        );
+        try {
+            $store->committedResult($this->lease, $batch->runId, 2);
+            self::fail('A changed evaluator may not adopt a committed run.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::PayloadMismatch, $conflict->failureCode);
+        }
+    }
+
+    public function testActiveRequestAppearingAfterSourceRollsBackShadowPromotion(): void
+    {
+        $this->seedActiveManualRequest(self::bytes('concurrent-manual'));
+        $store = new DbalShadowEvaluationStore($this->connection());
+
+        try {
+            $store->persist($this->lease, $this->batch('racing-run', withPromotion: true));
+            self::fail('A promotion must recheck the per-guest active-request invariant.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::ActiveRequestChanged, $conflict->failureCode);
+        }
+        self::assertSame('0', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM scheduler_evaluation_runs')));
+        self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
     }
 
     public function testEligibleWinnerIsPromotedAtomicallyFromCollectorStartAndReplayIsExact(): void
@@ -219,10 +253,47 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         $store->persist($this->lease, $this->batch('run-a'));
 
         try {
+            $store->committedResult($this->lease, new ShadowEvaluationRunId(self::bytes('run-b')), 1);
+            self::fail('The committed probe must not hide another run for the same cycle.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::CycleAlreadyEvaluated, $conflict->failureCode);
+        }
+
+        try {
             $store->persist($this->lease, $this->batch('run-b'));
             self::fail('A collector cycle must not gain a second evaluation.');
         } catch (ShadowEvaluationConflict $conflict) {
             self::assertSame(ShadowEvaluationConflictCode::CycleAlreadyEvaluated, $conflict->failureCode);
+        }
+    }
+
+    public function testCommittedProbeRejectsRunIdOwnedByAnotherCycle(): void
+    {
+        $otherToken = self::bytes('other-cycle');
+        $runId = self::bytes('reused-run');
+        $at = self::format($this->now->modify('-10 seconds'));
+        $this->connection()->insert('collector_cycles', [
+            'cycle_token' => $otherToken, 'schedule_name' => 'inventory',
+            'worker_instance_id' => self::bytes('worker'), 'worker_kind' => 'collector',
+            'fencing_token' => 2, 'scheduled_for' => $at, 'started_at' => $at,
+            'heartbeat_at' => $at, 'finished_at' => $at, 'status' => 'succeeded',
+        ]);
+        $this->connection()->insert('scheduler_evaluation_runs', [
+            'id' => $runId, 'cycle_token' => $otherToken, 'collector_fencing_token' => 2,
+            'evaluator_version' => 1, 'payload_hash' => hash('sha256', 'other', true),
+            'decision_count' => 0, 'gate_count' => 0, 'started_at' => $at,
+            'completed_at' => $at, 'persisted_at' => $at,
+        ]);
+
+        try {
+            (new DbalShadowEvaluationStore($this->connection()))->committedResult(
+                $this->lease,
+                new ShadowEvaluationRunId($runId),
+                1,
+            );
+            self::fail('The committed probe must not adopt a run ID from another cycle.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::RunIdReused, $conflict->failureCode);
         }
     }
 
@@ -347,6 +418,50 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         }
     }
 
+    public function testActiveGuestMigrationIsIdempotentAndExpandOnly(): void
+    {
+        self::assertSame([], $this->executeActiveGuestMigration(false));
+        self::assertSame([], $this->executeActiveGuestMigration(true));
+        $this->assertActiveGuestMigrationState();
+    }
+
+    public function testActiveGuestMigrationPreflightReportsDuplicateAndRecoversPartialDdl(): void
+    {
+        $first = self::bytes('migration-duplicate-first');
+        $second = self::bytes('migration-duplicate-second');
+        $restored = false;
+        $this->seedActiveManualRequest($first);
+        $this->connection()->executeStatement('ALTER TABLE backup_requests DROP INDEX uq_backup_requests_active_guest');
+
+        try {
+            $this->seedActiveManualRequest($second, $this->now->modify('+1 second'));
+            try {
+                $this->executeActiveGuestMigration(true);
+                self::fail('The migration must reject duplicate active requests before adding its unique index.');
+            } catch (Throwable $exception) {
+                self::assertStringContainsString('Duplicate active backup requests', $exception->getMessage());
+                self::assertStringContainsString(strtoupper(bin2hex($this->connectionId->binary())), $exception->getMessage());
+                self::assertStringContainsString(strtoupper(bin2hex($this->clusterId->binary())), $exception->getMessage());
+                self::assertStringContainsString(strtoupper(bin2hex($this->guestId->binary())), $exception->getMessage());
+                self::assertStringContainsString('count=2', $exception->getMessage());
+            }
+
+            $this->deleteBackupRequestsIgnoringSelfReferences(['id' => $second]);
+            $upSql = $this->executeActiveGuestMigration(true);
+            $restored = true;
+            self::assertCount(1, $upSql);
+            self::assertStringContainsString('ADD CONSTRAINT uq_backup_requests_active_guest UNIQUE', $upSql[0]);
+            $this->assertActiveGuestMigrationState();
+        } finally {
+            if (!$restored) {
+                $this->deleteBackupRequestsIgnoringSelfReferences();
+                $this->executeActiveGuestMigration(true);
+            }
+            $this->cleanupCommittedFixture();
+            $this->synchronizeImplicitDdlCommit();
+        }
+    }
+
     public function testConcurrentIdenticalWritersConvergeOnOneRun(): void
     {
         if (!function_exists('pcntl_fork')) {
@@ -377,6 +492,38 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             ));
             self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
             self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_request_events')));
+        } finally {
+            $this->cleanupCommittedFixture();
+        }
+    }
+
+    public function testConcurrentManualAndAutomaticCreatorsSerializePerGuestWithoutDuplicate(): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            self::markTestSkipped('pcntl is required for the request-creator race proof.');
+        }
+
+        $parameters = $this->connection()->getParams();
+        $batch = $this->batch('creator-race', withPromotion: true);
+        $this->connection()->commit();
+        $automatic = $this->startChildWriter($parameters, $batch);
+        $manual = $this->startChildManualWriter($parameters);
+
+        try {
+            self::assertSame(1, fwrite($automatic[1], '1'));
+            self::assertSame(1, fwrite($manual[1], '1'));
+            $automaticResult = $this->finishAnyChildWriter($automatic[0], $automatic[1]);
+            $manualResult = $this->finishAnyChildWriter($manual[0], $manual[1]);
+
+            self::assertTrue(
+                ('persisted' === $automaticResult && 'blocked' === $manualResult)
+                || (str_contains($automaticResult, 'active request appeared') && 'manual' === $manualResult),
+                'The per-guest lock must serialize one creator and fail the other closed.',
+            );
+            self::assertSame('1', $this->numericString($this->connection()->fetchOne(
+                "SELECT COUNT(*) FROM backup_requests WHERE guest_id=:guest AND active_guest_id IS NOT NULL",
+                ['guest' => $this->guestId->binary()],
+            )));
         } finally {
             $this->cleanupCommittedFixture();
         }
@@ -429,6 +576,35 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             [$decision],
             $withPromotion ? [$promotion] : [],
         );
+    }
+
+    private function seedActiveManualRequest(string $requestId, ?DateTimeImmutable $at = null): void
+    {
+        $this->insertActiveManualRequest($this->connection(), $requestId, $at);
+    }
+
+    private function insertActiveManualRequest(
+        \Doctrine\DBAL\Connection $connection,
+        string $requestId,
+        ?DateTimeImmutable $scheduledAt = null,
+    ): void
+    {
+        $at = self::format($scheduledAt ?? $this->now);
+        $json = '{"mode":"snapshot"}';
+        $connection->insert('backup_requests', [
+            'id' => $requestId, 'root_request_id' => $requestId, 'attempt' => 1,
+            'origin' => 'manual', 'state' => 'pending', 'reason' => 'manual', 'priority' => 400,
+            'scheduled_at' => $at, 'available_at' => $at,
+            'connection_id' => $this->connectionId->binary(), 'cluster_id' => $this->clusterId->binary(),
+            'guest_id' => $this->guestId->binary(), 'node_id' => $this->nodeId->binary(),
+            'placement_revision' => 1, 'placement_observed_at' => $at,
+            'policy_id' => self::bytes('policy'), 'policy_revision' => 1,
+            'target_id' => self::bytes('target'), 'target_revision' => 1,
+            'resolved_policy_json' => $json, 'resolved_policy_hash' => hash('sha256', $json, true),
+            'expected_size_bytes' => '1000', 'retry_disposition' => 'not_applicable',
+            'submission_provenance' => 'not_submitted', 'revision' => 1, 'claim_fence' => 0,
+            'created_at' => $at, 'updated_at' => $at,
+        ]);
     }
 
     private function seedLeaseAndGuest(): void
@@ -652,6 +828,70 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         return $result;
     }
 
+    /** @param array<string, mixed> $parameters
+     *  @return array{int, resource}
+     */
+    private function startChildManualWriter(array $parameters): array
+    {
+        $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        if (false === $sockets) {
+            throw new \RuntimeException('Could not create manual request concurrency sockets.');
+        }
+        [$parent, $child] = $sockets;
+        $pid = pcntl_fork();
+        if (-1 === $pid) {
+            throw new \RuntimeException('Could not fork a manual request writer.');
+        }
+        if (0 === $pid) {
+            fclose($parent);
+            if ('1' !== fread($child, 1)) {
+                exit(2);
+            }
+            // @phpstan-ignore argument.type (parameters originate from a live DBAL connection)
+            $connection = DriverManager::getConnection($parameters);
+            try {
+                $result = $connection->transactional(function (\Doctrine\DBAL\Connection $db): string {
+                    $guard = new DbalBackupRequestGuestGuard();
+                    $guard->lock($db, [$this->guestId->binary()]);
+                    if (null !== $guard->activeRequestId($db, $this->guestId->binary())) {
+                        return 'blocked';
+                    }
+                    $this->insertActiveManualRequest($db, self::bytes('creator-race-manual'));
+
+                    return 'manual';
+                });
+                fwrite($child, $result);
+            } catch (Throwable $exception) {
+                fwrite($child, $exception::class.':'.$exception->getMessage());
+            } finally {
+                $connection->close();
+                fclose($child);
+            }
+            pcntl_exec('/bin/true');
+            exit(3);
+        }
+
+        fclose($child);
+        stream_set_timeout($parent, 15);
+
+        return [$pid, $parent];
+    }
+
+    /** @param resource $socket */
+    private function finishAnyChildWriter(int $pid, $socket): string
+    {
+        $result = stream_get_contents($socket);
+        fclose($socket);
+        $processStatus = null;
+        pcntl_waitpid($pid, $processStatus);
+        self::assertIsInt($processStatus);
+        self::assertTrue(pcntl_wifexited($processStatus));
+        self::assertSame(0, pcntl_wexitstatus($processStatus));
+        self::assertIsString($result);
+
+        return $result;
+    }
+
     private function cleanupCommittedFixture(): void
     {
         $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
@@ -665,6 +905,21 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
                 'proxmox_connections', 'collector_cycles', 'collector_schedule', 'worker_heartbeats',
             ] as $table) {
                 $this->connection()->executeStatement('DELETE FROM '.$table);
+            }
+        } finally {
+            $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
+    /** @param array<string, mixed> $criteria */
+    private function deleteBackupRequestsIgnoringSelfReferences(array $criteria = []): void
+    {
+        $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            if ([] === $criteria) {
+                $this->connection()->executeStatement('DELETE FROM backup_requests');
+            } else {
+                $this->connection()->delete('backup_requests', $criteria);
             }
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
@@ -696,6 +951,58 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         }
 
         return $statements;
+    }
+
+    /** @return list<string> */
+    private function executeActiveGuestMigration(bool $up): array
+    {
+        $path = dirname(__DIR__, 3).'/migrations/Version20260715000200.php';
+        require_once $path;
+        $class = 'DoctrineMigrations\\'.pathinfo($path, PATHINFO_FILENAME);
+        if (!is_a($class, AbstractMigration::class, true)) {
+            self::fail('The active-guest migration did not load as a Doctrine migration.');
+        }
+        $migration = new $class($this->connection(), new NullLogger());
+        if ($up) {
+            $migration->up(new Schema());
+        } else {
+            $migration->down(new Schema());
+        }
+
+        $statements = [];
+        foreach ($migration->getSql() as $query) {
+            $statements[] = $query->getStatement();
+            self::assertSame([], $query->getParameters());
+            self::assertSame([], $query->getTypes());
+            $this->connection()->executeStatement($query->getStatement());
+        }
+
+        return $statements;
+    }
+
+    private function assertActiveGuestMigrationState(): void
+    {
+        $column = $this->connection()->fetchAssociative(<<<'SQL'
+SELECT EXTRA AS extra, GENERATION_EXPRESSION AS generation_expression
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'backup_requests'
+  AND COLUMN_NAME = 'active_guest_id'
+SQL);
+        self::assertIsArray($column);
+        self::assertIsString($column['extra']);
+        self::assertIsString($column['generation_expression']);
+        self::assertStringContainsString('STORED GENERATED', strtoupper($column['extra']));
+        self::assertStringContainsString("'reconcile_required'", strtolower($column['generation_expression']));
+
+        self::assertSame('0', $this->numericString($this->connection()->fetchOne(<<<'SQL'
+SELECT NON_UNIQUE
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'backup_requests'
+  AND INDEX_NAME = 'uq_backup_requests_active_guest'
+LIMIT 1
+SQL)));
     }
 
     private function assertAutomaticPromotionMigrationState(): void

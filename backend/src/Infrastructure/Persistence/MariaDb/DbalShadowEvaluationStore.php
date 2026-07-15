@@ -24,10 +24,39 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
     private const string SCHEDULE_NAME = 'inventory';
 
     private ExpectedBackupSize $expectedSizes;
+    private DbalBackupRequestGuestGuard $guestGuard;
 
     public function __construct(private Connection $connection, ?ExpectedBackupSize $expectedSizes = null)
     {
         $this->expectedSizes = $expectedSizes ?? new ExpectedBackupSize();
+        $this->guestGuard = new DbalBackupRequestGuestGuard();
+    }
+
+    public function committedResult(
+        CollectorLease $lease,
+        \App\Application\Scheduler\Shadow\ShadowEvaluationRunId $runId,
+        int $evaluatorVersion,
+    ): ?ShadowEvaluationPersistenceResult {
+        return $this->connection->transactional(function (Connection $connection) use ($lease, $runId, $evaluatorVersion): ?ShadowEvaluationPersistenceResult {
+            $this->assertFence($connection, $lease, true);
+            $existing = $this->findExistingEvaluation($connection, $lease->token->binary(), $runId->binary());
+            if (false === $existing) {
+                $this->assertFence($connection, $lease, false);
+
+                return null;
+            }
+
+            if ($this->integer($existing, 'collector_fencing_token') !== $lease->fencingToken
+                || $this->integer($existing, 'evaluator_version') !== $evaluatorVersion) {
+                throw new ShadowEvaluationConflict(
+                    ShadowEvaluationConflictCode::PayloadMismatch,
+                    'The committed shadow evaluation belongs to another fence or evaluator version.',
+                );
+            }
+            $this->assertFence($connection, $lease, false);
+
+            return ShadowEvaluationPersistenceResult::AlreadyPersisted;
+        });
     }
 
     public function persist(
@@ -46,16 +75,10 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
             $payloadHash = $batch->contentHash();
             $decisionCount = count($batch->decisions);
             $gateCount = $batch->gateCount();
-            $existing = $connection->fetchAssociative(
-                <<<'SQL'
-                    SELECT * FROM scheduler_evaluation_runs
-                    WHERE cycle_token = :cycle_token OR id = :id
-                    FOR UPDATE
-                    SQL,
-                [
-                    'cycle_token' => $batch->cycleToken->binary(),
-                    'id' => $batch->runId->binary(),
-                ],
+            $existing = $this->findExistingEvaluation(
+                $connection,
+                $batch->cycleToken->binary(),
+                $batch->runId->binary(),
             );
 
             if (false !== $existing) {
@@ -74,6 +97,8 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
 
                 return $result;
             }
+
+            $this->lockPromotionGuestsAndAssertNoActiveRequest($connection, $batch);
 
             $this->assertConfigurationRevisions($connection, $batch);
 
@@ -109,6 +134,61 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
 
             return ShadowEvaluationPersistenceResult::Persisted;
         });
+    }
+
+    /** @return array<string, mixed>|false */
+    private function findExistingEvaluation(Connection $connection, string $cycleToken, string $runId): array|false
+    {
+        $byCycle = $connection->fetchAssociative(
+            'SELECT * FROM scheduler_evaluation_runs WHERE cycle_token = :cycle_token FOR UPDATE',
+            ['cycle_token' => $cycleToken],
+        );
+        $byRun = $connection->fetchAssociative(
+            'SELECT * FROM scheduler_evaluation_runs WHERE id = :id FOR UPDATE',
+            ['id' => $runId],
+        );
+        if (false !== $byCycle && (!is_string($byCycle['id'] ?? null) || !hash_equals($runId, $byCycle['id']))) {
+            throw new ShadowEvaluationConflict(
+                ShadowEvaluationConflictCode::CycleAlreadyEvaluated,
+                'The collector cycle already has another shadow evaluation.',
+            );
+        }
+        if (false !== $byRun && (!is_string($byRun['cycle_token'] ?? null) || !hash_equals($cycleToken, $byRun['cycle_token']))) {
+            throw new ShadowEvaluationConflict(
+                ShadowEvaluationConflictCode::RunIdReused,
+                'The shadow evaluation run ID belongs to another collector cycle.',
+            );
+        }
+
+        return false !== $byCycle ? $byCycle : $byRun;
+    }
+
+    private function lockPromotionGuestsAndAssertNoActiveRequest(
+        Connection $connection,
+        ShadowEvaluationBatch $batch,
+    ): void {
+        if ([] === $batch->promotions) {
+            return;
+        }
+
+        $decisionGuests = [];
+        foreach ($batch->decisions as $decision) {
+            $decisionGuests[$decision->id->toHex()] = $decision->guestId->binary();
+        }
+        $guestIds = [];
+        foreach ($batch->promotions as $promotion) {
+            $guestIds[] = $decisionGuests[bin2hex($promotion->decisionId)]
+                ?? throw new RuntimeException('An automatic promotion lost its guest guard.');
+        }
+        $this->guestGuard->lock($connection, $guestIds);
+        foreach ($guestIds as $guestId) {
+            if (null !== $this->guestGuard->activeRequestId($connection, $guestId)) {
+                throw new ShadowEvaluationConflict(
+                    ShadowEvaluationConflictCode::ActiveRequestChanged,
+                    'An active request appeared after the automatic shadow source was read.',
+                );
+            }
+        }
     }
 
     private function promote(Connection $connection, AutomaticShadowPromotion $promotion): void

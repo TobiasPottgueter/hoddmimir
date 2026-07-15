@@ -525,6 +525,7 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         );
         self::assertSame('failed', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id=:id', ['id' => $claim->id]));
         self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
+        self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE guest_id=:guest AND active_guest_id IS NOT NULL", ['guest' => self::id('guest')])));
         self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_notification_outbox WHERE notification_kind='failure'")));
     }
 
@@ -1120,24 +1121,27 @@ SQL, ['guest' => self::id('guest')]);
         }
     }
 
-    public function testDuplicatePendingRequestsForOneGuestChooseOneStableWinner(): void
+    public function testSecondActiveRequestForOneGuestIsRejectedBeforeClaim(): void
     {
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
             '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
         ));
-        $store->promote(new ShadowPromotion(
-            self::id('request-c'), self::id('decision-c'), $this->now->modify('+1 second'),
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
-        ));
+        try {
+            $store->promote(new ShadowPromotion(
+                self::id('request-c'), self::id('decision-c'), $this->now->modify('+1 second'),
+                '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            ));
+            self::fail('A guest must not gain a second active request.');
+        } catch (\RuntimeException $error) {
+            self::assertSame('The guest already has an active backup request.', $error->getMessage());
+        }
 
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now->modify('+1 second')));
         self::assertNotNull($claim);
         self::assertSame(self::id('request-a'), $claim->id);
-        self::assertSame('pending', $this->connection()->fetchOne(
-            'SELECT state FROM backup_requests WHERE id = :id', ['id' => self::id('request-c')],
-        ));
+        self::assertSame('1', $this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
     }
 
     private function store(): DbalBackupQueueStore

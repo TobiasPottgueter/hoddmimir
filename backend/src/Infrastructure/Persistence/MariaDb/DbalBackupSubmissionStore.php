@@ -30,12 +30,15 @@ use RuntimeException;
 
 final readonly class DbalBackupSubmissionStore implements BackupSubmissionTransaction
 {
+    private DbalBackupRequestGuestGuard $guestGuard;
+
     public function __construct(
         private Connection $connection,
         private DbalBackupProblemRecorder $problems,
         private int $freshnessSeconds = 300,
     ) {
         if ($freshnessSeconds < 1 || $freshnessSeconds > 86_400) throw new \InvalidArgumentException('Invalid submission freshness window.');
+        $this->guestGuard = new DbalBackupRequestGuestGuard();
     }
 
     public function inspectExistingSubmission(SubmitClaimedBackupCommand $command): ExistingSubmissionStatus
@@ -208,6 +211,12 @@ SQL, ['request' => $command->requestId], ['request' => ParameterType::BINARY]);
     private function transition(SubmitClaimedBackupCommand $command, callable $operation): void
     {
         $this->connection->transactional(function (Connection $db) use ($command, $operation): void {
+            $guestId = $db->fetchOne(
+                'SELECT guest_id FROM backup_requests WHERE id = :request',
+                ['request' => $command->requestId],
+                ['request' => ParameterType::BINARY],
+            );
+            $this->guestGuard->lock($db, [$this->binary($guestId)]);
             $row = $db->fetchAssociative(<<<'SQL'
 SELECT request.*, guest.name AS guest_name, guest.guest_type, guest.vmid,
        node.node_name, target.display_name AS target_label

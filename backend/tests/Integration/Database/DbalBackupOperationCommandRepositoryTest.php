@@ -66,6 +66,23 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
             ['actor' => self::USER],
         )));
 
+        $duplicate = new BackupOperationCommand(
+            BackupOperationCommandType::ManualRequest,
+            self::uuid('c0000000-0000-4000-8000-000000000003'),
+            self::uuid('80000000-0000-4000-8000-000000000001'),
+            self::uuid('50000000-0000-4000-8000-000000000101'),
+            1,
+            'manual-active-duplicate',
+            'operation-apply2',
+        );
+        $duplicateResult = $repository->execute($duplicate, $principal);
+        self::assertSame(BackupOperationCommandStatus::Blocked, $duplicateResult->status);
+        self::assertSame('active_request_exists', $duplicateResult->blocker);
+        self::assertSame('1', self::scalarString($this->connection()->fetchOne(
+            "SELECT COUNT(*) FROM backup_requests WHERE guest_id = :guest AND state IN ('pending','retry_wait','leased','starting','running','reconcile_required')",
+            ['guest' => self::uuid('50000000-0000-4000-8000-000000000101')],
+        )));
+
         $cancel = new BackupOperationCommand(
             BackupOperationCommandType::CancelRequest,
             $request,
@@ -297,6 +314,13 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
                 'maximum_age_seconds' => 86400, 'schedule' => 'collector_cycle', 'keep_last' => 7,
                 'retention_execution_enabled' => 0, 'created_at' => $now, 'updated_at' => $now,
             ]);
+            $this->connection()->insert('guests', [
+                'id' => self::GUEST, 'connection_id' => 'operation-connec', 'cluster_id' => 'operation-cluste',
+                'guest_type' => 'qemu', 'vmid' => 100, 'name' => 'operation-guest', 'is_template' => 0,
+                'provisioned_size_bytes' => 1024, 'inventory_state' => 'active',
+                'first_seen_run_id' => 'operation-run000', 'last_seen_run_id' => 'operation-run000',
+                'first_seen_at' => $now, 'last_seen_at' => $now,
+            ]);
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         }
@@ -368,6 +392,7 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
             $this->connection()->delete('backup_operation_commands', ['actor_user_id' => self::USER]);
             $this->connection()->delete('audit_events', ['actor_user_id' => self::USER]);
             $this->connection()->delete('backup_requests', ['id' => self::REQUEST]);
+            $this->connection()->delete('guests', ['id' => self::GUEST]);
             $this->connection()->delete('backup_policies', ['id' => self::POLICY]);
             $this->connection()->delete('users', ['id' => self::USER]);
         } finally {

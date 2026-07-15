@@ -22,6 +22,8 @@ use RuntimeException;
 
 final readonly class DbalBackupQueueStore implements BackupQueueStore
 {
+    private DbalBackupRequestGuestGuard $guestGuard;
+
     public function __construct(
         private Connection $connection,
         private QueueClaimTokenSource $tokens,
@@ -32,11 +34,18 @@ final readonly class DbalBackupQueueStore implements BackupQueueStore
         if ($deferSeconds < 1 || $deferSeconds > 86400) {
             throw new \InvalidArgumentException('The queue defer interval must be between 1 and 86400 seconds.');
         }
+        $this->guestGuard = new DbalBackupRequestGuestGuard();
     }
 
     public function promote(ShadowPromotion $promotion): string
     {
         return $this->connection->transactional(function (Connection $db) use ($promotion): string {
+            $guestId = $db->fetchOne(
+                'SELECT guest_id FROM scheduler_decisions WHERE id = :id',
+                ['id' => $promotion->shadowDecisionId],
+                ['id' => ParameterType::BINARY],
+            );
+            $this->guestGuard->lock($db, [$this->binary($guestId)]);
             $row = $db->fetchAssociative(<<<'SQL'
 SELECT decision.*, guest.provisioned_size_bytes, state.last_success_size_bytes
 FROM scheduler_decisions decision
@@ -62,6 +71,9 @@ SQL, ['id' => $promotion->shadowDecisionId], ['id' => ParameterType::BINARY]);
             $existing = $this->existingRequestId($db, $row, $promotion->scheduledAt);
             if (null !== $existing) {
                 return $existing;
+            }
+            if (null !== $this->guestGuard->activeRequestId($db, $this->binary($row['guest_id'] ?? null))) {
+                throw new RuntimeException('The guest already has an active backup request.');
             }
 
             $expected = $this->sizes->calculate(

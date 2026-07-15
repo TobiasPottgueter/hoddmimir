@@ -12,7 +12,10 @@ use App\Application\Scheduler\Shadow\AutomaticShadowEvaluationSource;
 use App\Application\Scheduler\Shadow\PersistShadowEvaluation;
 use App\Application\Scheduler\Shadow\RunAutomaticShadowEvaluation;
 use App\Application\Scheduler\Shadow\ShadowEvaluationBatch;
+use App\Application\Scheduler\Shadow\ShadowEvaluationConflict;
+use App\Application\Scheduler\Shadow\ShadowEvaluationConflictCode;
 use App\Application\Scheduler\Shadow\ShadowEvaluationPersistenceResult;
+use App\Application\Scheduler\Shadow\ShadowEvaluationRunId;
 use App\Application\Scheduler\Shadow\ShadowEvaluationStore;
 use App\Domain\Scheduler\DecisionOutcome;
 use App\Domain\Scheduler\EligibilityEvaluator;
@@ -176,6 +179,23 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         self::assertSame('incompatible', $decision->gates[22]->result->detailCode->value);
     }
 
+    public function testEligibleCandidateWithoutResolvedPolicyJsonFailsClosedBeforePersistence(): void
+    {
+        $store = new CapturingShadowStore();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Eligible automatic shadow promotion requires resolved policy JSON.');
+        try {
+            $this->service(
+                new RecordingAutomaticShadowSource([$this->candidate(includeResolvedPolicyJson: false)]),
+                $store,
+                new DateTimeImmutable('2026-07-12T10:05:00Z'),
+            )->execute($this->lease());
+        } finally {
+            self::assertSame([], $store->batches);
+        }
+    }
+
     public function testNodeAndTargetConcurrencyBlockIndependentlyInStableOrder(): void
     {
         foreach ([
@@ -277,6 +297,54 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         self::assertSame(16, strlen($id));
     }
 
+    public function testCommittedCycleReturnsBeforeSourceAndClockAreReadAgain(): void
+    {
+        $source = new RecordingAutomaticShadowSource([$this->candidate(activeRequestAbsent: false)]);
+        $store = new CapturingShadowStore();
+        $store->committed = ShadowEvaluationPersistenceResult::AlreadyPersisted;
+
+        self::assertSame(
+            ShadowEvaluationPersistenceResult::AlreadyPersisted,
+            $this->service($source, $store, new DateTimeImmutable('2026-07-12T10:06:00Z'))->execute($this->lease()),
+        );
+        self::assertSame(0, $source->candidateReads);
+        self::assertSame(1, $store->committedChecks);
+        self::assertSame([], $store->batches);
+    }
+
+    public function testActiveRequestRaceIsReevaluatedExactlyOnceThenFailsClosed(): void
+    {
+        $source = new RecordingAutomaticShadowSource([$this->candidate()]);
+        $store = new CapturingShadowStore();
+        $store->persistConflicts = 2;
+
+        try {
+            $this->service($source, $store, new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
+            self::fail('A second source/persist race must fail closed.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::ActiveRequestChanged, $conflict->failureCode);
+        }
+        self::assertSame(2, $source->candidateReads);
+        self::assertCount(2, $store->batches);
+    }
+
+    public function testUnrelatedPersistenceConflictIsNeverRetried(): void
+    {
+        $source = new RecordingAutomaticShadowSource([$this->candidate()]);
+        $store = new CapturingShadowStore();
+        $store->persistConflicts = 1;
+        $store->persistConflictCode = ShadowEvaluationConflictCode::PayloadMismatch;
+
+        try {
+            $this->service($source, $store, new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
+            self::fail('A payload conflict must fail closed without re-evaluation.');
+        } catch (ShadowEvaluationConflict $conflict) {
+            self::assertSame(ShadowEvaluationConflictCode::PayloadMismatch, $conflict->failureCode);
+        }
+        self::assertSame(1, $source->candidateReads);
+        self::assertCount(1, $store->batches);
+    }
+
     private function service(RecordingAutomaticShadowSource $source, CapturingShadowStore $store, DateTimeImmutable $now): RunAutomaticShadowEvaluation
     {
         return new RunAutomaticShadowEvaluation($source, new PersistShadowEvaluation($store), new EligibilityEvaluator(), new EvidenceFreshnessPolicy(), new ReasonSelector(), new PriorityResolver(), new FixedShadowClock($now));
@@ -307,6 +375,7 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         bool $policyRetentionCompatible = true,
         ?string $policyId = null,
         int $policyPriority = 0,
+        bool $includeResolvedPolicyJson = true,
     ): AutomaticShadowCandidate {
         $id = static fn (string $value): string => substr(hash('sha256', $value, true), 0, 16);
         $at = new DateTimeImmutable('2026-07-12T10:00:00Z');
@@ -322,7 +391,7 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
             null === $currentBytes ? null : new UInt64Decimal((string) $currentBytes), $at,
             null === $baselineBytes ? null : new UInt64Decimal((string) $baselineBytes),
             null === $bytesThreshold ? null : new UInt64Decimal((string) $bytesThreshold), $cooldownSeconds,
-            $policyRetentionCompatible ? $json : null,
+            $policyRetentionCompatible && $includeResolvedPolicyJson ? $json : null,
             $policyPriority,
         );
     }
@@ -331,15 +400,21 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
 final class RecordingAutomaticShadowSource implements AutomaticShadowEvaluationSource
 {
     /** @var list<array{AutomaticShadowCandidate, DateTimeImmutable}> */ public array $resets = [];
+    public int $candidateReads = 0;
     /** @param list<AutomaticShadowCandidate> $items */ public function __construct(private array $items) {}
-    public function candidates(CollectorLease $lease): array { return $this->items; }
+    public function candidates(CollectorLease $lease): array { ++$this->candidateReads; return $this->items; }
     public function recordCounterReset(CollectorLease $lease, AutomaticShadowCandidate $candidate, DateTimeImmutable $detectedAt): void { $this->resets[] = [$candidate, $detectedAt]; }
 }
 
 final class CapturingShadowStore implements ShadowEvaluationStore
 {
     /** @var list<ShadowEvaluationBatch> */ public array $batches = [];
-    public function persist(CollectorLease $lease, ShadowEvaluationBatch $batch): ShadowEvaluationPersistenceResult { $this->batches[] = $batch; return ShadowEvaluationPersistenceResult::Persisted; }
+    public ?ShadowEvaluationPersistenceResult $committed = null;
+    public int $committedChecks = 0;
+    public int $persistConflicts = 0;
+    public ShadowEvaluationConflictCode $persistConflictCode = ShadowEvaluationConflictCode::ActiveRequestChanged;
+    public function committedResult(CollectorLease $lease, ShadowEvaluationRunId $runId, int $evaluatorVersion): ?ShadowEvaluationPersistenceResult { ++$this->committedChecks; return $this->committed; }
+    public function persist(CollectorLease $lease, ShadowEvaluationBatch $batch): ShadowEvaluationPersistenceResult { $this->batches[] = $batch; if ($this->persistConflicts > 0) { --$this->persistConflicts; throw new ShadowEvaluationConflict($this->persistConflictCode); } return ShadowEvaluationPersistenceResult::Persisted; }
 }
 
 final readonly class FixedShadowClock implements Clock

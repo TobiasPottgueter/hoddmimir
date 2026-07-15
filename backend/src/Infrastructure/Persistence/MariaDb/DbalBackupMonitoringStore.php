@@ -26,6 +26,8 @@ use RuntimeException;
 
 final readonly class DbalBackupMonitoringStore implements BackupMonitoringTransaction
 {
+    private DbalBackupRequestGuestGuard $guestGuard;
+
     public function __construct(
         private Connection $connection,
         private ControlledRetryPolicy $retryPolicy,
@@ -36,6 +38,7 @@ final readonly class DbalBackupMonitoringStore implements BackupMonitoringTransa
         if ($leaseSeconds < 1 || $leaseSeconds > 3600) {
             throw new \InvalidArgumentException('The monitoring lease duration is invalid.');
         }
+        $this->guestGuard = new DbalBackupRequestGuestGuard();
     }
 
     public function renew(MonitorClaimedBackupCommand $command): bool
@@ -212,6 +215,12 @@ SQL, [
             throw new \InvalidArgumentException('The task exit status is invalid.');
         }
         $this->connection->transactional(function (Connection $db) use ($command, $upid, $outcome, $exitStatus, $failure): void {
+            $guestId = $db->fetchOne(
+                'SELECT guest_id FROM backup_requests WHERE id = :request',
+                ['request' => $command->requestId],
+                ['request' => ParameterType::BINARY],
+            );
+            $this->guestGuard->lock($db, [$this->binary($guestId)]);
             $row = $this->authority($db, $command->requestId, $command->runId, $command->claimToken, $command->claimFence, $command->now);
             if (null === $row || !$this->sameUpid($row, $upid)) {
                 return;
