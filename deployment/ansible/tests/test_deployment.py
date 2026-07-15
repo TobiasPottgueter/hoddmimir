@@ -3,11 +3,13 @@ from __future__ import annotations
 import contextlib
 import errno
 import fcntl
+import grp
 import http.server
 import importlib.util
 import io
 import json
 import os
+import pwd
 import stat
 import subprocess
 import sys
@@ -579,7 +581,10 @@ class ComposeContractTest(unittest.TestCase):
             self.assertIn("--acme-user=hoddmimir-acme", renewal)
             self.assertIn("--token-file=/etc/hoddmimir/acme/hetzner_dns_api_token", renewal)
             self.assertNotIn(str(variables["hoddmimir_hetzner_dns_api_token"]), renewal)
-            self.assertIn("ENCRYPTION_KEYRING_REVISION=7\n", runtime_file.read_text(encoding="utf-8"))
+            runtime_environment = runtime_file.read_text(encoding="utf-8")
+            self.assertIn("ENCRYPTION_KEYRING_REVISION=7\n", runtime_environment)
+            self.assertNotIn("MATRIX_WEBHOOK_URL_FILE", runtime_environment)
+            self.assertNotIn("/run/secrets/matrix_webhook_url", runtime_environment)
             configured = run(["docker", "compose", "--file", str(compose_file), "config", "--format", "json"])
             self.assertEqual(0, configured.returncode, configured.stderr)
             model = json.loads(configured.stdout)
@@ -653,6 +658,12 @@ class ComposeContractTest(unittest.TestCase):
                 "matrix_webhook_url",
                 {secret["source"] for secret in services["backup-worker"]["secrets"]},
             )
+            for service_name in ("data-worker", "webapp"):
+                self.assertNotIn("MATRIX_WEBHOOK_URL_FILE", services[service_name]["environment"])
+                self.assertNotIn(
+                    "matrix_webhook_url",
+                    {secret["source"] for secret in services[service_name]["secrets"]},
+                )
             self.assertEqual(
                 ["hoddmimir:worker:data"],
                 services["data-worker"]["command"],
@@ -720,6 +731,7 @@ class ComposeContractTest(unittest.TestCase):
             self.assertIn("@sha256:", migration["image"])
             self.assertEqual("hoddmimir_migration", migration["environment"]["DATABASE_USER"])
             self.assertEqual("/run/secrets/mariadb_migration_password", migration["environment"]["DATABASE_PASSWORD_FILE"])
+            self.assertNotIn("MATRIX_WEBHOOK_URL_FILE", migration["environment"])
             self.assertTrue(migration["read_only"])
             self.assertEqual(["ALL"], migration["cap_drop"])
             self.assertEqual(["CHOWN", "DAC_READ_SEARCH", "SETGID", "SETUID"], migration["cap_add"])
@@ -730,6 +742,10 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual(["no-new-privileges:true"], migration["security_opt"])
             self.assertEqual(
                 {"app_secret", "mariadb_migration_password"},
+                {secret["source"] for secret in migration["secrets"]},
+            )
+            self.assertNotIn(
+                "matrix_webhook_url",
                 {secret["source"] for secret in migration["secrets"]},
             )
             self.assertEqual(
@@ -787,6 +803,39 @@ class DeploymentStagingIsolationTest(unittest.TestCase):
 
 
 class HostHttpsAnsibleContractTest(unittest.TestCase):
+    def test_fresh_host_creates_https_runtime_parents_before_executor_copy(self) -> None:
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        self.assertLess(
+            tasks.index("Create required HTTPS runtime parent directories"),
+            tasks.index("Install recoverable HTTPS transaction executor"),
+        )
+
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as local_temp:
+            environment = os.environ.copy()
+            environment["ANSIBLE_LOCAL_TEMP"] = local_temp
+            environment["HODDMIMIR_HTTPS_PARENT_TEST_ROOT"] = root
+            environment["HODDMIMIR_HTTPS_PARENT_TEST_OWNER"] = pwd.getpwuid(os.getuid()).pw_name
+            environment["HODDMIMIR_HTTPS_PARENT_TEST_GROUP"] = grp.getgrgid(os.getgid()).gr_name
+            first = run(
+                ["ansible-playbook", "--inventory", "localhost,", "tests/playbooks/https-runtime-directories.yml"],
+                env=environment,
+            )
+            second = run(
+                ["ansible-playbook", "--inventory", "localhost,", "tests/playbooks/https-runtime-directories.yml"],
+                env=environment,
+            )
+
+            self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+            self.assertEqual(0, second.returncode, second.stdout + second.stderr)
+            self.assertIn("changed=0", second.stdout)
+            for relative in ("usr/local/sbin", "etc/periodic/daily", "run/lock"):
+                directory = Path(root, relative)
+                self.assertTrue(directory.is_dir())
+                self.assertEqual(0o755, stat.S_IMODE(directory.stat().st_mode))
+            executor = Path(root, "usr/local/sbin/hoddmimir-https-transaction")
+            self.assertTrue(executor.is_file())
+            self.assertEqual(0o555, stat.S_IMODE(executor.stat().st_mode))
+
     def test_https_role_keeps_caddy_outside_compose_and_acme_identity_isolated(self) -> None:
         tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
         defaults = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "defaults" / "main.yml").read_text(encoding="utf-8")
@@ -824,7 +873,34 @@ class HostHttpsAnsibleContractTest(unittest.TestCase):
         self.assertIn("context=ssl.create_default_context()", transaction)
         self.assertNotIn("_create_unverified", transaction)
         self.assertIn("health_checker(arguments.health_url)", transaction)
+        self.assertIn("HTTPS_STARTUP_TIMEOUT_SECONDS = 15.0", transaction)
         self.assertNotIn("hoddmimir_hetzner_dns_api_token }}\"\n      -", tasks)
+
+    def test_failed_https_transaction_does_not_parse_empty_stdout_as_json(self) -> None:
+        tasks = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "main.yml").read_text(encoding="utf-8")
+        https_task = tasks.split(
+            "- name: Issue or renew the public certificate and activate host Caddy",
+            maxsplit=1,
+        )[1]
+
+        self.assertIn("hoddmimir_https_transaction.rc == 0 and", https_task)
+        self.assertIn("default('{}') | from_json", https_task)
+
+        with tempfile.TemporaryDirectory() as local_temp:
+            environment = os.environ.copy()
+            environment["ANSIBLE_LOCAL_TEMP"] = local_temp
+            result = run(
+                [
+                    "ansible-playbook",
+                    "--inventory",
+                    "localhost,",
+                    "tests/playbooks/https-failure-reporting.yml",
+                ],
+                env=environment,
+            )
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("failed=0", result.stdout)
 
     def test_listener_verification_uses_the_configured_non_default_web_port(self) -> None:
         verify = (ANSIBLE_ROOT / "roles" / "hoddmimir" / "tasks" / "verify.yml").read_text(encoding="utf-8")

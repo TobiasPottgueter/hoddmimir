@@ -1,0 +1,25 @@
+---
+- name: Verify HTTPS runtime parents on a fresh filesystem root
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hoddmimir_https_parent_test_root: "{{ lookup('ansible.builtin.env', 'HODDMIMIR_HTTPS_PARENT_TEST_ROOT') }}"
+    hoddmimir_https_runtime_directory_owner: "{{ lookup('ansible.builtin.env', 'HODDMIMIR_HTTPS_PARENT_TEST_OWNER') }}"
+    hoddmimir_https_runtime_directory_group: "{{ lookup('ansible.builtin.env', 'HODDMIMIR_HTTPS_PARENT_TEST_GROUP') }}"
+    hoddmimir_https_transaction_executable: "{{ hoddmimir_https_parent_test_root }}/usr/local/sbin/hoddmimir-https-transaction"
+    hoddmimir_certificate_renewal_executable: "{{ hoddmimir_https_parent_test_root }}/etc/periodic/daily/hoddmimir-certificate-renew"
+    hoddmimir_https_transaction_lock_file: "{{ hoddmimir_https_parent_test_root }}/run/lock/hoddmimir-https-transaction.lock"
+  tasks:
+    - name: Create the production HTTPS runtime parent set
+      ansible.builtin.include_role:
+        name: hoddmimir
+        tasks_from: https-runtime-directories
+
+    - name: Exercise the formerly failing transaction-executor copy destination
+      ansible.builtin.copy:
+        content: "fresh-host regression fixture\n"
+        dest: "{{ hoddmimir_https_transaction_executable }}"
+        owner: "{{ hoddmimir_https_runtime_directory_owner }}"
+        group: "{{ hoddmimir_https_runtime_directory_group }}"
+        mode: "0555"

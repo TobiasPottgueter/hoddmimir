@@ -89,6 +89,7 @@ services:
       <<: *app-environment
       DATABASE_USER: hoddmimir_backup_worker
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_backup_worker_password
+      MATRIX_WEBHOOK_URL_FILE: /run/secrets/matrix_webhook_url
     secrets: [app_secret, encryption_key, mariadb_backup_worker_password, matrix_webhook_url]
     depends_on:
       mariadb: { condition: service_healthy }

@@ -43,6 +43,8 @@ hoddmimir_hetzner_dns_api_token_file: "{{ hoddmimir_acme_secret_directory }}/het
 hoddmimir_https_transaction_executable: /usr/local/sbin/hoddmimir-https-transaction
 hoddmimir_https_transaction_lock_file: /run/lock/hoddmimir-https-transaction.lock
 hoddmimir_certificate_renewal_executable: /etc/periodic/daily/hoddmimir-certificate-renew
+hoddmimir_https_runtime_directory_owner: root
+hoddmimir_https_runtime_directory_group: root
 hoddmimir_https_healthcheck_url: "https://{{ hoddmimir_public_domain }}/api/health"
 hoddmimir_docker_subnet: ""
 hoddmimir_docker_gateway: ""

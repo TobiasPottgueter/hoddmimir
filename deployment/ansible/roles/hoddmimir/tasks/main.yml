@@ -65,6 +65,9 @@
     group: "{{ hoddmimir_caddy_group }}"
     mode: "0640"
 
+- name: Create required HTTPS runtime parent directories
+  ansible.builtin.import_tasks: https-runtime-directories.yml
+
 - name: Install recoverable HTTPS transaction executor
   ansible.builtin.copy:
     src: https_transaction.py
@@ -271,4 +274,6 @@
       - "--caddy-service={{ hoddmimir_caddy_service }}"
       - "--lock-file={{ hoddmimir_https_transaction_lock_file }}"
   register: hoddmimir_https_transaction
-  changed_when: (hoddmimir_https_transaction.stdout | from_json).changed | bool
+  changed_when: >-
+    hoddmimir_https_transaction.rc == 0 and
+    ((hoddmimir_https_transaction.stdout | default('{}') | from_json).changed | default(false) | bool)

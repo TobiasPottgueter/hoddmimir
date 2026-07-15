@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,9 @@ from typing import Callable, Mapping, Sequence
 DOMAIN_PATTERN = re.compile(r"\A(?=.{1,253}\Z)(?!.*\.\.)(?!-)[a-z0-9-]+(?:\.[a-z0-9-]+)+\Z")
 EMAIL_PATTERN = re.compile(r"\A[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\Z")
 MAXIMUM_TOKEN_BYTES = 4096
+HTTPS_STARTUP_TIMEOUT_SECONDS = 15.0
+HTTPS_RETRY_INTERVAL_SECONDS = 0.25
+HTTPS_REQUEST_TIMEOUT_SECONDS = 5.0
 
 
 class HttpsTransactionError(RuntimeError):
@@ -460,27 +464,63 @@ def _lego_environment(token_file: Path, state_parent: Path) -> dict[str, str]:
     }
 
 
-def _check_https_health(url: str) -> None:
+def _check_https_health(
+    url: str,
+    *,
+    opener: Callable[..., object] = urllib.request.urlopen,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+    startup_timeout_seconds: float = HTTPS_STARTUP_TIMEOUT_SECONDS,
+    retry_interval_seconds: float = HTTPS_RETRY_INTERVAL_SECONDS,
+) -> None:
     request = urllib.request.Request(
         url,
         headers={"Accept": "application/json", "User-Agent": "hoddmimir-https-transaction/1"},
         method="GET",
     )
-    try:
-        with urllib.request.urlopen(
-            request,
-            timeout=15,
-            context=ssl.create_default_context(),
-        ) as response:
-            if response.status != 200:
-                raise HttpsTransactionError("The public HTTPS health endpoint returned an unexpected status.")
-            if response.geturl() != url:
-                raise HttpsTransactionError("The public HTTPS health endpoint redirected unexpectedly.")
-            body = response.read(65537)
-    except HttpsTransactionError:
-        raise
-    except (OSError, ssl.SSLError, urllib.error.URLError, ValueError):
-        raise HttpsTransactionError("The public HTTPS health request failed with strict certificate verification.") from None
+    if startup_timeout_seconds <= 0 or retry_interval_seconds <= 0:
+        raise HttpsTransactionError("The public HTTPS health startup window is invalid.")
+
+    deadline = clock() + startup_timeout_seconds
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise HttpsTransactionError("The public HTTPS endpoint did not become reachable within the startup window.")
+        try:
+            with opener(
+                request,
+                timeout=min(HTTPS_REQUEST_TIMEOUT_SECONDS, remaining),
+                context=ssl.create_default_context(),
+            ) as response:
+                if response.status != 200:
+                    raise HttpsTransactionError("The public HTTPS health endpoint returned an unexpected status.")
+                if response.geturl() != url:
+                    raise HttpsTransactionError("The public HTTPS health endpoint redirected unexpectedly.")
+                body = response.read(65537)
+            break
+        except HttpsTransactionError:
+            raise
+        except urllib.error.HTTPError:
+            raise HttpsTransactionError("The public HTTPS health endpoint returned an unexpected status.") from None
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, ssl.SSLCertVerificationError):
+                raise HttpsTransactionError("The public HTTPS certificate verification failed.") from None
+            if isinstance(error.reason, ssl.SSLError):
+                raise HttpsTransactionError("The public HTTPS TLS handshake failed.") from None
+        except ssl.SSLCertVerificationError:
+            raise HttpsTransactionError("The public HTTPS certificate verification failed.") from None
+        except ssl.SSLError:
+            raise HttpsTransactionError("The public HTTPS TLS handshake failed.") from None
+        except ValueError:
+            raise HttpsTransactionError("The public HTTPS health request is invalid.") from None
+        except OSError:
+            pass
+
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise HttpsTransactionError("The public HTTPS endpoint did not become reachable within the startup window.")
+        sleeper(min(retry_interval_seconds, remaining))
+
     if len(body) > 65536:
         raise HttpsTransactionError("The public HTTPS health response is too large.")
     try:

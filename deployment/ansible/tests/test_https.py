@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import importlib.util
 import json
 import os
@@ -254,6 +255,117 @@ class HttpsTransactionTest(unittest.TestCase):
             )
         self.assertEqual(old_caddy, self.caddyfile.read_bytes())
         self.assertTrue((self.root / "service-running").exists())
+
+    def test_public_health_waits_for_caddy_startup_without_relaxing_tls(self) -> None:
+        health_url = f"https://{self.DOMAIN}/api/health"
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.geturl.return_value = health_url
+        response.read.return_value = b'{"status":"ok"}'
+        opener = mock.Mock(
+            side_effect=[
+                HTTPS.urllib.error.URLError(ConnectionRefusedError("startup race sentinel")),
+                response,
+            ],
+        )
+        now = [0.0]
+
+        HTTPS._check_https_health(
+            health_url,
+            opener=opener,
+            clock=lambda: now[0],
+            sleeper=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+
+        self.assertEqual(2, opener.call_count)
+        for call in opener.call_args_list:
+            self.assertIsInstance(call.kwargs["context"], HTTPS.ssl.SSLContext)
+            self.assertEqual(HTTPS.ssl.CERT_REQUIRED, call.kwargs["context"].verify_mode)
+            self.assertTrue(call.kwargs["context"].check_hostname)
+
+    def test_public_health_certificate_failure_is_immediate_and_sanitized(self) -> None:
+        health_url = f"https://{self.DOMAIN}/api/health"
+        opener = mock.Mock(
+            side_effect=HTTPS.urllib.error.URLError(
+                HTTPS.ssl.SSLCertVerificationError("SECRET-CERTIFICATE-SENTINEL"),
+            ),
+        )
+        sleeper = mock.Mock()
+
+        with self.assertRaises(HTTPS.HttpsTransactionError) as raised:
+            HTTPS._check_https_health(
+                health_url,
+                opener=opener,
+                clock=lambda: 0.0,
+                sleeper=sleeper,
+            )
+
+        self.assertEqual("The public HTTPS certificate verification failed.", str(raised.exception))
+        self.assertNotIn("SECRET-CERTIFICATE-SENTINEL", str(raised.exception))
+        self.assertEqual(1, opener.call_count)
+        sleeper.assert_not_called()
+
+    def test_public_health_startup_timeout_is_bounded_and_sanitized(self) -> None:
+        health_url = f"https://{self.DOMAIN}/api/health"
+        opener = mock.Mock(
+            side_effect=HTTPS.urllib.error.URLError(ConnectionRefusedError("SECRET-CONNECTION-SENTINEL")),
+        )
+        now = [0.0]
+
+        with self.assertRaises(HTTPS.HttpsTransactionError) as raised:
+            HTTPS._check_https_health(
+                health_url,
+                opener=opener,
+                clock=lambda: now[0],
+                sleeper=lambda delay: now.__setitem__(0, now[0] + delay),
+                startup_timeout_seconds=0.5,
+                retry_interval_seconds=0.25,
+            )
+
+        self.assertEqual(
+            "The public HTTPS endpoint did not become reachable within the startup window.",
+            str(raised.exception),
+        )
+        self.assertNotIn("SECRET-CONNECTION-SENTINEL", str(raised.exception))
+        self.assertEqual(2, opener.call_count)
+
+    def test_public_health_http_error_and_redirect_fail_without_retry(self) -> None:
+        health_url = f"https://{self.DOMAIN}/api/health"
+        sleeper = mock.Mock()
+        http_error = HTTPS.urllib.error.HTTPError(health_url, 503, "unavailable", {}, io.BytesIO())
+
+        with self.assertRaises(HTTPS.HttpsTransactionError) as raised:
+            HTTPS._check_https_health(
+                health_url,
+                opener=mock.Mock(side_effect=http_error),
+                clock=lambda: 0.0,
+                sleeper=sleeper,
+            )
+        http_error.close()
+        self.assertEqual(
+            "The public HTTPS health endpoint returned an unexpected status.",
+            str(raised.exception),
+        )
+        sleeper.assert_not_called()
+
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.geturl.return_value = f"https://{self.DOMAIN}/login"
+        response.read.return_value = b'{"status":"ok"}'
+        with self.assertRaises(HTTPS.HttpsTransactionError) as raised:
+            HTTPS._check_https_health(
+                health_url,
+                opener=mock.Mock(return_value=response),
+                clock=lambda: 0.0,
+                sleeper=sleeper,
+            )
+        self.assertEqual(
+            "The public HTTPS health endpoint redirected unexpectedly.",
+            str(raised.exception),
+        )
+        sleeper.assert_not_called()
 
     def test_token_and_candidate_permissions_fail_closed_before_lego(self) -> None:
         for target, unsafe_mode in ((self.token, 0o600), (self.candidate, 0o644)):
