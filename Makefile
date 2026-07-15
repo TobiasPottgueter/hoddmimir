@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test fault-harness-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
@@ -105,6 +105,10 @@ e2e: e2e-wrapper-test ## Run isolated MariaDB-seeded Playwright browser flows
 
 api-schema-drift-test: ## Test the official Proxmox schema drift policy offline
 	python3 -m unittest scripts/tests/test_proxmox_api_schema_drift.py -v
+
+fault-harness-test: ## Verify the isolated Phase-7 TLS fault-injection proxy
+	python3 -m py_compile lab/fault-proxy/hoddmimir_fault_proxy.py lab/fault-proxy/tests/test_fault_proxy.py
+	python3 -m unittest discover -s lab/fault-proxy/tests -p 'test_*.py' -v
 
 supply-chain-contract-test: ## Verify pinned CI supply-chain gates without running scanners
 	python3 -m unittest scripts/tests/test_supply_chain_gates.py scripts/tests/test_mutation_sharding.py -v

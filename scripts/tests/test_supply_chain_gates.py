@@ -32,6 +32,25 @@ def matrix_lines(path: str) -> list[str]:
 
 
 class SupplyChainGateContractTest(unittest.TestCase):
+    def test_phase_7_fault_harness_is_a_release_blocking_ci_gate(self) -> None:
+        workflow = read(".github/workflows/ci.yml")
+        makefile = read("Makefile")
+        job = workflow.split("\n  fault-harness:\n", maxsplit=1)[1].split(
+            "\n  ansible:\n",
+            maxsplit=1,
+        )[0]
+        publication = workflow.split("\n  publish-image:\n", maxsplit=1)[1].split(
+            "\n  publish-images:\n",
+            maxsplit=1,
+        )[0]
+
+        self.assertIn('python-version: "3.14"', job)
+        self.assertIn("run: make fault-harness-test", job)
+        self.assertIn("fault-harness-test:", makefile)
+        self.assertIn("python3 -m py_compile lab/fault-proxy/", makefile)
+        self.assertIn("python3 -m unittest discover -s lab/fault-proxy/tests", makefile)
+        self.assertIn("- fault-harness", publication)
+
     def test_matrix_defines_exactly_three_amd64_artifacts(self) -> None:
         targets = {
             tuple(line.split("|", maxsplit=2))
@@ -391,6 +410,7 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
         for required_gate in (
             "- ansible",
             "- containers",
+            "- fault-harness",
             "- mutation-full",
             "- proxmox-schema-policy",
         ):
