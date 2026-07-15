@@ -161,7 +161,7 @@ final class PolicyPersistenceTest extends DatabaseTestCase
         ));
         $this->connection()->insert('backup_policy_guest_overrides', $this->overrideRow($context, random_bytes(16)));
 
-        $model = new DbalPolicyReadModel($this->connection());
+        $model = $this->policyReadModel();
         $first = $model->policies(new PolicyListQuery(new PageRequest(1), null, 'draft'));
         self::assertSame('Alpha', $first->items[0]->displayName);
         self::assertNotNull($first->nextCursor);
@@ -196,19 +196,25 @@ final class PolicyPersistenceTest extends DatabaseTestCase
         ]));
         $this->connection()->update('pve_storages', ['storage_type' => 'pbs'], ['id' => $context['storage']]);
 
-        $page = (new DbalPolicyReadModel($this->connection()))->policies(
+        $page = $this->policyReadModel()->policies(
             new PolicyListQuery(new PageRequest(10), null, 'enabled'),
         );
 
         self::assertCount(1, $page->items);
         self::assertFalse($page->items[0]->retentionExecutionEnabled);
         self::assertSame(
-            ['retention_execution_forbidden_for_pbs_target'],
+            [
+                'pve_evidence_missing', 'target_disabled', 'target_evidence_missing', 'executor_evidence_missing',
+                'retention_execution_forbidden_for_pbs_target',
+            ],
             array_column($page->items[0]->blockers, 'value'),
         );
         self::assertFalse($page->items[0]->toArray()['retentionExecutionEnabled']);
         self::assertSame(
-            ['retention_execution_forbidden_for_pbs_target'],
+            [
+                'pve_evidence_missing', 'target_disabled', 'target_evidence_missing', 'executor_evidence_missing',
+                'retention_execution_forbidden_for_pbs_target',
+            ],
             $page->items[0]->toArray()['blockers'],
         );
     }
@@ -350,6 +356,18 @@ final class PolicyPersistenceTest extends DatabaseTestCase
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         }
         return $context;
+    }
+
+    private function policyReadModel(): DbalPolicyReadModel
+    {
+        $evidence = new \App\Infrastructure\Persistence\MariaDb\DbalActivationEvidenceProvider($this->connection());
+        return new DbalPolicyReadModel(
+            $this->connection(),
+            $evidence,
+            new \App\Application\Configuration\Policy\PolicyActivationAssessor(),
+            new \App\Tests\Fakes\FrozenClock(new \DateTimeImmutable('2026-07-12T10:00:00Z')),
+            new \App\Domain\Scheduler\EvidenceFreshnessPolicy(),
+        );
     }
 
     private function assertRejected(callable $operation): void

@@ -96,6 +96,12 @@ final class BackupTargetAggregateTest extends TestCase
             (new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T11:54:59Z')))->freshness($now));
         self::assertSame(\App\Domain\Target\EvidenceObservationFreshness::Future,
             (new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T12:00:01Z')))->freshness($now));
+        self::assertSame(\App\Domain\Target\EvidenceObservationFreshness::Future,
+            (new ActivationEvidenceObservation(
+                true,
+                new DateTimeImmutable('2026-07-12T11:55:00Z'),
+                new DateTimeImmutable('2026-07-12T12:00:00.000001Z'),
+            ))->freshness($now));
         self::assertSame(\App\Domain\Target\EvidenceObservationFreshness::Missing,
             (new ActivationEvidenceObservation(null, $now))->freshness($now));
         self::assertSame(\App\Domain\Target\EvidenceObservationFreshness::Missing,
@@ -110,6 +116,23 @@ final class BackupTargetAggregateTest extends TestCase
                 self::addToAssertionCount(1);
             }
         }
+        try {
+            new ActivationEvidenceObservation(
+                true,
+                new DateTimeImmutable('2026-07-12T12:00:00Z'),
+                new DateTimeImmutable('2026-07-12T11:59:59Z'),
+            );
+            self::fail('An inverted evidence range was accepted.');
+        } catch (InvalidArgumentException) {
+            self::addToAssertionCount(1);
+        }
+
+        $rejected = new ActivationEvidenceObservation(false, $now);
+        $deduplicated = $this->complete()->assessActivation(
+            new TargetActivationEvidence($rejected, $rejected, $rejected, new ActivationEvidenceObservation(true, $now)),
+            $now,
+        );
+        self::assertSame([TargetActivationBlocker::CandidateRejected], $deduplicated->blockers);
 
         $target = $this->complete();
         foreach (['candidate', 'inventory', 'capacity', 'executor'] as $field) {

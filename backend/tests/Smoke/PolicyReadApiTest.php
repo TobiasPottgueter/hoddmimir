@@ -6,7 +6,7 @@ namespace App\Tests\Smoke;
 
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Policy\ReadModel\ConfiguredPolicy;
-use App\Application\Policy\ReadModel\PolicyBlockerCode;
+use App\Application\Configuration\Policy\PolicyActivationBlockerCode;
 use App\Application\Policy\ReadModel\PolicyListQuery;
 use App\Application\Policy\ReadModel\PolicyPage;
 use App\Application\Policy\ReadModel\PolicyReadModel;
@@ -114,6 +114,36 @@ final class PolicyReadApiTest extends WebTestCase
             );
         }
     }
+
+    public function testGetExposesReadyAndEnabledPolicyActivationWithoutSyntheticBlockers(): void
+    {
+        $client = self::createClient();
+        $client->disableReboot();
+        $fake = new PolicyReadModelFake();
+        $fake->ready = true;
+        self::getContainer()->set(DbalPolicyReadModel::class, $fake);
+
+        $client->request('GET', '/api/v1/policies');
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+        $items = $payload['items'] ?? null;
+        self::assertIsArray($items);
+        $item = $items[0] ?? null;
+        self::assertIsArray($item);
+        self::assertTrue($item['canEnable'] ?? null);
+        self::assertSame([], $item['blockers'] ?? null);
+
+        $fake->enabled = true;
+        $client->request('GET', '/api/v1/policies');
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+        $items = $payload['items'] ?? null;
+        self::assertIsArray($items);
+        $item = $items[0] ?? null;
+        self::assertIsArray($item);
+        self::assertFalse($item['canEnable'] ?? null);
+        self::assertSame([], $item['blockers'] ?? null);
+    }
 }
 
 final class PolicyReadModelFake implements PolicyReadModel
@@ -121,6 +151,8 @@ final class PolicyReadModelFake implements PolicyReadModel
     public ?PolicyListQuery $policyQuery = null;
     public ?PolicySelectionQuery $selectionQuery = null;
     public bool $fail = false;
+    public bool $ready = false;
+    public bool $enabled = false;
 
     public function policies(PolicyListQuery $query): PolicyPage
     {
@@ -129,11 +161,11 @@ final class PolicyReadModelFake implements PolicyReadModel
             throw new RuntimeException('database.internal');
         }
         return new PolicyPage($query->page, [new ConfiguredPolicy(
-            PolicyReadApiTest::ID, 1, 'draft', 'Nightly', PolicyReadApiTest::ID, 'PVE',
+            PolicyReadApiTest::ID, 1, $this->enabled ? 'enabled' : 'draft', 'Nightly', PolicyReadApiTest::ID, 'PVE',
             PolicyReadApiTest::OTHER, 'cluster-a', null, null, null, null, null, null,
-            null, null, null, null, false, null, [
-                PolicyBlockerCode::ExecutorEvidenceMissing,
-                PolicyBlockerCode::RetentionExecutionForbiddenForPbsTarget,
+            null, null, null, null, false, null, $this->ready ? [] : [
+                PolicyActivationBlockerCode::ExecutorEvidenceMissing,
+                PolicyActivationBlockerCode::RetentionExecutionForbiddenForPbsTarget,
             ],
             failureNotificationRecipients: [],
         )], PageCursor::resource($query->cursorContext(), 'Nightly', PolicyReadApiTest::ID));

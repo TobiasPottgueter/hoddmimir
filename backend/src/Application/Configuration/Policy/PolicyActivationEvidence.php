@@ -17,6 +17,7 @@ final readonly class PolicyActivationEvidence
         public ActivationEvidenceObservation $executor,
         public bool $pbsTarget = false,
         public bool $retentionExecutionEnabled = false,
+        public ?bool $targetEnabled = null,
     ) {
         $this->pveObservedAt = $pveObservedAt?->setTimezone(new DateTimeZone('UTC'));
     }

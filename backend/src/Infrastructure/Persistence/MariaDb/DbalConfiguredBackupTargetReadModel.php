@@ -8,11 +8,23 @@ use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use App\Application\Target\ReadModel\ConfiguredBackupTarget;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetAllowedNode;
-use App\Application\Target\ReadModel\ConfiguredBackupTargetBlockerCode;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetPage;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetQuery;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetReadModel;
+use App\Application\Configuration\Target\TargetCandidateEvidenceProvider;
+use App\Application\Configuration\Target\TargetExecutorEvidenceProvider;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
+use App\Domain\Shared\Clock;
 use App\Domain\Shared\UInt64Decimal;
+use App\Domain\Target\AllowedNodes;
+use App\Domain\Target\BackupTarget;
+use App\Domain\Target\BackupTargetId;
+use App\Domain\Target\ConcurrencyPolicy;
+use App\Domain\Target\MinimumFreeBytes;
+use App\Domain\Target\PbsTargetMapping;
+use App\Domain\Target\TargetActivationEvidence;
+use App\Domain\Target\TargetRevision;
+use App\Domain\Target\TargetStatus;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
@@ -20,14 +32,41 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use RuntimeException;
+use Throwable;
 
 final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBackupTargetReadModel
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+        private TargetCandidateEvidenceProvider $candidateEvidence,
+        private TargetExecutorEvidenceProvider $executorEvidence,
+        private Clock $clock,
+        private EvidenceFreshnessPolicy $freshness,
+    ) {
     }
 
     public function targets(ConfiguredBackupTargetQuery $query): ConfiguredBackupTargetPage
+    {
+        $started = !$this->connection->isTransactionActive();
+        if ($started) {
+            $this->connection->executeStatement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $this->connection->beginTransaction();
+        }
+        try {
+            $page = $this->targetsInSnapshot($query);
+            if ($started) {
+                $this->connection->commit();
+            }
+            return $page;
+        } catch (Throwable $failure) {
+            if ($started && $this->connection->isTransactionActive()) {
+                $this->connection->rollBack();
+            }
+            throw $failure;
+        }
+    }
+
+    private function targetsInSnapshot(ConfiguredBackupTargetQuery $query): ConfiguredBackupTargetPage
     {
         $where = [];
         $parameters = [];
@@ -80,8 +119,13 @@ final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBa
 
         $targetIds = array_map(fn (array $row): string => $this->binary($row, 'id'), $rows);
         $nodes = $this->allowedNodes($targetIds);
-        $items = array_map(function (array $row) use ($nodes): ConfiguredBackupTarget {
+        $domainIds = array_map(static fn (string $id): BackupTargetId => new BackupTargetId($id), $targetIds);
+        $candidateEvidence = $this->candidateEvidence->candidateEvidenceBatch($domainIds);
+        $executorEvidence = $this->executorEvidence->executorEvidenceBatch($domainIds);
+        $now = $this->clock->now();
+        $items = array_map(function (array $row) use ($nodes, $candidateEvidence, $executorEvidence, $now): ConfiguredBackupTarget {
             $id = $this->binary($row, 'id');
+            $hexId = bin2hex($id);
             $connectionName = $this->text($row, 'connection_name');
             $allowed = $nodes[bin2hex($id)] ?? [];
             $status = $this->text($row, 'status');
@@ -90,20 +134,35 @@ final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBa
             $pbsConnection = $this->nullableUuid($row['pbs_connection_id'] ?? null);
             $pbsDatastore = $this->nullableUuid($row['pbs_datastore_id'] ?? null);
             $pbsNamespace = $this->nullableUuid($row['pbs_namespace_id'] ?? null);
-            $blockers = [];
-            if (null === $minimum || null === $parallel || [] === $allowed) {
-                $blockers[] = ConfiguredBackupTargetBlockerCode::ConfigurationIncomplete;
-            }
-            if ('pbs' === $this->text($row, 'storage_type') && (null === $pbsConnection || null === $pbsDatastore)) {
-                $blockers[] = ConfiguredBackupTargetBlockerCode::PbsBindingMissing;
-            }
-            if ('disabled' === $status) {
-                $blockers[] = ConfiguredBackupTargetBlockerCode::ExecutorEvidenceMissing;
-            }
+            $pbsStorage = 'pbs' === $this->text($row, 'storage_type');
+            $domainTarget = new BackupTarget(
+                new BackupTargetId($id),
+                new TargetRevision($this->positiveInteger($row, 'revision')),
+                TargetStatus::from($status),
+                $pbsStorage,
+                null === $minimum ? null : new MinimumFreeBytes($minimum->value),
+                new AllowedNodes(array_map(
+                    static fn (ConfiguredBackupTargetAllowedNode $node): string => (new ReadModelIdentifier($node->id))->binary(),
+                    $allowed,
+                )),
+                null === $parallel ? null : new ConcurrencyPolicy($parallel),
+                null === $pbsConnection || null === $pbsDatastore ? null : new PbsTargetMapping(
+                    (new ReadModelIdentifier($pbsConnection))->binary(),
+                    (new ReadModelIdentifier($pbsDatastore))->binary(),
+                    null === $pbsNamespace ? null : (new ReadModelIdentifier($pbsNamespace))->binary(),
+                ),
+            );
+            $candidate = $candidateEvidence[$hexId];
+            $assessment = $domainTarget->assessActivation(new TargetActivationEvidence(
+                $candidate->candidate,
+                $candidate->inventory,
+                $candidate->capacity,
+                $executorEvidence[$hexId],
+            ), $now, $this->freshness->maximumAgeSeconds);
 
             return new ConfiguredBackupTarget(
                 $this->uuidBytes($id),
-                $this->positiveInteger($row, 'revision'),
+                $domainTarget->revision->value,
                 'enabled' === $status,
                 $this->text($row, 'display_name'),
                 $this->uuid($row, 'connection_id'),
@@ -120,7 +179,7 @@ final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBa
                 $pbsNamespace,
                 $this->nullableDate($row['disabled_at'] ?? null),
                 $allowed,
-                $blockers,
+                $assessment->blockers,
             );
         }, $rows);
 

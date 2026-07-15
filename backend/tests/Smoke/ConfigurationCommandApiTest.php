@@ -188,4 +188,7 @@ final class CommandEvidenceFake implements TargetCandidateEvidenceProvider, Targ
     public function candidateEvidence(BackupTargetId $id): TargetCandidateEvidence{++$this->calls;$v=$this->fresh();return new TargetCandidateEvidence($v,$v,$v);}
     public function executorEvidence(BackupTargetId $id): ActivationEvidenceObservation{++$this->calls;return $this->fresh();}
     public function policyEvidence(PolicyId $id): PolicyActivationEvidence{++$this->calls;$v=$this->fresh();return new PolicyActivationEvidence(9,new DateTimeImmutable('now'),$v,$v);}
+    public function candidateEvidenceBatch(array $ids): array{$result=[];foreach($ids as $id)$result[$id->toHex()]=$this->candidateEvidence($id);return $result;}
+    public function executorEvidenceBatch(array $ids): array{$result=[];foreach($ids as $id)$result[$id->toHex()]=$this->executorEvidence($id);return $result;}
+    public function policyEvidenceBatch(array $ids): array{$result=[];foreach($ids as $id)$result[bin2hex($id->binary())]=$this->policyEvidence($id);return $result;}
 }

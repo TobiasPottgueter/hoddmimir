@@ -42,7 +42,7 @@ const policy = {
   failureNotificationRecipients: [],
   disabledAt: null,
   canEnable: false,
-  blockers: ["configuration_incomplete", "executor_evidence_missing"],
+  blockers: ["target_unconfigured", "executor_evidence_missing"],
 } satisfies ConfiguredPolicy;
 
 const selection = {

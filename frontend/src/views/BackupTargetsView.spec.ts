@@ -65,7 +65,7 @@ const configuredTarget = {
   disabledAt: null,
   allowedNodes: [{ id: OTHER_UUID, name: "pve-a" }],
   canEnable: false,
-  blockers: ["configuration_incomplete"],
+  blockers: ["minimum_free_unconfigured"],
 } satisfies ConfiguredBackupTarget;
 
 describe("BackupTargetsView", () => {

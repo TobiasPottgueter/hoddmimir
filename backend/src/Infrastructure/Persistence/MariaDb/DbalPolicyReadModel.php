@@ -6,8 +6,10 @@ namespace App\Infrastructure\Persistence\MariaDb;
 
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\ReadModelIdentifier;
+use App\Application\Configuration\Policy\PolicyActivationAssessor;
+use App\Application\Configuration\Policy\PolicyActivationEvidence;
+use App\Application\Configuration\Policy\PolicyActivationEvidenceProvider;
 use App\Application\Policy\ReadModel\ConfiguredPolicy;
-use App\Application\Policy\ReadModel\PolicyBlockerCode;
 use App\Application\Policy\ReadModel\PolicyListQuery;
 use App\Application\Policy\ReadModel\PolicyPage;
 use App\Application\Policy\ReadModel\PolicyReadModel;
@@ -16,20 +18,60 @@ use App\Application\Policy\ReadModel\PolicySelectionEntry;
 use App\Application\Policy\ReadModel\PolicySelectionPage;
 use App\Application\Policy\ReadModel\PolicySelectionQuery;
 use App\Domain\Policy\FailureNotificationRecipients;
+use App\Domain\Policy\BackupMode;
+use App\Domain\Policy\BackupPolicy;
+use App\Domain\Policy\Compression;
+use App\Domain\Policy\PolicyId;
+use App\Domain\Policy\PolicyPriority;
+use App\Domain\Policy\PolicyRevision;
+use App\Domain\Policy\PolicyStatus;
+use App\Domain\Policy\PolicyThresholds;
+use App\Domain\Policy\RetentionPolicy;
+use App\Domain\Policy\Schedule;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
+use App\Domain\Shared\Clock;
+use App\Domain\Target\BackupTargetId;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use RuntimeException;
+use Throwable;
 
 final readonly class DbalPolicyReadModel implements PolicyReadModel
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+        private PolicyActivationEvidenceProvider $evidence,
+        private PolicyActivationAssessor $assessor,
+        private Clock $clock,
+        private EvidenceFreshnessPolicy $freshness,
+    ) {
     }
 
     public function policies(PolicyListQuery $query): PolicyPage
+    {
+        $started = !$this->connection->isTransactionActive();
+        if ($started) {
+            $this->connection->executeStatement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $this->connection->beginTransaction();
+        }
+        try {
+            $page = $this->policiesInSnapshot($query);
+            if ($started) {
+                $this->connection->commit();
+            }
+            return $page;
+        } catch (Throwable $failure) {
+            if ($started && $this->connection->isTransactionActive()) {
+                $this->connection->rollBack();
+            }
+            throw $failure;
+        }
+    }
+
+    private function policiesInSnapshot(PolicyListQuery $query): PolicyPage
     {
         $where = [];
         $parameters = [];
@@ -74,7 +116,14 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
         if ($hasMore) {
             array_pop($rows);
         }
-        $items = array_map(fn (array $row): ConfiguredPolicy => $this->policy($row), $rows);
+        $ids = array_map(fn (array $row): PolicyId => new PolicyId($this->binary($row, 'id')), $rows);
+        $evidence = $this->evidence->policyEvidenceBatch($ids);
+        $now = $this->clock->now();
+        $items = array_map(fn (array $row): ConfiguredPolicy => $this->policy(
+            $row,
+            $evidence[bin2hex($this->binary($row, 'id'))],
+            $now,
+        ), $rows);
         $last = [] === $rows ? null : $rows[array_key_last($rows)];
         $next = $hasMore && null !== $last ? PageCursor::resource(
             $query->cursorContext(),
@@ -176,26 +225,30 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
     }
 
     /** @param array<string, mixed> $row */
-    private function policy(array $row): ConfiguredPolicy
+    private function policy(array $row, PolicyActivationEvidence $evidence, DateTimeImmutable $now): ConfiguredPolicy
     {
         $retentionExecutionEnabled = $this->boolean($row, 'retention_execution_enabled');
         $pbsTarget = 'pbs' === ($row['target_storage_type'] ?? null);
-        $incomplete = null === ($row['target_id'] ?? null) || null === ($row['policy_priority'] ?? null)
-            || null === ($row['backup_mode'] ?? null) || null === ($row['compression'] ?? null)
-            || null === ($row['schedule'] ?? null)
-            || (null === ($row['maximum_age_seconds'] ?? null) && null === ($row['bytes_written_threshold'] ?? null))
-            || null === $this->retention($row);
-        $blockers = $incomplete ? [PolicyBlockerCode::ConfigurationIncomplete] : [];
-        if ('enabled' !== ($row['status'] ?? null)) {
-            $blockers[] = PolicyBlockerCode::ExecutorEvidenceMissing;
-        }
-        if ($pbsTarget && $retentionExecutionEnabled) {
-            $blockers[] = PolicyBlockerCode::RetentionExecutionForbiddenForPbsTarget;
-        }
+        $retention = $this->retention($row);
+        $domainPolicy = BackupPolicy::rehydrate(
+            new PolicyId($this->binary($row, 'id')),
+            new PolicyRevision($this->positiveInteger($row, 'revision')),
+            PolicyStatus::from($this->text($row, 'status')),
+            null === ($row['target_id'] ?? null) ? null : new BackupTargetId($this->binary($row, 'target_id')),
+            null === ($row['backup_mode'] ?? null) ? null : BackupMode::from($this->text($row, 'backup_mode')),
+            null === ($row['compression'] ?? null) ? null : Compression::from($this->text($row, 'compression')),
+            $this->domainRetention($retention),
+            null === ($row['policy_priority'] ?? null) ? null : new PolicyPriority($this->nullableInteger($row['policy_priority'])
+                ?? throw new RuntimeException('MariaDB returned invalid policy integer.')),
+            $this->domainThresholds($row),
+            null === ($row['schedule'] ?? null) ? null : Schedule::from($this->text($row, 'schedule')),
+            new FailureNotificationRecipients($this->failureRecipients($row['failure_notification_recipients_json'] ?? null)),
+        );
+        $assessment = $this->assessor->assess($domainPolicy, $evidence, $now, $this->freshness->maximumAgeSeconds);
 
         return new ConfiguredPolicy(
             $this->uuid($row, 'id'),
-            $this->positiveInteger($row, 'revision'),
+            $domainPolicy->revision->value,
             $this->text($row, 'status'),
             $this->text($row, 'display_name'),
             $this->uuid($row, 'connection_id'),
@@ -211,12 +264,39 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             $this->nullableDecimal($row['bytes_written_threshold'] ?? null),
             $this->nullableInteger($row['cooldown_seconds'] ?? null),
             $this->nullableText($row['schedule'] ?? null),
-            $this->retention($row),
+            $retention,
             $retentionExecutionEnabled && !$pbsTarget,
             $this->nullableDate($row['disabled_at'] ?? null),
-            $blockers,
-            $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),
+            $assessment->blockers,
+            $domainPolicy->failureNotificationRecipients->addresses,
         );
+    }
+
+    /** @param array<string, mixed> $row */
+    private function domainThresholds(array $row): ?PolicyThresholds
+    {
+        $maximumAge = $this->nullableInteger($row['maximum_age_seconds'] ?? null);
+        $bytes = $this->nullableDecimal($row['bytes_written_threshold'] ?? null);
+        $cooldown = $this->nullableInteger($row['cooldown_seconds'] ?? null);
+        return null === $maximumAge && null === $bytes ? null : new PolicyThresholds($maximumAge, $bytes, $cooldown);
+    }
+
+    private function domainRetention(?PolicyRetention $retention): ?RetentionPolicy
+    {
+        if (null === $retention) {
+            return null;
+        }
+        return null !== $retention->legacyMaxFiles
+            ? RetentionPolicy::legacyMaxFiles($retention->legacyMaxFiles)
+            : RetentionPolicy::prune(
+                $retention->keepAll,
+                $retention->keepLast,
+                $retention->keepHourly,
+                $retention->keepDaily,
+                $retention->keepWeekly,
+                $retention->keepMonthly,
+                $retention->keepYearly,
+            );
     }
 
     /** @return list<string> */
@@ -292,6 +372,16 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
     {
         return $this->nullableUuid($row[$key] ?? null)
             ?? throw new RuntimeException('MariaDB returned invalid policy identifier.');
+    }
+
+    /** @param array<string, mixed> $row */
+    private function binary(array $row, string $key): string
+    {
+        $value = $row[$key] ?? null;
+        if (!is_string($value) || 16 !== strlen($value)) {
+            throw new RuntimeException('MariaDB returned invalid policy identifier.');
+        }
+        return $value;
     }
 
     private function nullableUuid(mixed $value): ?string

@@ -132,7 +132,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(29, $versions);
+        self::assertCount(30, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -191,6 +191,8 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260715000100', $versions[27]);
         self::assertIsString($versions[28]);
         self::assertStringEndsWith('Version20260715000200', $versions[28]);
+        self::assertIsString($versions[29]);
+        self::assertStringEndsWith('Version20260715154500', $versions[29]);
     }
 
     public function testActiveBackupRequestGuestKeyIsGeneratedAndUnique(): void

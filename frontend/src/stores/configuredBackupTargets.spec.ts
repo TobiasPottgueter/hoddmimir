@@ -27,7 +27,7 @@ const target = {
   disabledAt: "2026-07-12T10:00:00.000000Z",
   allowedNodes: [{ id: OTHER_UUID, name: "pve-a" }],
   canEnable: false,
-  blockers: ["configuration_incomplete"],
+  blockers: ["minimum_free_unconfigured"],
 } satisfies ConfiguredBackupTarget;
 
 function page(

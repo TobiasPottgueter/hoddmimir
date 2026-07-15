@@ -29,7 +29,7 @@ const target = {
   disabledAt: null,
   allowedNodes: [],
   canEnable: false,
-  blockers: ["configuration_incomplete"],
+  blockers: ["minimum_free_unconfigured"],
 } satisfies ConfiguredBackupTarget;
 
 describe("useConfiguredBackupTargets", () => {
@@ -37,11 +37,11 @@ describe("useConfiguredBackupTargets", () => {
 
   it("liefert geschlossene deutsche Konfigurations-Labels", () => {
     expect(
-      configuredBackupTargetBlockerLabel("configuration_incomplete"),
-    ).toContain("nicht vollständig");
-    expect(configuredBackupTargetBlockerLabel("pbs_binding_missing")).toContain(
-      "PBS-Zuordnung",
-    );
+      configuredBackupTargetBlockerLabel("minimum_free_unconfigured"),
+    ).toContain("nicht konfiguriert");
+    expect(
+      configuredBackupTargetBlockerLabel("pbs_mapping_required"),
+    ).toContain("PBS-Zuordnung");
     expect(
       configuredBackupTargetBlockerLabel("executor_evidence_missing"),
     ).toContain("Executor");

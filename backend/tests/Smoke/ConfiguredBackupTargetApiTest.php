@@ -6,7 +6,7 @@ namespace App\Tests\Smoke;
 
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Target\ReadModel\ConfiguredBackupTarget;
-use App\Application\Target\ReadModel\ConfiguredBackupTargetBlockerCode;
+use App\Domain\Target\TargetActivationBlocker;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetPage;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetQuery;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetReadModel;
@@ -48,7 +48,7 @@ final class ConfiguredBackupTargetApiTest extends WebTestCase
         self::assertIsArray($item);
         self::assertSame(false, $item['canEnable'] ?? null);
         self::assertSame(
-            ['configuration_incomplete'],
+            ['minimum_free_unconfigured'],
             $item['blockers'] ?? null,
         );
         self::assertNotNull($model->query);
@@ -94,12 +94,45 @@ final class ConfiguredBackupTargetApiTest extends WebTestCase
         );
         self::assertStringNotContainsString('database.internal', $body);
     }
+
+    public function testGetExposesServerAssessedActivationAndEnabledStateTruthfully(): void
+    {
+        $client = self::createClient();
+        $client->disableReboot();
+        $model = new ConfiguredBackupTargetReadModelFake();
+        $model->ready = true;
+        self::getContainer()->set(DbalConfiguredBackupTargetReadModel::class, $model);
+
+        $client->request('GET', '/api/v1/backup-targets');
+        self::assertResponseIsSuccessful();
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+        $items = $payload['items'] ?? null;
+        self::assertIsArray($items);
+        $item = $items[0] ?? null;
+        self::assertIsArray($item);
+        self::assertTrue($item['canEnable'] ?? null);
+        self::assertSame([], $item['blockers'] ?? null);
+
+        $model->enabled = true;
+        $client->request('GET', '/api/v1/backup-targets');
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+        $items = $payload['items'] ?? null;
+        self::assertIsArray($items);
+        $item = $items[0] ?? null;
+        self::assertIsArray($item);
+        self::assertFalse($item['canEnable'] ?? null);
+        self::assertSame([], $item['blockers'] ?? null);
+    }
 }
 
 final class ConfiguredBackupTargetReadModelFake implements ConfiguredBackupTargetReadModel
 {
     public ?ConfiguredBackupTargetQuery $query = null;
     public bool $fail = false;
+    public bool $ready = false;
+    public bool $enabled = false;
 
     public function targets(ConfiguredBackupTargetQuery $query): ConfiguredBackupTargetPage
     {
@@ -110,7 +143,7 @@ final class ConfiguredBackupTargetReadModelFake implements ConfiguredBackupTarge
         $target = new ConfiguredBackupTarget(
             ConfiguredBackupTargetApiTest::ID,
             1,
-            false,
+            $this->enabled,
             'Nightly',
             ConfiguredBackupTargetApiTest::ID,
             'PVE',
@@ -119,16 +152,16 @@ final class ConfiguredBackupTargetReadModelFake implements ConfiguredBackupTarge
             ConfiguredBackupTargetApiTest::ID,
             'backup',
             'dir',
+            $this->ready ? new \App\Domain\Shared\UInt64Decimal('1') : null,
+            $this->ready ? 1 : null,
             null,
             null,
             null,
-            null,
-            null,
-            '2026-07-12T10:00:00.000000Z',
-            [],
-            [
-                ConfiguredBackupTargetBlockerCode::ConfigurationIncomplete,
-            ],
+            $this->enabled ? null : '2026-07-12T10:00:00.000000Z',
+            $this->ready ? [new \App\Application\Target\ReadModel\ConfiguredBackupTargetAllowedNode(
+                ConfiguredBackupTargetApiTest::ID, 'node-a',
+            )] : [],
+            $this->ready ? [] : [TargetActivationBlocker::MinimumFreeUnconfigured],
         );
         return new ConfiguredBackupTargetPage(
             $query->page,

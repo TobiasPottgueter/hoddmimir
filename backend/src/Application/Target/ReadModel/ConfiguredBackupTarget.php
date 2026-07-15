@@ -6,6 +6,7 @@ namespace App\Application\Target\ReadModel;
 
 use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use App\Domain\Shared\UInt64Decimal;
+use App\Domain\Target\TargetActivationBlocker;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
@@ -15,12 +16,12 @@ final readonly class ConfiguredBackupTarget
     /** @var list<ConfiguredBackupTargetAllowedNode> */
     public array $allowedNodes;
 
-    /** @var list<ConfiguredBackupTargetBlockerCode> */
+    /** @var list<TargetActivationBlocker> */
     public array $blockers;
 
     /**
      * @param list<ConfiguredBackupTargetAllowedNode> $allowedNodes
-     * @param list<ConfiguredBackupTargetBlockerCode> $blockers
+     * @param list<TargetActivationBlocker> $blockers
      */
     public function __construct(
         public string $id,
@@ -79,7 +80,7 @@ final readonly class ConfiguredBackupTarget
         $normalized = [];
         foreach ($blockers as $blocker) {
             // @phpstan-ignore instanceof.alwaysTrue (enforce the declared runtime boundary)
-            if (!$blocker instanceof ConfiguredBackupTargetBlockerCode) {
+            if (!$blocker instanceof TargetActivationBlocker) {
                 throw new InvalidArgumentException('Configured backup-target blockers are invalid.');
             }
             if (!isset($seen[$blocker->value])) {

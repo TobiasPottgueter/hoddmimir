@@ -8,7 +8,7 @@ use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Target\ReadModel\ConfiguredBackupTarget;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetAllowedNode;
-use App\Application\Target\ReadModel\ConfiguredBackupTargetBlockerCode;
+use App\Domain\Target\TargetActivationBlocker;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetPage;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetQuery;
 use App\Domain\Shared\UInt64Decimal;
@@ -22,8 +22,16 @@ final class ConfiguredBackupTargetModelTest extends TestCase
     public function testClosedProjectionSerializesDraftAndDisabledStateWithoutActivationLogic(): void
     {
         self::assertSame(
-            ['configuration_incomplete', 'pbs_binding_missing', 'executor_evidence_missing'],
-            array_column(ConfiguredBackupTargetBlockerCode::cases(), 'value'),
+            [
+                'minimum_free_unconfigured', 'allowed_nodes_empty', 'concurrency_unconfigured',
+                'candidate_evidence_missing', 'candidate_rejected', 'candidate_evidence_stale',
+                'candidate_evidence_future', 'inventory_evidence_missing', 'inventory_evidence_stale',
+                'inventory_evidence_future', 'capacity_evidence_missing', 'capacity_evidence_stale',
+                'capacity_evidence_future', 'executor_evidence_missing', 'executor_evidence_stale',
+                'executor_evidence_future', 'executor_unauthorized', 'pbs_mapping_required',
+                'pbs_mapping_unexpected',
+            ],
+            array_column(TargetActivationBlocker::cases(), 'value'),
         );
         $target = $this->target(false, '2026-07-12T10:00:00.000000Z');
         $payload = $target->toArray();
@@ -51,7 +59,7 @@ final class ConfiguredBackupTargetModelTest extends TestCase
                 ['id' => '11112233-4455-6677-8899-aabbccddeeff', 'name' => 'node-b'],
             ],
             'canEnable' => false,
-            'blockers' => ['configuration_incomplete'],
+            'blockers' => ['concurrency_unconfigured'],
         ], $payload);
 
         self::assertNull($this->target(false, null)->disabledAt, 'An enabled=false row without timestamp remains distinguishable as a draft.');
@@ -194,8 +202,8 @@ final class ConfiguredBackupTargetModelTest extends TestCase
                 new ConfiguredBackupTargetAllowedNode('21112233-4455-6677-8899-aabbccddeeff', 'node-a'),
             ],
             [
-                ConfiguredBackupTargetBlockerCode::ConfigurationIncomplete,
-                ConfiguredBackupTargetBlockerCode::ConfigurationIncomplete,
+                TargetActivationBlocker::ConcurrencyUnconfigured,
+                TargetActivationBlocker::ConcurrencyUnconfigured,
             ],
         );
     }

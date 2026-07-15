@@ -994,9 +994,25 @@ export type BackupTargetCandidatePage = {
 };
 
 export type ConfiguredBackupTargetBlockerCode =
-  | "configuration_incomplete"
-  | "pbs_binding_missing"
-  | "executor_evidence_missing";
+  | "minimum_free_unconfigured"
+  | "allowed_nodes_empty"
+  | "concurrency_unconfigured"
+  | "candidate_evidence_missing"
+  | "candidate_rejected"
+  | "candidate_evidence_stale"
+  | "candidate_evidence_future"
+  | "inventory_evidence_missing"
+  | "inventory_evidence_stale"
+  | "inventory_evidence_future"
+  | "capacity_evidence_missing"
+  | "capacity_evidence_stale"
+  | "capacity_evidence_future"
+  | "executor_evidence_missing"
+  | "executor_evidence_stale"
+  | "executor_evidence_future"
+  | "executor_unauthorized"
+  | "pbs_mapping_required"
+  | "pbs_mapping_unexpected";
 
 export type ConfiguredBackupTargetAllowedNode = {
   id: CanonicalUuid;
@@ -1034,9 +1050,27 @@ export type ConfiguredBackupTargetPage = {
 export type PolicyStatus = "draft" | "enabled" | "disabled";
 
 export type PolicyBlockerCode =
-  | "configuration_incomplete"
+  | "pve_evidence_missing"
+  | "pve_evidence_stale"
+  | "pve_evidence_future"
+  | "unsupported_pve_major"
+  | "target_evidence_missing"
+  | "target_evidence_stale"
+  | "target_evidence_future"
+  | "target_disabled"
   | "executor_evidence_missing"
-  | "retention_execution_forbidden_for_pbs_target";
+  | "executor_evidence_stale"
+  | "executor_evidence_future"
+  | "executor_unauthorized"
+  | "retention_execution_forbidden_for_pbs_target"
+  | "target_unconfigured"
+  | "mode_unconfigured"
+  | "compression_unconfigured"
+  | "retention_unconfigured"
+  | "priority_unconfigured"
+  | "thresholds_unconfigured"
+  | "schedule_unconfigured"
+  | "retention_incompatible";
 
 export type PolicyRetention = {
   legacyMaxFiles: number | null;
@@ -1071,7 +1105,7 @@ export type ConfiguredPolicy = {
   retentionExecutionEnabled: boolean;
   failureNotificationRecipients: Array<string>;
   disabledAt: UtcTimestamp | null;
-  canEnable: false;
+  canEnable: boolean;
   blockers: Array<PolicyBlockerCode>;
 };
 

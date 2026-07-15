@@ -7,7 +7,7 @@ namespace App\Tests\Unit\Application\Policy\ReadModel;
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Policy\ReadModel\ConfiguredPolicy;
-use App\Application\Policy\ReadModel\PolicyBlockerCode;
+use App\Application\Configuration\Policy\PolicyActivationBlockerCode;
 use App\Application\Policy\ReadModel\PolicyListQuery;
 use App\Application\Policy\ReadModel\PolicyPage;
 use App\Application\Policy\ReadModel\PolicyRetention;
@@ -30,7 +30,7 @@ final class PolicyReadModelTest extends TestCase
             self::ID, 2, 'draft', 'Nightly', self::ID, 'PVE', self::OTHER, 'cluster-a',
             self::OTHER, 'Target', 500, 'snapshot', 'zstd', 3600, '1000', 300,
             'collector_cycle', $retention, false, null,
-            [PolicyBlockerCode::ExecutorEvidenceMissing],
+            [PolicyActivationBlockerCode::ExecutorEvidenceMissing],
         );
 
         self::assertSame([

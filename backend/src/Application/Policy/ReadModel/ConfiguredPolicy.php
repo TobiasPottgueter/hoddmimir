@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Policy\ReadModel;
 
+use App\Application\Configuration\Policy\PolicyActivationBlockerCode;
 use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use InvalidArgumentException;
 
@@ -13,7 +14,7 @@ final readonly class ConfiguredPolicy
 
     /**
      * @param list<string> $failureNotificationRecipients
-     * @param list<PolicyBlockerCode> $blockers
+     * @param list<PolicyActivationBlockerCode> $blockers
      */
     public function __construct(
         public string $id,

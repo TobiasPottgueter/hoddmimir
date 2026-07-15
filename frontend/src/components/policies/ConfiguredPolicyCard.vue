@@ -133,7 +133,7 @@ defineEmits<{
         :label="policy.status === 'enabled' ? 'Deaktivieren' : 'Aktivieren'"
         :icon="policy.status === 'enabled' ? 'pi pi-ban' : 'pi pi-check'"
         :severity="policy.status === 'enabled' ? 'danger' : 'success'"
-        :disabled="policy.status !== 'enabled' && policy.blockers.length > 0"
+        :disabled="policy.status !== 'enabled' && !policy.canEnable"
         @click="$emit('toggle', policy)"
       />
     </footer>

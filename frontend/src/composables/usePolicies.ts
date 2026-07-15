@@ -15,10 +15,28 @@ const statusLabels = {
 } satisfies Record<PolicyStatus, string>;
 
 const blockerLabels = {
-  configuration_incomplete: "Konfiguration ist unvollständig",
+  pve_evidence_missing: "PVE-Evidenz fehlt",
+  pve_evidence_stale: "PVE-Evidenz ist veraltet",
+  pve_evidence_future: "PVE-Evidenz liegt in der Zukunft",
+  unsupported_pve_major: "PVE-Version wird nicht unterstützt",
+  target_evidence_missing: "Ziel-Evidenz fehlt",
+  target_evidence_stale: "Ziel-Evidenz ist veraltet",
+  target_evidence_future: "Ziel-Evidenz liegt in der Zukunft",
+  target_disabled: "Backupziel ist deaktiviert oder nicht nutzbar",
   executor_evidence_missing: "Executor-Evidenz fehlt",
+  executor_evidence_stale: "Executor-Evidenz ist veraltet",
+  executor_evidence_future: "Executor-Evidenz liegt in der Zukunft",
+  executor_unauthorized: "Executor ist nicht berechtigt",
   retention_execution_forbidden_for_pbs_target:
     "Retention-Ausführung ist für PBS-Ziele nicht zulässig",
+  target_unconfigured: "Backupziel ist nicht konfiguriert",
+  mode_unconfigured: "Backupmodus ist nicht konfiguriert",
+  compression_unconfigured: "Kompression ist nicht konfiguriert",
+  retention_unconfigured: "Retention ist nicht konfiguriert",
+  priority_unconfigured: "Priorität ist nicht konfiguriert",
+  thresholds_unconfigured: "Schwellwerte sind nicht konfiguriert",
+  schedule_unconfigured: "Zeitplan ist nicht konfiguriert",
+  retention_incompatible: "Retention ist mit der PVE-Version nicht kompatibel",
 } satisfies Record<PolicyBlockerCode, string>;
 
 const scopeLabels = {

@@ -53,8 +53,8 @@ describe("usePolicies", () => {
     ).toBe("Letzte: 3 · Täglich: 7");
     expect(policyStatusLabel("enabled")).toBe("Aktiviert");
     expect(policyStatusLabel("disabled")).toBe("Deaktiviert");
-    expect(policyBlockerLabel("configuration_incomplete")).toContain(
-      "unvollständig",
+    expect(policyBlockerLabel("target_unconfigured")).toContain(
+      "nicht konfiguriert",
     );
     expect(
       policyBlockerLabel("retention_execution_forbidden_for_pbs_target"),

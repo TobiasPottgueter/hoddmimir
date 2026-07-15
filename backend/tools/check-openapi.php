@@ -7,11 +7,11 @@ use App\Application\Inventory\PbsContent\PbsContentScopeType;
 use App\Application\Inventory\Pve\PveCoreScope;
 use App\Application\Configuration\Connection\Onboarding\OnboardingIssueCode;
 use App\Application\Monitoring\MonitoringScopeType;
-use App\Application\Policy\ReadModel\PolicyBlockerCode;
+use App\Application\Configuration\Policy\PolicyActivationBlockerCode;
 use App\Application\Target\ReadModel\BackupTargetBlockerCode;
 use App\Application\Target\ReadModel\BackupTargetCapacityStatus;
 use App\Application\Target\ReadModel\BackupTargetExecutorStatus;
-use App\Application\Target\ReadModel\ConfiguredBackupTargetBlockerCode;
+use App\Domain\Target\TargetActivationBlocker;
 use App\Application\Target\ReadModel\PbsEndpointMatchStatus;
 use App\Domain\Shared\UInt64Decimal;
 use App\Kernel;
@@ -570,7 +570,7 @@ foreach ($expectedTargetEnums as $name => $expected) {
         failContract('OpenAPI target-candidate enum '.$name.' drifted from its application enum.');
     }
 }
-if (array_column(ConfiguredBackupTargetBlockerCode::cases(), 'value')
+if (array_column(TargetActivationBlocker::cases(), 'value')
     !== ($schemas['ConfiguredBackupTargetBlockerCode']['enum'] ?? null)) {
     failContract('OpenAPI configured-target blocker enum drifted from its closed Phase 4.4a contract.');
 }
@@ -658,7 +658,7 @@ foreach ($onboardingOperations as $route => $requestSchema) {
     }
 }
 if (['draft', 'enabled', 'disabled'] !== ($schemas['PolicyStatus']['enum'] ?? null)
-    || array_column(PolicyBlockerCode::cases(), 'value') !== ($schemas['PolicyBlockerCode']['enum'] ?? null)) {
+    || array_column(PolicyActivationBlockerCode::cases(), 'value') !== ($schemas['PolicyBlockerCode']['enum'] ?? null)) {
     failContract('OpenAPI policy status or blocker enum drifted from its closed read-model contract.');
 }
 $decimalBytes = $schemas['DecimalBytes'] ?? null;
@@ -705,11 +705,11 @@ $policySelectionItems = nestedValue(
     $schemas,
     ['PolicySelectionPage', 'properties', 'items', 'items', '$ref'],
 );
-$policyCanEnable = nestedValue($schemas, ['ConfiguredPolicy', 'properties', 'canEnable', 'const']);
+$policyCanEnable = nestedValue($schemas, ['ConfiguredPolicy', 'properties', 'canEnable', 'type']);
 if ('#/components/schemas/ConfiguredPolicy' !== $policyPageItems
     || '#/components/schemas/PolicySelectionEntry' !== $policySelectionItems
-    || false !== $policyCanEnable) {
-    failContract('OpenAPI policy pages or fail-closed reference drifted.');
+    || 'boolean' !== $policyCanEnable) {
+    failContract('OpenAPI policy pages or activation reference drifted.');
 }
 $unavailableCode = nestedValue(
     $schemas,

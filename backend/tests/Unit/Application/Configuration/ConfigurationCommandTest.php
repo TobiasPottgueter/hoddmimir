@@ -135,7 +135,7 @@ final class ConfigurationCommandTest extends TestCase
     {
         $repository = new FakeConfigurationRepository();
         $evidence = new FakePolicyEvidence();
-        $handler = new PolicyCommandHandler(new PermissionAuthorizer(), $repository, $evidence, new ConfigurationClock(), new EvidenceFreshnessPolicy());
+        $handler = new PolicyCommandHandler(new PermissionAuthorizer(), $repository, $evidence, new ConfigurationClock(), new EvidenceFreshnessPolicy(), new \App\Application\Configuration\Policy\PolicyActivationAssessor());
         $this->expectAuthorization(fn () => $handler->handle($this->command(ConfigurationCommandType::PolicyCreate), $this->principal(false)));
         $savedPolicy = $repository->policy;
         $repository->policy = null;
@@ -206,7 +206,7 @@ final class ConfigurationCommandTest extends TestCase
         $evidence = new FakePolicyEvidence();
         $fresh = new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T11:58:00.000000Z'));
         $evidence->value = new PolicyActivationEvidence(9, $fresh->observedAt, $fresh, $fresh);
-        $policy = new PolicyCommandHandler(new PermissionAuthorizer(), $repository, $evidence, new ConfigurationClock(), new EvidenceFreshnessPolicy(120));
+        $policy = new PolicyCommandHandler(new PermissionAuthorizer(), $repository, $evidence, new ConfigurationClock(), new EvidenceFreshnessPolicy(120), new \App\Application\Configuration\Policy\PolicyActivationAssessor());
         self::assertSame(ConfigurationCommandStatus::Applied, $policy->handle($this->command(ConfigurationCommandType::PolicyEnable), $this->principal())->status);
         $stale = new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T11:57:59.999999Z'));
         $evidence->value = new PolicyActivationEvidence(9, $stale->observedAt, $stale, $stale);
@@ -274,6 +274,12 @@ final class FakeTargetCandidateEvidence implements TargetCandidateEvidenceProvid
         $value = new ActivationEvidenceObservation($this->accepted, null === $this->accepted ? null : $this->observedAt);
         return new TargetCandidateEvidence($value, $value, $value);
     }
+    public function candidateEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[$id->toHex()] = $this->candidateEvidence($id);
+        return $result;
+    }
 }
 
 final class FakeTargetExecutorEvidence implements TargetExecutorEvidenceProvider
@@ -283,6 +289,12 @@ final class FakeTargetExecutorEvidence implements TargetExecutorEvidenceProvider
     public function __construct() { $this->observedAt = new DateTimeImmutable('2026-07-12T12:00:00Z'); }
     public function executorEvidence(BackupTargetId $id): ActivationEvidenceObservation
     { return new ActivationEvidenceObservation($this->accepted, null === $this->accepted ? null : $this->observedAt); }
+    public function executorEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[$id->toHex()] = $this->executorEvidence($id);
+        return $result;
+    }
 }
 
 final class FakePolicyEvidence implements PolicyActivationEvidenceProvider
@@ -294,6 +306,12 @@ final class FakePolicyEvidence implements PolicyActivationEvidenceProvider
         $this->value = new PolicyActivationEvidence(9, new DateTimeImmutable('2026-07-12T12:00:00Z'), $fresh, $fresh);
     }
     public function policyEvidence(PolicyId $id): PolicyActivationEvidence { return $this->value; }
+    public function policyEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[bin2hex($id->binary())] = $this->value;
+        return $result;
+    }
 }
 
 final class ConfigurationClock implements Clock

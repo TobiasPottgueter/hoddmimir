@@ -29,7 +29,7 @@ const policy = {
   failureNotificationRecipients: ["ops@example.test"],
   disabledAt: null,
   canEnable: false,
-  blockers: ["configuration_incomplete", "executor_evidence_missing"],
+  blockers: ["target_unconfigured", "executor_evidence_missing"],
 } satisfies ConfiguredPolicy;
 
 describe("ConfiguredPolicyCard", () => {
@@ -48,7 +48,7 @@ describe("ConfiguredPolicyCard", () => {
   });
 
   it("emittiert revisionierte Management-Aktionen für eine blockerfreie Policy", async () => {
-    const manageable = { ...policy, blockers: [] };
+    const manageable = { ...policy, canEnable: true, blockers: [] };
     const wrapper = mount(ConfiguredPolicyCard, {
       props: { policy: manageable, selected: true, canManage: true },
       global: { plugins: [PrimeVue] },

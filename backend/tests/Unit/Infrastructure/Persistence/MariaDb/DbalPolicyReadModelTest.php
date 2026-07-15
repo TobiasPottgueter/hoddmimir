@@ -4,11 +4,19 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Infrastructure\Persistence\MariaDb;
 
+use App\Application\Configuration\Policy\PolicyActivationAssessor;
+use App\Application\Configuration\Policy\PolicyActivationEvidence;
+use App\Application\Configuration\Policy\PolicyActivationEvidenceProvider;
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Policy\ReadModel\PolicyListQuery;
 use App\Application\Policy\ReadModel\PolicySelectionQuery;
 use App\Infrastructure\Persistence\MariaDb\DbalPolicyReadModel;
+use App\Domain\Policy\PolicyId;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
+use App\Domain\Shared\Clock;
+use App\Domain\Target\ActivationEvidenceObservation;
+use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -29,7 +37,7 @@ final class DbalPolicyReadModelTest extends TestCase
                 self::anything(),
             )->willReturn([$this->policyRow('Alpha'), $this->policyRow('Zulu', str_repeat("\x09", 16))]);
 
-        $page = (new DbalPolicyReadModel($database))->policies(
+        $page = $this->model($database)->policies(
             new PolicyListQuery(new PageRequest(1), '50%_\\', 'draft'),
         );
 
@@ -37,7 +45,10 @@ final class DbalPolicyReadModelTest extends TestCase
         self::assertNotNull($page->nextCursor);
         self::assertSame('18446744073709551615', $page->items[0]->bytesWrittenThreshold);
         self::assertSame(['alerts@example.test'], $page->items[0]->failureNotificationRecipients);
-        self::assertSame(['configuration_incomplete', 'executor_evidence_missing'], $page->items[0]->toArray()['blockers']);
+        self::assertSame([
+            'target_unconfigured', 'mode_unconfigured', 'compression_unconfigured',
+            'retention_unconfigured', 'priority_unconfigured', 'schedule_unconfigured',
+        ], $page->items[0]->toArray()['blockers']);
     }
 
     public function testPolicyCursorAndCompleteConfigurationRemainFailClosedForCommands(): void
@@ -58,11 +69,11 @@ final class DbalPolicyReadModelTest extends TestCase
             ->with(self::stringContains('policy.id > :cursor_id'), self::anything(), self::anything())
             ->willReturn([$row]);
 
-        $page = (new DbalPolicyReadModel($database))->policies(
+        $page = $this->model($database)->policies(
             new PolicyListQuery(new PageRequest(1, $cursor)),
         );
-        self::assertSame(['executor_evidence_missing'], $page->items[0]->toArray()['blockers']);
-        self::assertFalse($page->items[0]->toArray()['canEnable']);
+        self::assertSame([], $page->items[0]->toArray()['blockers']);
+        self::assertTrue($page->items[0]->toArray()['canEnable']);
     }
 
     public function testSelectionProjectionMapsAssignmentsAndGuestOverridesWithCursor(): void
@@ -78,7 +89,7 @@ final class DbalPolicyReadModelTest extends TestCase
             ->with(self::stringContains('UNION ALL'), self::anything(), self::anything())
             ->willReturn([$assignment, $override]);
 
-        $page = (new DbalPolicyReadModel($database))->selection(
+        $page = $this->model($database)->selection(
             new PolicySelectionQuery(self::UUID, new PageRequest(1)),
         );
         self::assertCount(1, $page->items);
@@ -94,7 +105,7 @@ final class DbalPolicyReadModelTest extends TestCase
         $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
 
         $this->expectException(RuntimeException::class);
-        (new DbalPolicyReadModel($database))->policies(new PolicyListQuery(new PageRequest(1)));
+        $this->model($database)->policies(new PolicyListQuery(new PageRequest(1)));
     }
 
     public function testDatabaseIntegerAtPlatformMaximumIsAcceptedWithoutSaturation(): void
@@ -104,7 +115,7 @@ final class DbalPolicyReadModelTest extends TestCase
         $database = $this->createMock(Connection::class);
         $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
 
-        $item = (new DbalPolicyReadModel($database))
+        $item = $this->model($database)
             ->policies(new PolicyListQuery(new PageRequest(1)))->items[0];
         self::assertSame(PHP_INT_MAX, $item->maximumAgeSeconds);
     }
@@ -117,7 +128,7 @@ final class DbalPolicyReadModelTest extends TestCase
         $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
 
         $this->expectException(RuntimeException::class);
-        (new DbalPolicyReadModel($database))->policies(new PolicyListQuery(new PageRequest(1)));
+        $this->model($database)->policies(new PolicyListQuery(new PageRequest(1)));
     }
 
     /** @return array<string, mixed> */
@@ -154,4 +165,30 @@ final class DbalPolicyReadModelTest extends TestCase
             'sort_key' => 'assignment:guest',
         ];
     }
+
+    private function model(Connection $connection): DbalPolicyReadModel
+    {
+        return new DbalPolicyReadModel($connection, new PolicyProjectionEvidence(),
+            new PolicyActivationAssessor(), new PolicyProjectionClock(), new EvidenceFreshnessPolicy());
+    }
+}
+
+final class PolicyProjectionEvidence implements PolicyActivationEvidenceProvider
+{
+    public function policyEvidence(PolicyId $id): PolicyActivationEvidence
+    {
+        $fresh = new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T10:00:00Z'));
+        return new PolicyActivationEvidence(9, $fresh->observedAt, $fresh, $fresh);
+    }
+    public function policyEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[bin2hex($id->binary())] = $this->policyEvidence($id);
+        return $result;
+    }
+}
+
+final readonly class PolicyProjectionClock implements Clock
+{
+    public function now(): DateTimeImmutable { return new DateTimeImmutable('2026-07-12T10:00:00Z'); }
 }

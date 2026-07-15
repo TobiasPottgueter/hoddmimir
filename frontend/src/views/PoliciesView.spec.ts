@@ -120,7 +120,7 @@ describe("PoliciesView", () => {
       initialized: true,
     });
     const store = usePoliciesStore();
-    store.items = [{ ...policy, blockers: [] }];
+    store.items = [{ ...policy, canEnable: true, blockers: [] }];
     store.selectedPolicyId = UUID;
     store.selectionItems = [selection("assignment")];
     vi.spyOn(store, "load").mockResolvedValue();

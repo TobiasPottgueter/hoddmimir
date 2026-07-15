@@ -115,7 +115,7 @@ final readonly class BackupPolicy
     }
 
     /** @return list<PolicyActivationBlocker> */
-    public function activationBlockers(int $pveMajor): array
+    public function configurationBlockers(): array
     {
         $blockers = [];
         if (null === $this->targetId) {
@@ -139,6 +139,14 @@ final readonly class BackupPolicy
         if (null === $this->schedule) {
             $blockers[] = PolicyActivationBlocker::ScheduleUnconfigured;
         }
+
+        return $blockers;
+    }
+
+    /** @return list<PolicyActivationBlocker> */
+    public function activationBlockers(int $pveMajor): array
+    {
+        $blockers = $this->configurationBlockers();
         if ($pveMajor < 7 || $pveMajor > 9) {
             $blockers[] = PolicyActivationBlocker::UnsupportedPveMajor;
         } elseif (null !== $this->retention && !$this->retention->supportsPveMajor($pveMajor)) {

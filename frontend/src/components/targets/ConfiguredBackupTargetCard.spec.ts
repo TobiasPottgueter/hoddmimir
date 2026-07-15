@@ -26,7 +26,7 @@ const target = {
   disabledAt: "2026-07-12T10:00:00.000000Z",
   allowedNodes: [{ id: OTHER_UUID, name: "pve-a" }],
   canEnable: false,
-  blockers: ["configuration_incomplete"],
+  blockers: ["minimum_free_unconfigured"],
 } satisfies ConfiguredBackupTarget;
 
 describe("ConfiguredBackupTargetCard", () => {
@@ -40,9 +40,7 @@ describe("ConfiguredBackupTargetCard", () => {
     expect(wrapper.text()).toContain("PVE Produktion");
     expect(wrapper.text()).toContain("pve-a");
     expect(wrapper.text()).toContain("18.446.744.073.709.551.615 B");
-    expect(wrapper.text()).toContain(
-      "Konfiguration ist noch nicht vollständig",
-    );
+    expect(wrapper.text()).toContain("Mindestfreiplatz ist nicht konfiguriert");
     expect(wrapper.text()).toContain("Nicht aktivierbar");
     expect(wrapper.findAll("button")).toHaveLength(0);
     expect(wrapper.text()).not.toMatch(

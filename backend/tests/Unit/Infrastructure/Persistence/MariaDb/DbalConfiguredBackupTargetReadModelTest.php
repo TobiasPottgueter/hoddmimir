@@ -4,10 +4,18 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Infrastructure\Persistence\MariaDb;
 
+use App\Application\Configuration\Target\TargetCandidateEvidence;
+use App\Application\Configuration\Target\TargetCandidateEvidenceProvider;
+use App\Application\Configuration\Target\TargetExecutorEvidenceProvider;
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Target\ReadModel\ConfiguredBackupTargetQuery;
 use App\Infrastructure\Persistence\MariaDb\DbalConfiguredBackupTargetReadModel;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
+use App\Domain\Shared\Clock;
+use App\Domain\Target\ActivationEvidenceObservation;
+use App\Domain\Target\BackupTargetId;
+use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -44,7 +52,7 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
                 return $nodes;
             });
 
-        $page = (new DbalConfiguredBackupTargetReadModel($database))->targets(
+        $page = $this->model($database)->targets(
             new ConfiguredBackupTargetQuery(new PageRequest(100), 'Target', false),
         );
 
@@ -52,7 +60,7 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
         self::assertCount(100, $page->items);
         self::assertNotNull($page->nextCursor);
         self::assertSame('node-099', $page->items[99]->allowedNodes[0]->name);
-        self::assertFalse($page->items[99]->toArray()['canEnable']);
+        self::assertTrue($page->items[99]->toArray()['canEnable']);
     }
 
     public function testFiltersAndCursorAreBoundAndEscapedWithoutExtraQueriesForEmptyPage(): void
@@ -70,7 +78,7 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
                 self::anything(),
             )->willReturn([]);
 
-        $page = (new DbalConfiguredBackupTargetReadModel($database))->targets(
+        $page = $this->model($database)->targets(
             new ConfiguredBackupTargetQuery(new PageRequest(5, $cursor), '50%_\\', false),
         );
         self::assertSame([], $page->items);
@@ -84,7 +92,7 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
             ->willReturn([$this->row(str_repeat('i', 16), 'Target', 'unknown')]);
 
         $this->expectException(RuntimeException::class);
-        (new DbalConfiguredBackupTargetReadModel($database))->targets(
+        $this->model($database)->targets(
             new ConfiguredBackupTargetQuery(new PageRequest(1)),
         );
     }
@@ -97,7 +105,7 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
         $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
 
         $this->expectException(RuntimeException::class);
-        (new DbalConfiguredBackupTargetReadModel($database))->targets(
+        $this->model($database)->targets(
             new ConfiguredBackupTargetQuery(new PageRequest(1)),
         );
     }
@@ -125,4 +133,45 @@ final class DbalConfiguredBackupTargetReadModelTest extends TestCase
             'storage_type' => 'dir',
         ];
     }
+
+    private function model(Connection $connection): DbalConfiguredBackupTargetReadModel
+    {
+        $evidence = new ConfiguredTargetProjectionEvidence();
+        return new DbalConfiguredBackupTargetReadModel($connection, $evidence, $evidence,
+            new ConfiguredTargetProjectionClock(), new EvidenceFreshnessPolicy());
+    }
+}
+
+final class ConfiguredTargetProjectionEvidence implements TargetCandidateEvidenceProvider, TargetExecutorEvidenceProvider
+{
+    private function observation(): ActivationEvidenceObservation
+    {
+        return new ActivationEvidenceObservation(true, new DateTimeImmutable('2026-07-12T10:00:00Z'));
+    }
+    public function candidateEvidence(BackupTargetId $id): TargetCandidateEvidence
+    {
+        $observation = $this->observation();
+        return new TargetCandidateEvidence($observation, $observation, $observation);
+    }
+    public function candidateEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[$id->toHex()] = $this->candidateEvidence($id);
+        return $result;
+    }
+    public function executorEvidence(BackupTargetId $id): ActivationEvidenceObservation
+    {
+        return $this->observation();
+    }
+    public function executorEvidenceBatch(array $ids): array
+    {
+        $result = [];
+        foreach ($ids as $id) $result[$id->toHex()] = $this->executorEvidence($id);
+        return $result;
+    }
+}
+
+final readonly class ConfiguredTargetProjectionClock implements Clock
+{
+    public function now(): DateTimeImmutable { return new DateTimeImmutable('2026-07-12T10:00:00Z'); }
 }
