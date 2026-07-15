@@ -19,6 +19,7 @@ enum GateCode: string
     case PlacementPresent = 'placement_present';
     case PlacementFresh = 'placement_fresh';
     case ActiveRequestAbsent = 'active_request_absent';
+    case HigherRankedCandidateAbsent = 'higher_ranked_candidate_absent';
     case TargetNodeAllowed = 'target_node_allowed';
     case TargetStorageEnabled = 'target_storage_enabled';
     case TargetStorageActive = 'target_storage_active';

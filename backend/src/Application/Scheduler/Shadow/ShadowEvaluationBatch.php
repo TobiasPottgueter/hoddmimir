@@ -14,10 +14,14 @@ final readonly class ShadowEvaluationBatch
 {
     /** @var list<ShadowDecision> */
     public array $decisions;
+    /** @var list<AutomaticShadowPromotion> */
+    public array $promotions;
     public DateTimeImmutable $startedAt;
     public DateTimeImmutable $finishedAt;
 
-    /** @param list<ShadowDecision> $decisions */
+    /** @param list<ShadowDecision> $decisions
+     *  @param list<AutomaticShadowPromotion> $promotions
+     */
     public function __construct(
         public ShadowEvaluationRunId $runId,
         public CollectorCycleToken $cycleToken,
@@ -25,6 +29,7 @@ final readonly class ShadowEvaluationBatch
         DateTimeImmutable $startedAt,
         DateTimeImmutable $finishedAt,
         array $decisions,
+        array $promotions = [],
     ) {
         if ($this->evaluatorVersion < 1 || $this->evaluatorVersion > 65535) {
             throw new InvalidArgumentException('A shadow evaluator version must fit an unsigned small integer.');
@@ -46,6 +51,33 @@ final readonly class ShadowEvaluationBatch
         }
         ksort($byId, SORT_STRING);
         $this->decisions = array_values($byId);
+
+        $promotionByDecision = [];
+        $promotedGuests = [];
+        foreach ($promotions as $promotion) {
+            // @phpstan-ignore instanceof.alwaysTrue (enforce the declared runtime boundary)
+            if (!$promotion instanceof AutomaticShadowPromotion) {
+                throw new InvalidArgumentException('Shadow promotion payloads are invalid.');
+            }
+            $decisionHex = bin2hex($promotion->decisionId);
+            $decision = $byId[$decisionHex] ?? null;
+            if (null === $decision || \App\Domain\Scheduler\DecisionOutcome::Eligible !== $decision->outcome
+                || isset($promotionByDecision[$decisionHex])) {
+                throw new InvalidArgumentException('Every automatic promotion must reference one unique eligible decision.');
+            }
+            $guestHex = bin2hex($decision->guestId->binary());
+            if (isset($promotedGuests[$guestHex])) {
+                throw new InvalidArgumentException('A shadow batch may promote only one winner per guest.');
+            }
+            $policyHash = $decision->policy?->snapshotHash();
+            if (null === $policyHash || !hash_equals($policyHash, $promotion->resolvedPolicyHash())) {
+                throw new InvalidArgumentException('The promotion policy evidence differs from its shadow decision.');
+            }
+            $promotionByDecision[$decisionHex] = $promotion;
+            $promotedGuests[$guestHex] = true;
+        }
+        ksort($promotionByDecision, SORT_STRING);
+        $this->promotions = array_values($promotionByDecision);
     }
 
     /** @throws JsonException */
@@ -69,6 +101,12 @@ final readonly class ShadowEvaluationBatch
             'started_at' => $this->format($this->startedAt),
             'finished_at' => $this->format($this->finishedAt),
             'decisions' => array_map(fn (ShadowDecision $decision): array => $this->decisionDocument($decision), $this->decisions),
+            'promotions' => array_map(static fn (AutomaticShadowPromotion $promotion): array => [
+                'request_id' => bin2hex($promotion->requestId),
+                'decision_id' => bin2hex($promotion->decisionId),
+                'resolved_policy_json' => $promotion->resolvedPolicyJson,
+                'resolved_policy_hash' => $promotion->resolvedPolicyHashHex(),
+            ], $this->promotions),
         ];
     }
 

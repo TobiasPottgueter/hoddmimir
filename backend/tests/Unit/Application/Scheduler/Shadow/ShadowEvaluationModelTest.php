@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Application\Scheduler\Shadow;
 
 use App\Application\Collector\CollectorCycleToken;
 use App\Application\Inventory\InventoryIdentifier;
+use App\Application\Scheduler\Shadow\AutomaticShadowPromotion;
 use App\Application\Scheduler\Shadow\OrderedShadowGate;
 use App\Application\Scheduler\Shadow\ShadowDecision;
 use App\Application\Scheduler\Shadow\ShadowDecisionId;
@@ -75,6 +76,47 @@ final class ShadowEvaluationModelTest extends TestCase
         self::assertSame(str_repeat('aa', 32), $policy->snapshotHashHex());
         self::assertSame(8, $policy->revision);
         self::assertSame(9, $target->revision);
+    }
+
+    public function testAutomaticPromotionExposesValidatedCanonicalPolicyEvidence(): void
+    {
+        $json = '{"mode":"snapshot"}';
+        $hash = hash('sha256', $json, true);
+        $promotion = new AutomaticShadowPromotion(
+            str_repeat("\x31", 16),
+            str_repeat("\x32", 16),
+            $json,
+            $hash,
+        );
+
+        self::assertSame(str_repeat("\x31", 16), $promotion->requestId);
+        self::assertSame(str_repeat("\x32", 16), $promotion->decisionId);
+        self::assertSame($json, $promotion->resolvedPolicyJson);
+        self::assertSame($hash, $promotion->resolvedPolicyHash());
+        self::assertSame(bin2hex($hash), $promotion->resolvedPolicyHashHex());
+    }
+
+    #[DataProvider('invalidAutomaticPromotionProvider')]
+    public function testAutomaticPromotionRejectsInvalidIdentityOrPolicyEvidence(string $case): void
+    {
+        $json = '{"mode":"snapshot"}';
+        $this->expectException(InvalidArgumentException::class);
+        match ($case) {
+            'request id' => new AutomaticShadowPromotion(str_repeat('r', 15), str_repeat('d', 16), $json, hash('sha256', $json, true)),
+            'decision id' => new AutomaticShadowPromotion(str_repeat('r', 16), str_repeat('d', 17), $json, hash('sha256', $json, true)),
+            'json' => new AutomaticShadowPromotion(str_repeat('r', 16), str_repeat('d', 16), '{', hash('sha256', '{', true)),
+            'hash length' => new AutomaticShadowPromotion(str_repeat('r', 16), str_repeat('d', 16), $json, str_repeat('h', 31)),
+            'hash mismatch' => new AutomaticShadowPromotion(str_repeat('r', 16), str_repeat('d', 16), $json, str_repeat('h', 32)),
+            default => throw new \LogicException('Unknown automatic promotion test case.'),
+        };
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function invalidAutomaticPromotionProvider(): iterable
+    {
+        foreach (['request id', 'decision id', 'json', 'hash length', 'hash mismatch'] as $case) {
+            yield $case => [$case];
+        }
     }
 
     #[DataProvider('invalidEvidenceProvider')]
@@ -224,6 +266,49 @@ final class ShadowEvaluationModelTest extends TestCase
         self::assertSame(0, $batch->gateCount());
     }
 
+    public function testBatchCarriesOneEligiblePromotionAndCoversItInTheContentHash(): void
+    {
+        $decision = $this->eligibleDecision(1);
+        $promotion = $this->promotion($decision, 1);
+        $batch = $this->batch([$decision], promotions: [$promotion]);
+
+        self::assertSame([$promotion], $batch->promotions);
+        self::assertNotSame($this->batch([$decision])->contentHash(), $batch->contentHash());
+    }
+
+    #[DataProvider('invalidBatchPromotionProvider')]
+    public function testBatchRejectsInvalidOrAmbiguousPromotions(string $case): void
+    {
+        $first = $this->eligibleDecision(1);
+        $second = $this->eligibleDecision(2);
+        $blocked = $this->decision(
+            DecisionOutcome::Blocked,
+            null,
+            null,
+            null,
+            null,
+            [new OrderedShadowGate(1, $this->gate(false))],
+        );
+        $this->expectException(InvalidArgumentException::class);
+        match ($case) {
+            'invalid payload' => $this->batch([$first], promotions: [new \stdClass()]),
+            'missing decision' => $this->batch([$first], promotions: [$this->promotion($second, 2)]),
+            'noneligible decision' => $this->batch([$blocked], promotions: [$this->promotionForId($blocked->id->binary(), 1)]),
+            'duplicate decision' => $this->batch([$first], promotions: [$this->promotion($first, 1), $this->promotion($first, 2)]),
+            'duplicate guest' => $this->batch([$first, $second], promotions: [$this->promotion($first, 1), $this->promotion($second, 2)]),
+            'policy mismatch' => $this->batch([$first], promotions: [$this->promotionForId($first->id->binary(), 1, '{"mode":"stop"}')]),
+            default => throw new \LogicException('Unknown batch promotion test case.'),
+        };
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function invalidBatchPromotionProvider(): iterable
+    {
+        foreach (['invalid payload', 'missing decision', 'noneligible decision', 'duplicate decision', 'duplicate guest', 'policy mismatch'] as $case) {
+            yield $case => [$case];
+        }
+    }
+
     public function testBatchHashCoversAbsentOptionalEvidenceAndUnobservedGates(): void
     {
         $failed = new GateResult(
@@ -350,8 +435,10 @@ final class ShadowEvaluationModelTest extends TestCase
         );
     }
 
-    /** @param array<int, mixed> $decisions */
-    private function batch(array $decisions, int $evaluatorVersion = 1): ShadowEvaluationBatch
+    /** @param array<int, mixed> $decisions
+     *  @param array<int, mixed> $promotions
+     */
+    private function batch(array $decisions, int $evaluatorVersion = 1, array $promotions = []): ShadowEvaluationBatch
     {
         return new ShadowEvaluationBatch(
             $this->runId(),
@@ -361,6 +448,8 @@ final class ShadowEvaluationModelTest extends TestCase
             new DateTimeImmutable('2026-07-12T14:05:00+02:00'),
             // @phpstan-ignore-next-line argument.type (one test intentionally crosses the PHPDoc runtime boundary)
             $decisions,
+            // @phpstan-ignore-next-line argument.type (one test intentionally crosses the PHPDoc runtime boundary)
+            $promotions,
         );
     }
 
@@ -371,7 +460,25 @@ final class ShadowEvaluationModelTest extends TestCase
 
     private function policy(): ShadowPolicyEvidence
     {
-        return new ShadowPolicyEvidence($this->inventoryId(14), 4, str_repeat("\x0e", 32));
+        return new ShadowPolicyEvidence($this->inventoryId(14), 4, hash('sha256', '{"mode":"snapshot"}', true));
+    }
+
+    private function promotion(ShadowDecision $decision, int $requestByte): AutomaticShadowPromotion
+    {
+        return $this->promotionForId($decision->id->binary(), $requestByte);
+    }
+
+    private function promotionForId(
+        string $decisionId,
+        int $requestByte,
+        string $json = '{"mode":"snapshot"}',
+    ): AutomaticShadowPromotion {
+        return new AutomaticShadowPromotion(
+            str_repeat(pack('C', $requestByte), 16),
+            $decisionId,
+            $json,
+            hash('sha256', $json, true),
+        );
     }
 
     private function target(): ShadowTargetEvidence

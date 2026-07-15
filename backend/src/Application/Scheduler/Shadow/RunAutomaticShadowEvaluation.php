@@ -7,7 +7,10 @@ namespace App\Application\Scheduler\Shadow;
 use App\Application\Collector\CollectorLease;
 use App\Application\Inventory\InventoryIdentifier;
 use App\Domain\Scheduler\AutomaticReasonInputs;
+use App\Domain\Scheduler\BackupCandidateWinnerSelector;
 use App\Domain\Scheduler\ByteReasonEvidence;
+use App\Domain\Scheduler\DecisionOutcome;
+use App\Domain\Scheduler\EligibleBackupCandidate;
 use App\Domain\Scheduler\EligibilityEvaluator;
 use App\Domain\Scheduler\EvidenceFreshnessPolicy;
 use App\Domain\Scheduler\GateCode;
@@ -18,6 +21,7 @@ use App\Domain\Scheduler\GateSubjectId;
 use App\Domain\Scheduler\PriorityResolver;
 use App\Domain\Scheduler\ReasonSelector;
 use App\Domain\Scheduler\RequestOrigin;
+use App\Domain\Policy\PolicyPriority;
 use App\Domain\Shared\Clock;
 use DateInterval;
 use DateTimeImmutable;
@@ -39,10 +43,12 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
     public function execute(CollectorLease $lease): ShadowEvaluationPersistenceResult
     {
         $startedAt = $this->clock->now();
-        $decisions = [];
+        /** @var list<array{candidate: AutomaticShadowCandidate, decision: ShadowDecision}> $evaluated */
+        $evaluated = [];
         foreach ($this->source->candidates($lease) as $candidate) {
-            $decisions[] = $this->decision($lease, $candidate, $startedAt);
+            $evaluated[] = ['candidate' => $candidate, 'decision' => $this->decision($lease, $candidate, $startedAt)];
         }
+        [$decisions, $promotions] = $this->selectWinners($evaluated);
         $finishedAt = $this->clock->now();
         $batch = new ShadowEvaluationBatch(
             new ShadowEvaluationRunId($this->stableId('run', $lease->token->binary())),
@@ -51,9 +57,115 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             $startedAt,
             $finishedAt,
             $decisions,
+            $promotions,
         );
 
         return $this->persist->execute($lease, $batch);
+    }
+
+    /**
+     * @param list<array{candidate: AutomaticShadowCandidate, decision: ShadowDecision}> $evaluated
+     * @return array{list<ShadowDecision>, list<AutomaticShadowPromotion>}
+     */
+    private function selectWinners(array $evaluated): array
+    {
+        /** @var array<string, list<EligibleBackupCandidate>> $eligibleByGuest */
+        $eligibleByGuest = [];
+        /** @var array<string, AutomaticShadowCandidate> $candidateByDecision */
+        $candidateByDecision = [];
+        foreach ($evaluated as $item) {
+            $decision = $item['decision'];
+            if (DecisionOutcome::Eligible !== $decision->outcome) {
+                continue;
+            }
+            $reasonPriority = $decision->reasonPriority;
+            if (null === $reasonPriority) {
+                throw new \LogicException('An eligible decision lost its automatic reason.');
+            }
+            $reason = $reasonPriority->reason;
+            $candidate = $item['candidate'];
+            $eligible = new EligibleBackupCandidate(
+                $decision->id->binary(),
+                $decision->guestId->binary(),
+                $decision->policy?->policyId->binary() ?? throw new \LogicException('An eligible decision lost its policy.'),
+                $decision->target?->targetId->binary() ?? throw new \LogicException('An eligible decision lost its target.'),
+                $reason,
+                new PolicyPriority($candidate->policyPriority),
+            );
+            $guest = bin2hex($eligible->guestId);
+            $eligibleByGuest[$guest][] = $eligible;
+            $candidateByDecision[bin2hex($eligible->decisionId)] = $candidate;
+        }
+
+        /** @var array<string, true> $winnerIds */
+        $winnerIds = [];
+        $selector = new BackupCandidateWinnerSelector();
+        foreach ($eligibleByGuest as $candidates) {
+            $selection = $selector->select($candidates);
+            $winnerIds[bin2hex($selection->winner->decisionId)] = true;
+        }
+
+        $decisions = [];
+        $promotions = [];
+        foreach ($evaluated as $item) {
+            $decision = $item['decision'];
+            $decisionHex = $decision->id->toHex();
+            if (DecisionOutcome::Eligible !== $decision->outcome) {
+                $decisions[] = $decision;
+                continue;
+            }
+            if (!isset($winnerIds[$decisionHex])) {
+                $decisions[] = $this->discardedDecision($decision);
+                continue;
+            }
+
+            $candidate = $candidateByDecision[$decisionHex];
+            $json = $candidate->resolvedPolicyJson;
+            if (null === $json) {
+                throw new \LogicException('An eligible winner lacks its canonical resolved policy.');
+            }
+            $decisions[] = $decision;
+            $promotions[] = new AutomaticShadowPromotion(
+                $this->stableId('automatic-request', $decision->id->binary()),
+                $decision->id->binary(),
+                $json,
+                $decision->policy?->snapshotHash() ?? throw new \LogicException('An eligible winner lost its policy hash.'),
+            );
+        }
+
+        return [$decisions, $promotions];
+    }
+
+    private function discardedDecision(ShadowDecision $decision): ShadowDecision
+    {
+        $gates = $decision->gates;
+        $gates[] = new OrderedShadowGate(
+            count($gates) + 1,
+            new GateResult(
+                GateCode::HigherRankedCandidateAbsent,
+                false,
+                GateScope::Request,
+                $this->subject($decision->guestId->binary()),
+                null,
+                GateDetailCode::HigherRankedCandidate,
+            ),
+        );
+
+        return new ShadowDecision(
+            $decision->id,
+            $decision->connectionId,
+            $decision->clusterId,
+            $decision->guestId,
+            $decision->placement,
+            DecisionOutcome::Deduplicated,
+            $decision->reasonPriority,
+            $decision->policy,
+            $decision->target,
+            $decision->inventoryObservedAt,
+            $decision->capacityObservedAt,
+            $decision->writeStateObservedAt,
+            $gates,
+        );
     }
 
     private function decision(

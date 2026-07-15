@@ -41,6 +41,7 @@ final class ClosedDecisionTypesTest extends TestCase
             'placement_present',
             'placement_fresh',
             'active_request_absent',
+            'higher_ranked_candidate_absent',
             'target_node_allowed',
             'target_storage_enabled',
             'target_storage_active',
@@ -61,6 +62,7 @@ final class ClosedDecisionTypesTest extends TestCase
             'passed', 'disabled', 'explicitly_excluded', 'archived', 'missing', 'stale',
             'not_allowed', 'inactive', 'unauthorized', 'insufficient_free_space',
             'concurrency_limit_reached', 'invalid_mapping', 'incompatible', 'active_request_exists',
+            'higher_ranked_candidate',
         ], array_column(GateDetailCode::cases(), 'value'));
     }
 

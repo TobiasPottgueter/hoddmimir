@@ -6,6 +6,8 @@ namespace App\Infrastructure\Persistence\MariaDb;
 
 use App\Application\Collector\CollectorLease;
 use App\Application\Collector\CollectorLeaseOwnershipLost;
+use App\Application\Backup\Queue\ExpectedBackupSize;
+use App\Application\Scheduler\Shadow\AutomaticShadowPromotion;
 use App\Application\Scheduler\Shadow\ShadowDecision;
 use App\Application\Scheduler\Shadow\ShadowEvaluationBatch;
 use App\Application\Scheduler\Shadow\ShadowEvaluationConflict;
@@ -21,8 +23,11 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
 {
     private const string SCHEDULE_NAME = 'inventory';
 
-    public function __construct(private Connection $connection)
+    private ExpectedBackupSize $expectedSizes;
+
+    public function __construct(private Connection $connection, ?ExpectedBackupSize $expectedSizes = null)
     {
+        $this->expectedSizes = $expectedSizes ?? new ExpectedBackupSize();
     }
 
     public function persist(
@@ -62,6 +67,9 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
                     $decisionCount,
                     $gateCount,
                 );
+                foreach ($batch->promotions as $promotion) {
+                    $this->promote($connection, $promotion);
+                }
                 $this->assertFence($connection, $lease, false);
 
                 return $result;
@@ -93,11 +101,206 @@ final readonly class DbalShadowEvaluationStore implements ShadowEvaluationStore
             foreach ($batch->decisions as $offset => $decision) {
                 $this->insertDecision($connection, $batch, $decision, $offset + 1);
             }
+            foreach ($batch->promotions as $promotion) {
+                $this->promote($connection, $promotion);
+            }
 
             $this->assertFence($connection, $lease, false);
 
             return ShadowEvaluationPersistenceResult::Persisted;
         });
+    }
+
+    private function promote(Connection $connection, AutomaticShadowPromotion $promotion): void
+    {
+        $row = $connection->fetchAssociative(<<<'SQL'
+SELECT decision.*, cycle.started_at AS cycle_started_at,
+       guest.provisioned_size_bytes, state.last_success_size_bytes
+FROM scheduler_decisions decision
+JOIN scheduler_evaluation_runs evaluation ON evaluation.id = decision.evaluation_run_id
+JOIN collector_cycles cycle
+  ON cycle.cycle_token = evaluation.cycle_token
+ AND cycle.fencing_token = evaluation.collector_fencing_token
+JOIN guests guest
+  ON guest.connection_id = decision.connection_id
+ AND guest.cluster_id = decision.cluster_id
+ AND guest.id = decision.guest_id
+LEFT JOIN guest_backup_state state
+  ON state.guest_id = decision.guest_id
+ AND state.policy_id = decision.policy_id
+ AND state.target_id = decision.target_id
+WHERE decision.id = :id
+FOR UPDATE
+SQL, ['id' => $promotion->decisionId]);
+        if (false === $row
+            || 'eligible' !== ($row['outcome'] ?? null)
+            || !is_string($row['policy_snapshot_hash'] ?? null)
+            || !hash_equals($promotion->resolvedPolicyHash(), $row['policy_snapshot_hash'])
+            || !is_string($row['cycle_started_at'] ?? null)) {
+            throw new RuntimeException('Only a matching eligible shadow winner can be promoted.');
+        }
+
+        $scheduledAt = $row['cycle_started_at'];
+        $existing = $connection->fetchAssociative(<<<'SQL'
+SELECT * FROM backup_requests
+WHERE shadow_decision_id = :decision
+   OR (policy_id = :policy AND guest_id = :guest AND scheduled_at = :scheduled)
+FOR UPDATE
+SQL, [
+            'decision' => $promotion->decisionId,
+            'policy' => $row['policy_id'],
+            'guest' => $row['guest_id'],
+            'scheduled' => $scheduledAt,
+        ]);
+        if (false !== $existing) {
+            $this->assertExistingPromotion($existing, $row, $promotion, $scheduledAt);
+            $event = $connection->fetchAssociative(
+                "SELECT * FROM backup_request_events WHERE request_id = :request AND sequence_no = 1",
+                ['request' => $promotion->requestId],
+            );
+            $expectedEventId = substr(hash('sha256', 'queue-event'."\0".$promotion->requestId.'1', true), 0, 16);
+            if (false === $event
+                || !is_string($event['id'] ?? null) || !hash_equals($expectedEventId, $event['id'])
+                || !is_string($event['request_id'] ?? null) || !hash_equals($promotion->requestId, $event['request_id'])
+                || 'promoted' !== ($event['event_type'] ?? null)
+                || 'pending' !== ($event['state'] ?? null)
+                || ($event['occurred_at'] ?? null) !== $scheduledAt) {
+                throw new RuntimeException('The existing automatic request lost its promotion event.');
+            }
+
+            return;
+        }
+
+        $expected = $this->expectedSizes->calculate(
+            $this->optionalDecimal($row['last_success_size_bytes'] ?? null),
+            $this->optionalDecimal($row['provisioned_size_bytes'] ?? null),
+        );
+        if (null === $expected) {
+            throw new RuntimeException('Expected backup size evidence is missing.');
+        }
+
+        $connection->insert('backup_requests', [
+            'id' => $promotion->requestId,
+            'root_request_id' => $promotion->requestId,
+            'attempt' => 1,
+            'origin' => 'automatic',
+            'state' => 'pending',
+            'reason' => $this->requiredText($row['reason'] ?? null),
+            'priority' => $this->integer($row, 'priority'),
+            'scheduled_at' => $scheduledAt,
+            'available_at' => $scheduledAt,
+            'connection_id' => $this->requiredBinary($row['connection_id'] ?? null),
+            'cluster_id' => $this->requiredBinary($row['cluster_id'] ?? null),
+            'guest_id' => $this->requiredBinary($row['guest_id'] ?? null),
+            'node_id' => $this->requiredBinary($row['node_id'] ?? null),
+            'placement_revision' => $this->integer($row, 'placement_revision'),
+            'placement_observed_at' => $this->requiredText($row['placement_observed_at'] ?? null),
+            'policy_id' => $this->requiredBinary($row['policy_id'] ?? null),
+            'policy_revision' => $this->integer($row, 'policy_revision'),
+            'target_id' => $this->requiredBinary($row['target_id'] ?? null),
+            'target_revision' => $this->integer($row, 'target_revision'),
+            'shadow_decision_id' => $promotion->decisionId,
+            'resolved_policy_json' => $promotion->resolvedPolicyJson,
+            'resolved_policy_hash' => $promotion->resolvedPolicyHash(),
+            'expected_size_bytes' => $expected->value,
+            'retry_disposition' => 'not_applicable',
+            'submission_provenance' => 'not_submitted',
+            'revision' => 1,
+            'claim_fence' => 0,
+            'created_at' => $scheduledAt,
+            'updated_at' => $scheduledAt,
+        ]);
+        $connection->insert('backup_request_events', [
+            'id' => substr(hash('sha256', 'queue-event'."\0".$promotion->requestId.'1', true), 0, 16),
+            'request_id' => $promotion->requestId,
+            'sequence_no' => 1,
+            'event_type' => 'promoted',
+            'state' => 'pending',
+            'claim_fence' => null,
+            'occurred_at' => $scheduledAt,
+            'detail_code' => null,
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $existing
+     * @param array<string, mixed> $decision
+     */
+    private function assertExistingPromotion(
+        array $existing,
+        array $decision,
+        AutomaticShadowPromotion $promotion,
+        string $scheduledAt,
+    ): void {
+        $binaryFields = [
+            'id' => $promotion->requestId,
+            'root_request_id' => $promotion->requestId,
+            'shadow_decision_id' => $promotion->decisionId,
+            'connection_id' => $decision['connection_id'] ?? null,
+            'cluster_id' => $decision['cluster_id'] ?? null,
+            'guest_id' => $decision['guest_id'] ?? null,
+            'node_id' => $decision['node_id'] ?? null,
+            'policy_id' => $decision['policy_id'] ?? null,
+            'target_id' => $decision['target_id'] ?? null,
+            'resolved_policy_hash' => $promotion->resolvedPolicyHash(),
+        ];
+        foreach ($binaryFields as $field => $expected) {
+            if (!is_string($existing[$field] ?? null) || !is_string($expected)
+                || !hash_equals($expected, $existing[$field])) {
+                throw new RuntimeException('An existing automatic request conflicts with its shadow winner.');
+            }
+        }
+        foreach (['placement_revision', 'policy_revision', 'target_revision', 'priority'] as $field) {
+            if ($this->integer($existing, $field) !== $this->integer($decision, $field)) {
+                throw new RuntimeException('An existing automatic request conflicts with its shadow winner.');
+            }
+        }
+        if ('automatic' !== ($existing['origin'] ?? null)
+            || 1 !== $this->mixedInteger($existing['attempt'] ?? null)
+            || ($existing['reason'] ?? null) !== ($decision['reason'] ?? null)
+            || ($existing['scheduled_at'] ?? null) !== $scheduledAt
+            || ($existing['created_at'] ?? null) !== $scheduledAt
+            || ($existing['resolved_policy_json'] ?? null) !== $promotion->resolvedPolicyJson) {
+            throw new RuntimeException('An existing automatic request conflicts with its shadow winner.');
+        }
+    }
+
+    private function requiredBinary(mixed $value): string
+    {
+        if (!is_string($value) || 16 !== strlen($value)) {
+            throw new RuntimeException('MariaDB returned an invalid automatic request identifier.');
+        }
+        return $value;
+    }
+
+    private function requiredText(mixed $value): string
+    {
+        if (!is_string($value) || '' === $value) {
+            throw new RuntimeException('MariaDB returned invalid automatic request evidence.');
+        }
+        return $value;
+    }
+
+    private function optionalDecimal(mixed $value): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+        if ((is_int($value) && $value >= 0) || (is_string($value) && ctype_digit($value))) {
+            return (string) $value;
+        }
+        throw new RuntimeException('MariaDB returned invalid expected-size evidence.');
+    }
+
+    private function mixedInteger(mixed $value): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && ctype_digit($value)) {
+            return (int) $value;
+        }
+        throw new RuntimeException('MariaDB returned an invalid integer.');
     }
 
     /** @param array<string, mixed> $existing */

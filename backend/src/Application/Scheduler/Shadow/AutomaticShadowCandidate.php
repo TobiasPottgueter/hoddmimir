@@ -52,6 +52,8 @@ final readonly class AutomaticShadowCandidate
         public ?UInt64Decimal $baselineBytes,
         public ?UInt64Decimal $bytesThreshold,
         public ?int $cooldownSeconds,
+        public ?string $resolvedPolicyJson = null,
+        public int $policyPriority = 0,
     ) {
     }
 }

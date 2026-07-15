@@ -8,8 +8,12 @@ use App\Application\Collector\CollectorCycleToken;
 use App\Application\Collector\CollectorLease;
 use App\Application\Collector\CollectorLeaseOwnershipLost;
 use App\Application\Collector\CollectorWorkerId;
+use App\Application\Backup\Queue\ClaimNextBackupCommand;
+use App\Application\Backup\Queue\ExpectedBackupSize;
+use App\Application\Backup\Queue\QueueClaimTokenSource;
 use App\Application\Inventory\InventoryIdentifier;
 use App\Application\Scheduler\Shadow\OrderedShadowGate;
+use App\Application\Scheduler\Shadow\AutomaticShadowPromotion;
 use App\Application\Scheduler\Shadow\ShadowDecision;
 use App\Application\Scheduler\Shadow\ShadowDecisionId;
 use App\Application\Scheduler\Shadow\ShadowEvaluationBatch;
@@ -21,6 +25,7 @@ use App\Application\Scheduler\Shadow\ShadowPlacementEvidence;
 use App\Application\Scheduler\Shadow\ShadowPolicyEvidence;
 use App\Application\Scheduler\Shadow\ShadowTargetEvidence;
 use App\Domain\Scheduler\BackupReason;
+use App\Domain\Scheduler\EvidenceFreshnessPolicy;
 use App\Domain\Scheduler\DecisionOutcome;
 use App\Domain\Scheduler\GateCode;
 use App\Domain\Scheduler\GateDetailCode;
@@ -30,9 +35,11 @@ use App\Domain\Scheduler\GateSubjectId;
 use App\Domain\Scheduler\Priority;
 use App\Domain\Scheduler\ReasonPriority;
 use App\Infrastructure\Persistence\MariaDb\DbalShadowEvaluationStore;
+use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
 use DateTimeImmutable;
 use DateTimeZone;
 use Doctrine\DBAL\DriverManager;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Throwable;
 
 final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
@@ -80,6 +87,126 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             self::fail('A changed replay must not be accepted.');
         } catch (ShadowEvaluationConflict $conflict) {
             self::assertSame(ShadowEvaluationConflictCode::PayloadMismatch, $conflict->failureCode);
+        }
+    }
+
+    public function testEligibleWinnerIsPromotedAtomicallyFromCollectorStartAndReplayIsExact(): void
+    {
+        $store = new DbalShadowEvaluationStore($this->connection());
+        $batch = $this->batch('promoted-run', withPromotion: true);
+
+        self::assertSame(ShadowEvaluationPersistenceResult::Persisted, $store->persist($this->lease, $batch));
+        self::assertSame(ShadowEvaluationPersistenceResult::AlreadyPersisted, $store->persist($this->lease, $batch));
+        $request = $this->connection()->fetchAssociative('SELECT * FROM backup_requests');
+        self::assertIsArray($request);
+        self::assertSame('automatic', $request['origin']);
+        self::assertSame('pending', $request['state']);
+        self::assertSame('never_backed_up', $request['reason']);
+        self::assertSame('300', $this->numericString($request['priority'] ?? null));
+        self::assertSame(self::format($this->now), $request['scheduled_at']);
+        self::assertSame(self::format($this->now), $request['available_at']);
+        self::assertSame(self::format($this->now), $request['created_at']);
+        self::assertSame('{"mode":"snapshot"}', $request['resolved_policy_json']);
+        self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
+        self::assertSame('1', $this->numericString($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_request_events WHERE event_type='promoted'")));
+    }
+
+    public function testExecutionDisabledLeavesAutomaticallyPromotedRequestPendingAndUnclaimed(): void
+    {
+        $requestId = self::bytes('request-disabled-execution-run');
+        (new DbalShadowEvaluationStore($this->connection()))->persist(
+            $this->lease,
+            $this->batch('disabled-execution-run', withPromotion: true),
+        );
+        $tokens = new class implements QueueClaimTokenSource {
+            public function next(): string { return str_repeat('t', 16); }
+        };
+        $queue = new DbalBackupQueueStore(
+            $this->connection(),
+            $tokens,
+            new ExpectedBackupSize(),
+            new EvidenceFreshnessPolicy(),
+        );
+
+        self::assertNull($queue->claim(new ClaimNextBackupCommand(
+            self::bytes('disabled-worker'),
+            $this->now,
+            allowNewClaims: false,
+        )));
+        self::assertSame('pending', $this->connection()->fetchOne('SELECT state FROM backup_requests'));
+        self::assertSame('0', $this->numericString($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_runs WHERE request_id = :request_id',
+            ['request_id' => $requestId],
+            ['request_id' => \Doctrine\DBAL\ParameterType::BINARY],
+        )));
+    }
+
+    public function testReplayAcceptsLegitimateQueueProgressAfterPromotion(): void
+    {
+        $store = new DbalShadowEvaluationStore($this->connection());
+        $batch = $this->batch('progressed-replay', withPromotion: true);
+        $store->persist($this->lease, $batch);
+        $availableAt = self::format($this->now->modify('+1 minute'));
+        $this->connection()->update('backup_requests', [
+            'state' => 'retry_wait',
+            'available_at' => $availableAt,
+            'updated_at' => $availableAt,
+        ], []);
+
+        self::assertSame(ShadowEvaluationPersistenceResult::AlreadyPersisted, $store->persist($this->lease, $batch));
+        self::assertSame('retry_wait', $this->connection()->fetchOne('SELECT state FROM backup_requests'));
+        self::assertSame($availableAt, $this->connection()->fetchOne('SELECT available_at FROM backup_requests'));
+    }
+
+    #[DataProvider('corruptedPromotionReplayProvider')]
+    public function testChangedPromotionReplayFailsClosed(string $case): void
+    {
+        $store = new DbalShadowEvaluationStore($this->connection());
+        $batch = $this->batch('corrupt-'.$case, withPromotion: true);
+        $store->persist($this->lease, $batch);
+
+        match ($case) {
+            'created' => $this->connection()->update('backup_requests', ['created_at' => self::format($this->now->modify('-1 second'))], []),
+            'event-id' => $this->connection()->update('backup_request_events', ['id' => self::bytes('corrupt-event')], []),
+            default => throw new \LogicException('Unknown corrupted promotion replay case.'),
+        };
+
+        try {
+            $store->persist($this->lease, $batch);
+            self::fail('A changed automatic promotion replay must fail closed.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame(
+                'event-id' === $case
+                    ? 'The existing automatic request lost its promotion event.'
+                    : 'An existing automatic request conflicts with its shadow winner.',
+                $failure->getMessage(),
+            );
+        }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function corruptedPromotionReplayProvider(): iterable
+    {
+        foreach (['created', 'event-id'] as $case) {
+            yield $case => [$case];
+        }
+    }
+
+    public function testPromotionPreparationFailureRollsBackShadowDecisionAndRequestTogether(): void
+    {
+        $this->connection()->update('guests', ['provisioned_size_bytes' => null], ['id' => $this->guestId->binary()]);
+        try {
+            (new DbalShadowEvaluationStore($this->connection()))->persist(
+                $this->lease,
+                $this->batch('rollback-run', withPromotion: true),
+            );
+            self::fail('Missing promotion evidence must abort the whole shadow commit.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('Expected backup size evidence is missing.', $failure->getMessage());
+            self::assertSame('0', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM scheduler_evaluation_runs')));
+            self::assertSame('0', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM scheduler_decisions')));
+            self::assertSame('0', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
+            self::assertSame('0', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_request_events')));
         }
     }
 
@@ -198,7 +325,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             self::markTestSkipped('pcntl is required for the shadow concurrency proof.');
         }
 
-        $batch = $this->batch('concurrent-run');
+        $batch = $this->batch('concurrent-run', withPromotion: true);
         $parameters = $this->connection()->getParams();
         $this->connection()->commit();
         /** @var list<array{int, resource}> $children */
@@ -220,6 +347,8 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             self::assertSame('1', $this->numericString(
                 $this->connection()->fetchOne('SELECT COUNT(*) FROM scheduler_evaluation_runs'),
             ));
+            self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests')));
+            self::assertSame('1', $this->numericString($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_request_events')));
         } finally {
             $this->cleanupCommittedFixture();
         }
@@ -229,8 +358,10 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
         string $runLabel,
         int $evaluatorVersion = 1,
         ?InventoryIdentifier $guestId = null,
+        bool $withPromotion = false,
     ): ShadowEvaluationBatch {
         $placementObservedAt = $this->now->modify('-4 seconds');
+        $policyJson = '{"mode":"snapshot"}';
         $decision = new ShadowDecision(
             new ShadowDecisionId(self::bytes('decision-'.$runLabel)),
             $this->connectionId,
@@ -239,7 +370,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             new ShadowPlacementEvidence($this->nodeId, 1, $placementObservedAt),
             DecisionOutcome::Eligible,
             new ReasonPriority(BackupReason::NeverBackedUp, Priority::NeverBackedUp),
-            new ShadowPolicyEvidence(self::id('policy'), 1, hash('sha256', 'policy', true)),
+            new ShadowPolicyEvidence(self::id('policy'), 1, hash('sha256', $withPromotion ? $policyJson : 'policy', true)),
             new ShadowTargetEvidence(self::id('target'), 1),
             $this->now->modify('-4 seconds'),
             $this->now->modify('-3 seconds'),
@@ -254,6 +385,13 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             ))],
         );
 
+        $promotion = new AutomaticShadowPromotion(
+            self::bytes('request-'.$runLabel),
+            $decision->id->binary(),
+            $policyJson,
+            hash('sha256', $policyJson, true),
+        );
+
         return new ShadowEvaluationBatch(
             new ShadowEvaluationRunId(self::bytes($runLabel)),
             $this->lease->token,
@@ -261,6 +399,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             $this->now->modify('-2 seconds'),
             $this->now->modify('-1 second'),
             [$decision],
+            $withPromotion ? [$promotion] : [],
         );
     }
 
@@ -416,6 +555,7 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
             'vmid' => 100,
             'name' => 'guest-a',
             'is_template' => 0,
+            'provisioned_size_bytes' => '1000',
             'inventory_state' => 'active',
             'first_seen_run_id' => $runId->binary(),
             'last_seen_run_id' => $runId->binary(),
@@ -486,14 +626,20 @@ final class DbalShadowEvaluationStoreTest extends DatabaseTestCase
 
     private function cleanupCommittedFixture(): void
     {
-        foreach ([
-            'scheduler_decision_gates', 'scheduler_decisions', 'scheduler_evaluation_runs',
-            'backup_policy_guest_overrides', 'backup_policy_assignments', 'backup_policies',
-            'backup_target_allowed_nodes', 'backup_targets', 'pve_storages',
-            'guests', 'pve_nodes', 'pve_clusters', 'inventory_sync_runs',
-            'proxmox_connections', 'collector_cycles', 'collector_schedule', 'worker_heartbeats',
-        ] as $table) {
-            $this->connection()->executeStatement('DELETE FROM '.$table);
+        $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            foreach ([
+                'backup_request_events', 'backup_requests',
+                'scheduler_decision_gates', 'scheduler_decisions', 'scheduler_evaluation_runs',
+                'backup_policy_guest_overrides', 'backup_policy_assignments', 'backup_policies',
+                'backup_target_allowed_nodes', 'backup_targets', 'pve_storages',
+                'guests', 'pve_nodes', 'pve_clusters', 'inventory_sync_runs',
+                'proxmox_connections', 'collector_cycles', 'collector_schedule', 'worker_heartbeats',
+            ] as $table) {
+                $this->connection()->executeStatement('DELETE FROM '.$table);
+            }
+        } finally {
+            $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         }
     }
 

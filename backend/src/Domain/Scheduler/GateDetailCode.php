@@ -20,4 +20,5 @@ enum GateDetailCode: string
     case InvalidMapping = 'invalid_mapping';
     case Incompatible = 'incompatible';
     case ActiveRequestExists = 'active_request_exists';
+    case HigherRankedCandidate = 'higher_ranked_candidate';
 }

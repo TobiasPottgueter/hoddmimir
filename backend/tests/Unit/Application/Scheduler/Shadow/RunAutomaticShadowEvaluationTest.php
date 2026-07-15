@@ -75,6 +75,53 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         self::assertSame(DecisionOutcome::Eligible, $decision->outcome);
         self::assertTrue($decision->gates[20]->result->passed);
         self::assertTrue($decision->gates[21]->result->passed);
+        self::assertCount(1, $store->batches[0]->promotions);
+        self::assertSame($decision->id->binary(), $store->batches[0]->promotions[0]->decisionId);
+    }
+
+    public function testPerGuestWinnerUsesReasonBeforePolicyPriorityAndExplainsTheLoser(): void
+    {
+        $store = new CapturingShadowStore();
+        $this->service(new RecordingAutomaticShadowSource([
+            $this->candidate(policyId: str_repeat('a', 16), policyPriority: 1),
+            $this->candidate(
+                lastSuccessAt: new DateTimeImmutable('2026-07-12T09:00:00Z'),
+                maximumAgeSeconds: 3600,
+                policyId: str_repeat('b', 16),
+                policyPriority: 1000,
+            ),
+        ]), $store, new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
+
+        $batch = $store->batches[0];
+        self::assertCount(1, $batch->promotions);
+        $winner = array_values(array_filter($batch->decisions, static fn ($decision): bool => DecisionOutcome::Eligible === $decision->outcome))[0];
+        $loser = array_values(array_filter($batch->decisions, static fn ($decision): bool => DecisionOutcome::Deduplicated === $decision->outcome))[0];
+        self::assertSame('never_backed_up', $winner->reasonPriority?->reason->value);
+        self::assertSame($winner->id->binary(), $batch->promotions[0]->decisionId);
+        self::assertSame('higher_ranked_candidate_absent', $loser->gates[24]->result->code->value);
+        self::assertSame('higher_ranked_candidate', $loser->gates[24]->result->detailCode->value);
+    }
+
+    public function testPerGuestWinnerUsesPolicyPriorityThenStablePolicyId(): void
+    {
+        foreach ([
+            'policy priority' => [
+                $this->candidate(policyId: str_repeat('z', 16), policyPriority: 900),
+                $this->candidate(policyId: str_repeat('a', 16), policyPriority: 100),
+                str_repeat('z', 16),
+            ],
+            'stable policy id' => [
+                $this->candidate(policyId: str_repeat('z', 16), policyPriority: 100),
+                $this->candidate(policyId: str_repeat('a', 16), policyPriority: 100),
+                str_repeat('a', 16),
+            ],
+        ] as [$left, $right, $expectedPolicy]) {
+            $store = new CapturingShadowStore();
+            $this->service(new RecordingAutomaticShadowSource([$left, $right]), $store, new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
+            $winner = array_values(array_filter($store->batches[0]->decisions, static fn ($decision): bool => DecisionOutcome::Eligible === $decision->outcome))[0];
+            self::assertSame($expectedPolicy, $winner->policy?->policyId->binary());
+            self::assertCount(1, $store->batches[0]->promotions);
+        }
     }
 
     public function testStaleAndUnauthorizedExecutorEvidenceRemainDistinctClosedBlockers(): void
@@ -258,12 +305,15 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         bool $nodeConcurrencyAvailable = true,
         bool $targetConcurrencyAvailable = true,
         bool $policyRetentionCompatible = true,
+        ?string $policyId = null,
+        int $policyPriority = 0,
     ): AutomaticShadowCandidate {
         $id = static fn (string $value): string => substr(hash('sha256', $value, true), 0, 16);
         $at = new DateTimeImmutable('2026-07-12T10:00:00Z');
+        $json = '{"mode":"snapshot"}';
         return new AutomaticShadowCandidate(
             $id('connection'), true, $id('cluster'), true, $id('guest'), $guestActive, $guestTemplate, $at,
-            $placementPresent ? $id('node') : null, true, $placementPresent ? 2 : null, $placementPresent ? $at : null, $id('policy'), 3, true, $policyRetentionCompatible, hash('sha256', 'policy', true),
+            $placementPresent ? $id('node') : null, true, $placementPresent ? 2 : null, $placementPresent ? $at : null, $policyId ?? $id('policy'), 3, true, $policyRetentionCompatible, $policyRetentionCompatible ? hash('sha256', $json, true) : hash('sha256', 'policy', true),
             true, false, $id('target'), 4, true, true, true, true, $at,
             null === $availableBytes ? null : new UInt64Decimal((string) $availableBytes),
             null === $minimumFreeBytes ? null : new UInt64Decimal((string) $minimumFreeBytes),
@@ -272,6 +322,8 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
             null === $currentBytes ? null : new UInt64Decimal((string) $currentBytes), $at,
             null === $baselineBytes ? null : new UInt64Decimal((string) $baselineBytes),
             null === $bytesThreshold ? null : new UInt64Decimal((string) $bytesThreshold), $cooldownSeconds,
+            $policyRetentionCompatible ? $json : null,
+            $policyPriority,
         );
     }
 }

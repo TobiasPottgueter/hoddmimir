@@ -36,8 +36,12 @@ final readonly class EligibilityEvaluator
 
         $onlyDuplicateFailures = true;
         foreach ($failures as $failure) {
-            if (GateCode::ActiveRequestAbsent !== $failure->code
-                || GateDetailCode::ActiveRequestExists !== $failure->detailCode) {
+            if (!(
+                (GateCode::ActiveRequestAbsent === $failure->code
+                    && GateDetailCode::ActiveRequestExists === $failure->detailCode)
+                || (GateCode::HigherRankedCandidateAbsent === $failure->code
+                    && GateDetailCode::HigherRankedCandidate === $failure->detailCode)
+            )) {
                 $onlyDuplicateFailures = false;
             }
         }

@@ -225,6 +225,8 @@ SQL, [
             $this->decimal($row['current_bytes'] ?? null), $this->date($row['write_state_observed_at'] ?? null),
             $this->decimal($row['baseline_bytes'] ?? null), $this->decimal($row['bytes_written_threshold'] ?? null),
             $this->int($row['cooldown_seconds'] ?? null),
+            $policyEvidence['json'],
+            $this->int($row['policy_priority'] ?? null) ?? 0,
         );
     }
 
@@ -268,7 +270,7 @@ SQL, [
         return false === $date ? null : $date;
     }
     /** @param array<string, mixed> $row
-     *  @return array{hash: string, compatible: bool}
+     *  @return array{hash: string, compatible: bool, json: ?string}
      */
     private function resolvedPolicyEvidence(array $row): array {
         $policyRetention = $this->retention($row, '');
@@ -282,7 +284,7 @@ SQL, [
                 'pveMajor' => $pveMajor,
                 'retention' => $retention->signature(),
             ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-            return ['hash' => hash('sha256', "incompatible-policy-retention\0".$evidence, true), 'compatible' => false];
+            return ['hash' => hash('sha256', "incompatible-policy-retention\0".$evidence, true), 'compatible' => false, 'json' => null];
         }
         $resolved = new ResolvedBackupPolicy(
             new PolicyId($this->binary($row['policy_id'] ?? null)),
@@ -300,9 +302,11 @@ SQL, [
             Schedule::from($this->text($row['schedule'] ?? null)),
             $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),
         );
+        $json = $resolved->canonicalJson();
         return [
-            'hash' => hex2bin($resolved->snapshotHash()) ?: throw new RuntimeException('The resolved policy hash is invalid.'),
+            'hash' => hash('sha256', $json, true),
             'compatible' => true,
+            'json' => $json,
         ];
     }
     private function failureRecipients(mixed $value): FailureNotificationRecipients {

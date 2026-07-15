@@ -130,7 +130,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(27, $versions);
+        self::assertCount(28, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -185,6 +185,8 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260712002100', $versions[25]);
         self::assertIsString($versions[26]);
         self::assertStringEndsWith('Version20260712002200', $versions[26]);
+        self::assertIsString($versions[27]);
+        self::assertStringEndsWith('Version20260715000100', $versions[27]);
     }
 
     public function testBackupRunLogsPreserveTheCompleteTypedPveLineBoundary(): void
