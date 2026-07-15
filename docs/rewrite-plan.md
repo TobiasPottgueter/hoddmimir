@@ -650,14 +650,16 @@ erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
 
-Status: **Fachlogik, Administration und Shadow-Auswertung sind lokal
-implementiert; der Abschluss ist nach einem Auditfund wieder offen.** Die
-automatische, transaktionale und idempotente Promotion des ausgewählten
-Shadow-Gewinners in `backup_requests` ist auf dem dokumentierten
-Phase-7-Zwischenstand nicht vollständig in den Collectorpfad integriert. Der
-Fix läuft, gilt aber erst nach Unit-/MariaDB-/Crash-/Fencing-Nachweis,
-Integration und erneuter CI als belegt. Live-/Betriebsnachweise bleiben Phase 7. Der detaillierte Vertrag einschließlich Sicherheitsgrenzen und festgelegter
-Fachentscheidungen steht in
+Status: **lokal implementiert und abgenommen; der erneute Release-/Live-Nachweis
+bleibt Phase 7.** Der im Audit gefundene fehlende Produktionspfad ist
+geschlossen: Die automatische Gewinnerauswahl und Promotion nach
+`backup_requests` erfolgt deterministisch, gefencet und gemeinsam mit
+Shadow-Run, Entscheidungen, Gates und erstem Queue-Event in einer
+MariaDB-Transaktion. Unit-, echte MariaDB-, Rollback-, Concurrency-, Fencing-,
+Replay- und `execution=false`-Tests belegen den lokalen Vertrag. Vollständige
+CI, finaler AMD64-Kandidat und Labnachweis bleiben Phase 7. Der detaillierte
+Vertrag einschließlich Sicherheitsgrenzen und festgelegter Fachentscheidungen
+steht in
 [`phase-4-policy-shadow-plan.md`](phase-4-policy-shadow-plan.md).
 
 - reine Domain-Services für Eligibility, Gründe, Priorität, Vererbung und Limits.
@@ -666,10 +668,9 @@ Fachentscheidungen steht in
 - Shadow Mode berechnet Entscheidungen, startet aber keine Backups.
 - Vergleich der neuen Entscheidungen mit den fachlichen Regeln der bisherigen Funktionsweise und dokumentierte Verbesserungen.
 
-Abnahme: Administration, Auswahl-, Prioritäts- und Grenzregeln sowie die
-erklärbare Shadow-Auswertung sind lokal getestet. Der Phase-4-Abschluss bleibt
-bis zur belegten automatischen Gewinnerpromotion und der anschließenden
-Live-Abnahme offen.
+Abnahme: Administration, Auswahl-, Prioritäts- und Grenzregeln, erklärbare
+Shadow-Auswertung und automatische atomare Gewinnerpromotion sind lokal
+getestet. Der Release-/Betriebsnachweis erfolgt in Phase 7.
 
 ### Phase 5 – Backup Worker und UPID-Monitoring
 
@@ -711,8 +712,9 @@ Endpunktzertifikate. Der fortschreibbare Evidenzstand steht in
 [`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
 
 Noch offen sind der finale Kandidat, Laufzeit-Tokens, verified-only
-Hoddmímir-Onboarding, die API-Live-Matrix, automatischer Inventar-Sync,
-Automatic-Shadow-Promotion, Shadow-Zyklus, Matrix-Zustellung, alle realen
+Hoddmímir-Onboarding, die API-Live-Matrix, automatischer Inventar-Sync, der
+finale CI-/Labnachweis der Automatic-Shadow-Promotion, Shadow-Zyklus,
+Matrix-Zustellung, alle realen
 Backup-/Fehler-Mutationen und Produktions-Onboarding. Die vorbereitete
 Labtopologie und ihre Freigabe ersetzen keinen dieser Ausführungsnachweise.
 

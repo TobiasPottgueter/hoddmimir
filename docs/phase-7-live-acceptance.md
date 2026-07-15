@@ -15,9 +15,10 @@ TLS-Zertifikate bestätigt.
 Es wurden weiterhin **keine Laufzeit-Tokens erzeugt oder an Hoddmímir
 übergeben, keine Verbindung aktiviert, kein automatischer Hoddmímir-Scan und
 kein Backupstart oder anderer Fault-/Mutationsfall ausgeführt**. Ein realer
-Matrix-Webhook ist ebenfalls noch nicht abgenommen. Der laufende Fix für die
-automatische Promotion geeigneter Shadow-Entscheidungen in die Queue ist noch
-kein belegter Bestandteil eines finalen Kandidaten.
+Matrix-Webhook ist ebenfalls noch nicht abgenommen. Die automatische Promotion
+geeigneter Shadow-Entscheidungen in die Queue ist lokal integriert und mit
+Unit- sowie MariaDB-Tests belegt, aber noch kein veröffentlichter oder im Lab
+ausgerollter Bestandteil eines finalen Kandidaten.
 
 Dieser fortschreibbare Evidenzbericht konkretisiert Phase 7 aus dem
 [`rewrite-plan.md`](rewrite-plan.md). Die lokale Implementierung und ihre
@@ -33,8 +34,8 @@ Planung, Fixtures, Mocks und lokale Tests ersetzen keinen Live-Nachweis.
 - bereits ausgerollte Zwischenstände belegen Deployment- und
   Isolationsverträge, ersetzen aber weder die Freigabe des finalen Kandidaten
   noch dessen vollständige Quality Gates;
-- der noch laufende Automatic-Shadow-Promotion-Fix bleibt bis zu Integration,
-  MariaDB-/Unit-Nachweis, CI und erneutem Deployment ausdrücklich offen;
+- die lokal integrierte Automatic-Shadow-Promotion bleibt bis zu vollständiger
+  CI und erneutem Deployment als Release-/Live-Nachweis ausdrücklich offen;
 - die Backupausführung des produktionsnahen Stacks bleibt bis zur ausdrücklich
   getrennten Phase-8-Freigabe deaktiviert.
 
@@ -231,10 +232,11 @@ benötigen ausdrücklich freigegebene Lab-Systeme.
 
 ### 5. Automatischer Inventar-Sync und Shadow-Parallelbetrieb
 
-- [ ] Den Automatic-Shadow-Promotion-Fix integrieren und auf demselben finalen
-      Kandidaten mit Unit-, echter MariaDB-, Fencing-, Crash- und
-      Idempotenznachweisen abnehmen. Der laufende Implementierungsstand ist
-      noch kein grüner Nachweis.
+- [x] Den Automatic-Shadow-Promotion-Fix integrieren und lokal mit Unit-, echter
+      MariaDB-, Fencing-, Rollback-, Concurrency- und Idempotenznachweisen
+      abnehmen.
+- [ ] Den integrierten Promotion-Pfad auf dem finalen Kandidaten durch die
+      vollständige CI und anschließend im isolierten Lab nachweisen.
 - [ ] Nach dem Onboarding den ersten vollständigen automatischen Scan am
       nächsten regulären Rasterpunkt abwarten; kein manueller oder versteckter
       Wizard-Scan ist zulässig.
@@ -366,8 +368,8 @@ Phase 7 hat jetzt reale, aber klar begrenzte Evidenz: Host-Bootstrap,
 isolierter gesunder Labstack, read-only Labtopologie und der sichere
 Onboarding-Preflight sind belegt. Sie ist nicht abgeschlossen: finaler
 Kandidat und Gates, Laufzeit-Tokens, Hoddmímir-Onboarding, API-Live-Matrix,
-automatischer Inventar-Sync, automatische Shadow-Queue-Promotion,
-Shadow-Parallelbetrieb, Matrix-Zustellung, die komplette isolierte
+automatischer Inventar-Sync, finaler Release-/Live-Nachweis der automatischen
+Shadow-Queue-Promotion, Shadow-Parallelbetrieb, Matrix-Zustellung, die komplette isolierte
 Backup-/Fehler-Labmatrix und Produktions-Onboarding fehlen noch. Insbesondere
 wird weder ein Hoddmímir-Live-Scan noch eine Proxmox-Schreiboperation oder ein
 Backup-Erfolg behauptet.
