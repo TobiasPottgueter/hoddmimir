@@ -1,5 +1,10 @@
 # Phase-7 PVE fault proxy
 
+Status as of 15 July 2026: the harness and its local contract tests are
+available, but no live PVE fault-injection run has been accepted yet. The
+authoritative progress boundary is tracked in
+[`docs/phase-7-live-acceptance.md`](../../docs/phase-7-live-acceptance.md).
+
 This directory contains a lab-only, Python-standard-library TLS proxy for the
 two ambiguous write-response tests in Phase 7. It is not imported by an
 application component, included in an application image, or installed by the

@@ -1,6 +1,6 @@
 # Rewrite-Plan: Hoddmímir 2.0
 
-Stand: 13. Juli 2026
+Stand: 15. Juli 2026
 
 ## 1. Ziel und verbindlicher Scope
 
@@ -650,9 +650,14 @@ erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
 
-Status: **lokal implementiert und abgenommen; Live-/Betriebsnachweise bleiben
-Phase 7.** Der detaillierte Vertrag einschließlich Sicherheitsgrenzen und
-festgelegter Fachentscheidungen steht in
+Status: **Fachlogik, Administration und Shadow-Auswertung sind lokal
+implementiert; der Abschluss ist nach einem Auditfund wieder offen.** Die
+automatische, transaktionale und idempotente Promotion des ausgewählten
+Shadow-Gewinners in `backup_requests` ist auf dem dokumentierten
+Phase-7-Zwischenstand nicht vollständig in den Collectorpfad integriert. Der
+Fix läuft, gilt aber erst nach Unit-/MariaDB-/Crash-/Fencing-Nachweis,
+Integration und erneuter CI als belegt. Live-/Betriebsnachweise bleiben Phase 7. Der detaillierte Vertrag einschließlich Sicherheitsgrenzen und festgelegter
+Fachentscheidungen steht in
 [`phase-4-policy-shadow-plan.md`](phase-4-policy-shadow-plan.md).
 
 - reine Domain-Services für Eligibility, Gründe, Priorität, Vererbung und Limits.
@@ -661,7 +666,10 @@ festgelegter Fachentscheidungen steht in
 - Shadow Mode berechnet Entscheidungen, startet aber keine Backups.
 - Vergleich der neuen Entscheidungen mit den fachlichen Regeln der bisherigen Funktionsweise und dokumentierte Verbesserungen.
 
-Abnahme: Die vier Funktionen aus Abschnitt 1.1 sind vollständig bedienbar; sämtliche Auswahl-, Prioritäts- und Grenzregeln sind unitgetestet und der Shadow Mode ist erklärbar und stabil.
+Abnahme: Administration, Auswahl-, Prioritäts- und Grenzregeln sowie die
+erklärbare Shadow-Auswertung sind lokal getestet. Der Phase-4-Abschluss bleibt
+bis zur belegten automatischen Gewinnerpromotion und der anschließenden
+Live-Abnahme offen.
 
 ### Phase 5 – Backup Worker und UPID-Monitoring
 
@@ -694,11 +702,19 @@ Abnahme: alle kritischen Bedienabläufe sind component- und end-to-end-getestet.
 
 ### Phase 7 – Neueinrichtung und produktionsnaher Parallelbetrieb
 
-Status: **begonnen, nicht abgeschlossen.** Der reale Host-Bootstrap und der
-fortschreibbare Evidenzstand stehen in
-[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md). Release-Images,
-Anwendungsdeploy, neue Proxmox-Konfiguration, Live-Matrix, Shadow-Zyklus und
-isolierte Labbackups bleiben bis zu ihrem tatsächlichen Nachweis offen.
+Status: **begonnen, nicht abgeschlossen.** Der reale Host-Bootstrap, ein
+isolierter gesunder Vier-Service-Labstack und die read-only geprüfte
+Labgrundlage sind belegt. Diese umfasst drei PVE-Cluster der Major-Versionen
+7, 8 und 9 mit insgesamt neun Nodes und 18 Wegwerfgästen sowie PBS 3 und PBS 4. Der read-only Onboarding-Preflight bestätigt 5/5
+Identitäts-/Versions-/Revoke-Verträge und 11/11 lokal gepinnte
+Endpunktzertifikate. Der fortschreibbare Evidenzstand steht in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
+
+Noch offen sind der finale Kandidat, Laufzeit-Tokens, verified-only
+Hoddmímir-Onboarding, die API-Live-Matrix, automatischer Inventar-Sync,
+Automatic-Shadow-Promotion, Shadow-Zyklus, Matrix-Zustellung, alle realen
+Backup-/Fehler-Mutationen und Produktions-Onboarding. Die vorbereitete
+Labtopologie und ihre Freigabe ersetzen keinen dieser Ausführungsnachweise.
 
 - leere V2-Datenbank installieren.
 - produktionsnahes Deployment über die vorbereitete Ansible-Automation

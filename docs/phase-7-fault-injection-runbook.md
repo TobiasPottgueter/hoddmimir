@@ -1,5 +1,14 @@
 # Phase-7: deterministische PVE-Fehlerinjektion
 
+Stand: 15. Juli 2026
+
+Status: **Harness und lokaler Contract sind vorbereitet; noch kein Live-Fall
+ausgeführt.** Die freigegebene Labtopologie und ihre Wegwerfgäste sind
+read-only bestätigt, aber Laufzeit-Tokens, Hoddmímir-Onboarding, echter
+Matrix-Webhook und finaler Kandidat fehlen noch. Weder der mehrdeutige
+`vzdump`-Start noch der Cancel-Fall oder eine andere Mutation darf deshalb in
+der Live-Acceptance als belegt markiert werden.
+
 ## Zweck und Grenze
 
 Der Harness unter [`lab/fault-proxy`](../lab/fault-proxy/README.md) ist
