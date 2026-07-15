@@ -370,9 +370,13 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 f"da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:{line}"
                 for line in range(4, 11)
             },
+            *{
+                f"3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:{line}"
+                for line in (3, 11, 12, 13, 14, 15)
+            },
         }
 
-        self.assertLessEqual(len(entries), 9)
+        self.assertLessEqual(len(entries), 15)
         self.assertEqual(expected, entries)
 
 
