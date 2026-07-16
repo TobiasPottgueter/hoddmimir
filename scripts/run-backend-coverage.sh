@@ -204,7 +204,8 @@ run_core() {
             --configuration phpunit.coverage-core.xml.dist \
             --coverage-php coverage/core.cov \
             --coverage-clover coverage/core.clover.xml \
-            --coverage-text
+            --coverage-text \
+            --only-summary-for-coverage-text
     assert_safe_artifact "$CORE_COVERAGE" 'Core PHP coverage artifact'
     assert_safe_artifact "$CORE_CLOVER" 'Core Clover report'
     assert_image_identity

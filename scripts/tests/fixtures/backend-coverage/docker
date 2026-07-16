@@ -80,7 +80,7 @@ case "${1:-}" in
         fi
         exit "$status"
         ;;
-    *' vendor/bin/phpunit --configuration phpunit.coverage-core.xml.dist '*'--coverage-php coverage/core.cov '*'--coverage-clover coverage/core.clover.xml '* )
+    *' vendor/bin/phpunit --configuration phpunit.coverage-core.xml.dist '*'--coverage-php coverage/core.cov '*'--coverage-clover coverage/core.clover.xml '*'--coverage-text --only-summary-for-coverage-text '* )
         status=${FAKE_CORE_COVERAGE_STATUS:-0}
         if [ "$status" -eq 0 ]; then
             mkdir -p backend/coverage

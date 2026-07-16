@@ -62,6 +62,13 @@ class BackendCoverageWorkflowContractTest(unittest.TestCase):
         self.assertIn("integration.clover.xml", mariadb)
         self.assertIn("integration-manifest.json", mariadb)
 
+    def test_core_coverage_timeout_is_exactly_35_minutes(self) -> None:
+        core = self.job("backend-coverage-core")
+        self.assertEqual(
+            re.findall(r"^    timeout-minutes: (\d+)$", core, flags=re.MULTILINE),
+            ["35"],
+        )
+
     def test_stable_backend_gate_requires_and_composes_every_producer(self) -> None:
         backend = self.job("backend")
         self.assertIn("name: Backend", backend)

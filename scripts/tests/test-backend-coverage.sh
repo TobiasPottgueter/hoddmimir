@@ -54,6 +54,7 @@ grep -F 'tools/compose-owned-coverage.php compose' "$SUBJECT" >/dev/null \
     || fail 'coverage wrapper does not compose disjoint owned reports'
 grep -F '"$REPOSITORY_ROOT/scripts/test-backend-integration.sh" --coverage' "$SUBJECT" >/dev/null \
     || fail 'coverage wrapper does not delegate MariaDB coverage to the isolated integration stack'
+assert_count 1 '^[[:space:]]*--only-summary-for-coverage-text$' "$SUBJECT"
 if grep -E 'CodeCoverage::merge|merge-coverage|render-coverage|combined\.cov|phpunit\.coverage\.xml' "$SUBJECT" >/dev/null; then
     fail 'coverage wrapper contains obsolete or unsafe report merge logic'
 fi
