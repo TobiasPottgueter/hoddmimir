@@ -174,6 +174,45 @@ final class RefreshExecutorPermissionEvidenceTest extends TestCase
         self::assertSame([ExecutorEvidenceRefreshFailureCode::InvalidResponse], $store->failures);
     }
 
+    public function testMaximumSingletonPagesAndTerminatingEmptyPageAreAccepted(): void
+    {
+        $store = new RefreshStore($this->claim(singleEndpoint: true), [
+            [$this->subject(101)],
+            [$this->subject(102)],
+            [],
+        ]);
+        $service = new RefreshExecutorPermissionEvidence(
+            $store, new RefreshSource([$this->snapshot(self::ENDPOINT_A)]),
+            new ProjectExecutorPermissionEvidence(), new RefreshClock(), 1, 2,
+        );
+
+        self::assertSame(ExecutorEvidenceRefreshStatus::Published, $service->refreshDue(self::WORKER));
+        self::assertCount(2, $store->staged);
+        self::assertSame(1, $store->publishCalls);
+        self::assertSame([], $store->failures);
+        self::assertSame([null, $this->subject(101)->cursor(), $this->subject(102)->cursor()], $store->cursors);
+    }
+
+    public function testMissingTerminatingEmptyPageFailsClosedAtThePageBound(): void
+    {
+        $store = new RefreshStore($this->claim(singleEndpoint: true), [
+            [$this->subject(101)],
+            [$this->subject(102)],
+            [$this->subject(103)],
+            [],
+        ]);
+        $service = new RefreshExecutorPermissionEvidence(
+            $store, new RefreshSource([$this->snapshot(self::ENDPOINT_A)]),
+            new ProjectExecutorPermissionEvidence(), new RefreshClock(), 1, 2,
+        );
+
+        self::assertSame(ExecutorEvidenceRefreshStatus::Failed, $service->refreshDue(self::WORKER));
+        self::assertCount(2, $store->staged);
+        self::assertSame(0, $store->publishCalls);
+        self::assertSame([ExecutorEvidenceRefreshFailureCode::InvalidResponse], $store->failures);
+        self::assertSame([null, $this->subject(101)->cursor(), $this->subject(102)->cursor()], $store->cursors);
+    }
+
     /** @return iterable<string, array{array<int, mixed>}> */
     public static function invalidPageProvider(): iterable
     {

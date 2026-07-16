@@ -93,7 +93,7 @@ final readonly class ProjectExecutorPermissionEvidence
     private function nearestMatrixAncestor(array $matrix, string $subjectPath, string $privilege): ?string
     {
         $candidate = $subjectPath;
-        while ('/' !== $candidate) {
+        for ($remainingAncestors = \substr_count($subjectPath, '/'); $remainingAncestors > 0; --$remainingAncestors) {
             $offset = (int) \strrpos($candidate, '/');
             $candidate = 0 === $offset ? '/' : \substr($candidate, 0, $offset);
             if (!isset($matrix[$candidate])) {

@@ -65,11 +65,12 @@ final readonly class RefreshExecutorPermissionEvidence implements ExecutorEviden
         $this->store->bindSnapshotEndpoint($claim, $snapshot->endpointId, $observedAt);
         $cursor = null;
         $subjectCount = 0;
-        while (true) {
+        for ($remainingPages = $this->maximumSubjects + 1; $remainingPages > 0; --$remainingPages) {
             $this->store->renew($claim, $this->clock->now());
             $subjects = $this->store->subjects($claim, $cursor, $this->subjectPageSize);
             if ([] === $subjects) {
-                break;
+                $this->store->publish($claim, $observedAt);
+                return ExecutorEvidenceRefreshStatus::Published;
             }
             if (\count($subjects) > $this->subjectPageSize) {
                 return $this->invalidPage($claim);
@@ -93,8 +94,7 @@ final readonly class RefreshExecutorPermissionEvidence implements ExecutorEviden
             $this->store->stage($claim, $projections);
         }
 
-        $this->store->publish($claim, $observedAt);
-        return ExecutorEvidenceRefreshStatus::Published;
+        return $this->invalidPage($claim);
     }
 
     private function mayFailOver(ExecutorEvidenceRefreshFailureCode $code): bool
