@@ -8,6 +8,7 @@ use App\Application\Collector\CollectorWorkerRunCode;
 use App\Application\Collector\CollectorWorkerRunResult;
 use App\Application\Collector\CollectorWorkerRunner;
 use App\Application\Backup\Worker\BackupWorkerRuntimeSafety;
+use App\Application\Backup\Worker\BackupWorkerRunner;
 use App\Application\Backup\Execution\BackupExecutionGate;
 use App\Application\Backup\Notification\BackupNotificationConfiguration;
 use App\Application\Backup\Notification\BackupNotificationDeliveryGate;
@@ -66,6 +67,58 @@ final class WorkerCommandsTest extends TestCase
         self::assertSame('ready', $payload['status'] ?? null);
 
         $kernel->shutdown();
+    }
+
+    public function testBackupWorkerRunnerDependencyGraphIsConstructible(): void
+    {
+        $passwordFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-db-');
+        $secretFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-app-');
+        $keyringFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-keyring-');
+        self::assertIsString($passwordFile);
+        self::assertIsString($secretFile);
+        self::assertIsString($keyringFile);
+        file_put_contents($passwordFile, 'unused-test-password');
+        file_put_contents($secretFile, str_repeat('application-secret-', 3));
+        file_put_contents($keyringFile, '{"format":1,"revision":1,"primaryKeyId":"worker_test","keys":[{"id":"worker_test","material":"'.str_repeat('a', 64).'"}]}');
+        $environment = [
+            'DATABASE_HOST' => '127.0.0.1',
+            'DATABASE_PORT' => '3306',
+            'DATABASE_NAME' => 'hoddmimir_worker_di_test',
+            'DATABASE_USER' => 'hoddmimir_worker_di_test',
+            'DATABASE_PASSWORD_FILE' => $passwordFile,
+            'APP_SECRET_FILE' => $secretFile,
+            'ENCRYPTION_KEY_FILE' => $keyringFile,
+            'ENCRYPTION_KEYRING_REVISION' => '1',
+        ];
+        $previous = [];
+        foreach ($environment as $name => $value) {
+            $previous[$name] = getenv($name);
+            putenv($name.'='.$value);
+            $_ENV[$name] = $value;
+            $_SERVER[$name] = $value;
+        }
+        $kernel = null;
+        try {
+            $kernel = $this->readyKernel();
+            $testContainer = $kernel->getContainer()->get('test.service_container');
+            self::assertInstanceOf(TestContainer::class, $testContainer);
+            self::assertInstanceOf(BackupWorkerRunner::class, $testContainer->get(BackupWorkerRunner::class));
+        } finally {
+            $kernel?->shutdown();
+            foreach ($previous as $name => $value) {
+                if (false === $value) {
+                    putenv($name);
+                    unset($_ENV[$name], $_SERVER[$name]);
+                } else {
+                    putenv($name.'='.$value);
+                    $_ENV[$name] = $value;
+                    $_SERVER[$name] = $value;
+                }
+            }
+            unlink($passwordFile);
+            unlink($secretFile);
+            unlink($keyringFile);
+        }
     }
 
     public function testBackupWorkerRefusesExecutionWithoutProblemDelivery(): void

@@ -30,6 +30,9 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         'collector_schedule',
         'configuration_command_idempotency',
         'doctrine_migration_versions',
+        'executor_evidence_refresh_projection_stage',
+        'executor_evidence_refresh_state',
+        'executor_evidence_refresh_subject_stage',
         'executor_permission_evidence',
         'guest_backup_state',
         'guest_placements',
@@ -114,7 +117,17 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         }
 
         self::assertSame(
-            ['backup_credentials', 'collector_credentials', 'credential_key_usage'],
+            [
+                'backup_credentials',
+                'backup_request_client_configurations',
+                'collector_credentials',
+                'credential_key_usage',
+                'current_executor_permission_evidence',
+                'executor_evidence_claim_catalog',
+                'executor_evidence_endpoint_catalog',
+                'executor_evidence_subject_catalog',
+                'executor_scan_credentials',
+            ],
             $this->connection()->fetchFirstColumn(
                 <<<'SQL'
                     SELECT TABLE_NAME
@@ -132,7 +145,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(30, $versions);
+        self::assertCount(31, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -193,6 +206,8 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260715000200', $versions[28]);
         self::assertIsString($versions[29]);
         self::assertStringEndsWith('Version20260715154500', $versions[29]);
+        self::assertIsString($versions[30]);
+        self::assertStringEndsWith('Version20260716000100', $versions[30]);
     }
 
     public function testActiveBackupRequestGuestKeyIsGeneratedAndUnique(): void

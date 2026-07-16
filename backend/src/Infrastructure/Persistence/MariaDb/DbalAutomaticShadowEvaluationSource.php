@@ -129,7 +129,7 @@ LEFT JOIN backup_node_slots node_slot ON node_slot.connection_id = guest.connect
     AND node_slot.cluster_id = guest.cluster_id AND node_slot.node_id = placement.node_id
 LEFT JOIN backup_target_slots target_slot ON target_slot.connection_id = target.connection_id
     AND target_slot.cluster_id = target.cluster_id AND target_slot.target_id = target.id
-LEFT JOIN executor_permission_evidence executor
+LEFT JOIN current_executor_permission_evidence executor
     ON executor.connection_id = guest.connection_id AND executor.cluster_id = guest.cluster_id
     AND executor.target_id = target.id AND executor.node_id = placement.node_id
     AND executor.storage_id = target.storage_id AND executor.guest_id = guest.id

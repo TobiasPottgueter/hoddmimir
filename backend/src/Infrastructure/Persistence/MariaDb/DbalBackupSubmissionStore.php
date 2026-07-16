@@ -126,7 +126,7 @@ JOIN backup_targets target ON target.connection_id = request.connection_id AND t
 JOIN pve_storages storage ON storage.connection_id = request.connection_id AND storage.cluster_id = request.cluster_id AND storage.id = target.storage_id
 LEFT JOIN backup_target_allowed_nodes allowed ON allowed.target_id = target.id AND allowed.node_id = placement.node_id
 LEFT JOIN pve_node_storage_state node_storage ON node_storage.node_id = placement.node_id AND node_storage.storage_id = storage.id
-LEFT JOIN executor_permission_evidence evidence ON evidence.connection_id = request.connection_id
+LEFT JOIN current_executor_permission_evidence evidence ON evidence.connection_id = request.connection_id
  AND evidence.cluster_id = request.cluster_id AND evidence.target_id = request.target_id
  AND evidence.node_id = placement.node_id AND evidence.storage_id = storage.id AND evidence.guest_id = request.guest_id
 LEFT JOIN pbs_datastores pbs_datastore ON pbs_datastore.connection_id = target.pbs_connection_id AND pbs_datastore.id = target.pbs_datastore_id

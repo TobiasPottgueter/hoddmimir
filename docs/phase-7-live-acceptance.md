@@ -256,6 +256,14 @@ benötigen ausdrücklich freigegebene Lab-Systeme.
       Ausführung darf dadurch kein PVE-Schreibaufruf entstehen.
 - [ ] Bei absichtlich veralteter Evidenz nachweisen, dass kein Start
       zugelassen wird und frische Evidenz die Neubewertung auslöst.
+- [ ] Mehrere aufeinanderfolgende, kontrollierte Executor-Evidence-
+      Endpoint-Timeouts sanitisiert prüfen: die begrenzte synchrone
+      Verzögerung von bestehendem Task-Monitoring und Matrix-Zustellung
+      messen, bei deaktivierter Ausführung weiterhin null PVE-POST/DELETE
+      nachweisen und den Backup-Worker-Heartbeat bis zur anschließenden
+      Erholung beobachten. Einen getrennten Worker-/Lease-Ausfall so prüfen,
+      dass `degraded` beziehungsweise der gefencete Lease-Takeover und die
+      spätere Rückkehr zu `ready` ohne Doppelverarbeitung belegt sind.
 
 Dieser Block persistiert ausschließlich neue V2-Inventar-, Queue- und
 Auditdaten. Solange die Backupausführung deaktiviert bleibt, mutiert er PVE

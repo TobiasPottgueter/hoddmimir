@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Application\Backup\Monitoring;
 
+use App\Application\Backup\Execution\BackupExecutionGate;
 use App\Application\Backup\Monitoring\BackupMonitoringTransaction;
 use App\Application\Backup\Monitoring\MonitorClaimedBackup;
 use App\Application\Backup\Monitoring\MonitorClaimedBackupCommand;
@@ -172,6 +173,22 @@ final class MonitorClaimedBackupTest extends TestCase
         self::assertSame(1, $rejected->stopClaims);
     }
 
+    public function testDisabledExecutionSuppressesStopClaimAndDeleteButKeepsGetMonitoring(): void
+    {
+        $transaction = $this->prepared(0, StopAttemptDisposition::ReadyToClaim);
+        $client = new MonitoringClientFake();
+
+        $result = $this->service($transaction, $client, executionEnabled: false)->execute($this->command());
+
+        self::assertSame(MonitoringTickStatus::Running, $result->status);
+        self::assertSame(0, $transaction->stopClaims);
+        self::assertSame(0, $client->stopCalls);
+        self::assertSame(1, $client->logCalls);
+        self::assertSame(1, $client->statusCalls);
+        self::assertNull($result->stopStatus);
+        self::assertNull($result->stopFailure);
+    }
+
     public function testIncompleteTaskStatusRemainsTemporarilyUnavailable(): void
     {
         $transaction = $this->prepared();
@@ -200,7 +217,7 @@ final class MonitorClaimedBackupTest extends TestCase
             $this->now()->modify('+40 seconds'),
         ]);
 
-        $result = (new MonitorClaimedBackup($transaction, $client, new PveTaskStatusClassifier(), $clock))->execute($this->command());
+        $result = (new MonitorClaimedBackup($transaction, $client, new PveTaskStatusClassifier(), $clock, new MonitoringExecutionGate(true)))->execute($this->command());
 
         self::assertSame(MonitoringTickStatus::NoWork, $result->status);
         self::assertSame(0, $client->logCalls);
@@ -216,14 +233,14 @@ final class MonitorClaimedBackupTest extends TestCase
         $first = $this->prepared();
         $first->renewResults = [false];
         $client = new MonitoringClientFake();
-        $service = new MonitorClaimedBackup($first, $client, new PveTaskStatusClassifier(), new FrozenClock($this->now()));
+        $service = new MonitorClaimedBackup($first, $client, new PveTaskStatusClassifier(), new FrozenClock($this->now()), new MonitoringExecutionGate(true));
         self::assertSame(MonitoringTickStatus::NoWork, $service->execute($this->command())->status);
         self::assertSame(0, $client->logCalls);
 
         $third = $this->prepared();
         $third->renewResults = [true, true, false];
         $client = new MonitoringClientFake();
-        $service = new MonitorClaimedBackup($third, $client, new PveTaskStatusClassifier(), new FrozenClock($this->now()));
+        $service = new MonitorClaimedBackup($third, $client, new PveTaskStatusClassifier(), new FrozenClock($this->now()), new MonitoringExecutionGate(true));
         self::assertSame(MonitoringTickStatus::NoWork, $service->execute($this->command())->status);
         self::assertSame(1, $client->logCalls);
         self::assertSame(0, $client->statusCalls);
@@ -249,8 +266,8 @@ final class MonitorClaimedBackupTest extends TestCase
                 0,
                 statusFailure: PveBackupApiFailureCode::Transport,
             ),
-            fn () => new MonitorClaimedBackup(new MonitoringTransactionFake(), new MonitoringClientFake(), new PveTaskStatusClassifier(), new FrozenClock($this->now()), 0),
-            fn () => new MonitorClaimedBackup(new MonitoringTransactionFake(), new MonitoringClientFake(), new PveTaskStatusClassifier(), new FrozenClock($this->now()), 501),
+            fn () => new MonitorClaimedBackup(new MonitoringTransactionFake(), new MonitoringClientFake(), new PveTaskStatusClassifier(), new FrozenClock($this->now()), new MonitoringExecutionGate(true), 0),
+            fn () => new MonitorClaimedBackup(new MonitoringTransactionFake(), new MonitoringClientFake(), new PveTaskStatusClassifier(), new FrozenClock($this->now()), new MonitoringExecutionGate(true), 501),
         ] as $invalid) {
             try {
                 $invalid();
@@ -265,8 +282,16 @@ final class MonitorClaimedBackupTest extends TestCase
         MonitoringTransactionFake $transaction,
         MonitoringClientFake $client,
         int $pageSize = 200,
+        bool $executionEnabled = true,
     ): MonitorClaimedBackup {
-        return new MonitorClaimedBackup($transaction, $client, new PveTaskStatusClassifier(), new FrozenClock($this->now()), $pageSize);
+        return new MonitorClaimedBackup(
+            $transaction,
+            $client,
+            new PveTaskStatusClassifier(),
+            new FrozenClock($this->now()),
+            new MonitoringExecutionGate($executionEnabled),
+            $pageSize,
+        );
     }
 
     private function prepared(
@@ -303,6 +328,12 @@ final class MonitorClaimedBackupTest extends TestCase
     {
         return str_repeat($byte, 16);
     }
+}
+
+final readonly class MonitoringExecutionGate implements BackupExecutionGate
+{
+    public function __construct(private bool $enabled) {}
+    public function enabled(): bool { return $this->enabled; }
 }
 
 final class MonitoringTransactionFake implements BackupMonitoringTransaction

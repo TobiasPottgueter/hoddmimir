@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Backup\Monitoring;
 
+use App\Application\Backup\Execution\BackupExecutionGate;
 use App\Application\Proxmox\Pve\PveBackupApiFailure;
 use App\Application\Proxmox\Pve\PveBackupApiFailureCode;
 use App\Application\Proxmox\Pve\PveBackupClientProvider;
@@ -20,6 +21,7 @@ final readonly class MonitorClaimedBackup
         private PveBackupClientProvider $clients,
         private PveTaskStatusClassifier $classifier,
         private Clock $clock,
+        private BackupExecutionGate $executionGate,
         private int $logPageSize = 200,
     ) {
         if ($logPageSize < 1 || $logPageSize > PveTaskLogQuery::MAXIMUM_PAGE_SIZE) {
@@ -108,7 +110,8 @@ final readonly class MonitorClaimedBackup
         PreparedBackupMonitoring $prepared,
         \App\Application\Proxmox\Pve\PveBackupClient $client,
     ): array {
-        if (StopAttemptDisposition::ReadyToClaim !== $prepared->stopAttempt) {
+        if (!$this->executionGate->enabled()
+            || StopAttemptDisposition::ReadyToClaim !== $prepared->stopAttempt) {
             return [null, null];
         }
         if (!$this->transaction->claimStopAttempt($command, $prepared->upid)) {

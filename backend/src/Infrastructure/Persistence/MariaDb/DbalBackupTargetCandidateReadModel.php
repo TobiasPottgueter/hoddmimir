@@ -207,7 +207,7 @@ LEFT JOIN backup_targets target
   ON target.connection_id=storage.connection_id AND target.cluster_id=storage.cluster_id
  AND target.storage_id=storage.id
 LEFT JOIN backup_target_allowed_nodes allowed ON allowed.target_id=target.id
-LEFT JOIN executor_permission_evidence evidence
+LEFT JOIN current_executor_permission_evidence evidence
   ON evidence.connection_id=allowed.connection_id AND evidence.cluster_id=allowed.cluster_id
  AND evidence.target_id=allowed.target_id AND evidence.node_id=allowed.node_id
  AND evidence.storage_id=storage.id AND evidence.guest_id IS NULL

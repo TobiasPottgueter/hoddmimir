@@ -52,6 +52,10 @@ use App\Domain\Backup\MonitoringOutcome;
 use App\Domain\Backup\RecoveryOutcome;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
 use App\Infrastructure\Persistence\MariaDb\DbalAutomaticShadowEvaluationSource;
+use App\Infrastructure\Persistence\MariaDb\DbalExecutorEvidenceRefreshStore;
+use App\Infrastructure\Persistence\MariaDb\DbalPveBackupClientProvider;
+use App\Infrastructure\Proxmox\PveBackup\PveBackupClientFactory;
+use App\Infrastructure\Proxmox\PveBackup\PveBackupEndpointConfiguration;
 use App\Domain\Scheduler\EvidenceFreshnessPolicy;
 use Doctrine\DBAL\DriverManager;
 use Throwable;
@@ -122,6 +126,173 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         self::assertSame('cancelled', $this->connection()->fetchOne('SELECT state FROM backup_requests'));
         self::assertSame('3', $this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_request_events')));
         self::assertNotNull($this->connection()->fetchOne('SELECT released_at FROM backup_capacity_reservations'));
+    }
+
+    public function testBackupWorkerRoleLoadsRequestClientConfigurationThroughScopedView(): void
+    {
+        $this->seedBackupCredential();
+        $this->connection()->insert('proxmox_connection_endpoints', [
+            'id' => self::id('pve-endpoint'), 'connection_id' => self::id('connection'),
+            'host' => 'pve-runtime.test', 'port' => 8006, 'priority' => 5,
+            'enabled' => 1, 'tls_mode' => 'system_ca',
+            'created_at' => self::format($this->now), 'updated_at' => self::format($this->now),
+        ]);
+        $request = $this->store()->promote(new ShadowPromotion(
+            self::id('request-runtime-provider'), self::id('decision-a'), $this->now,
+            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $this->connection()->commit();
+        $worker = $this->runtimeBackupWorker();
+        try {
+            $factory = new IntegratedCapturingBackupClientFactory();
+            $client = (new DbalPveBackupClientProvider($worker, $factory))->forRequest($request);
+            self::assertSame($factory->client, $client);
+            self::assertNotNull($factory->configuration);
+            self::assertNotNull($factory->version);
+            self::assertSame('pve-runtime.test', $factory->configuration->host);
+            self::assertSame(8006, $factory->configuration->port);
+            self::assertSame(8, $factory->version->major);
+            self::assertSame(0, $factory->version->minor);
+            self::assertSame(['value' => '[REDACTED]'], $factory->configuration->__debugInfo());
+        } finally {
+            $worker->close();
+            $this->cleanupCommittedFixture();
+        }
+    }
+
+    public function testExecutorEvidenceSubjectsCombineActivePolicySelectionAndNonTerminalRequests(): void
+    {
+        $now = self::format($this->now);
+        $this->connection()->insert('backup_policy_assignments', [
+            'id' => self::id('guest-b-exclude'), 'policy_id' => self::id('policy'),
+            'connection_id' => self::id('connection'), 'cluster_id' => self::id('cluster'),
+            'scope' => 'guest', 'selection_value' => 'exclude', 'guest_id' => self::id('guest-b'),
+            'status' => 'active', 'revision' => 1, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $this->connection()->executeStatement(
+            'UPDATE executor_evidence_refresh_state SET next_due_at = UTC_TIMESTAMP(6) - INTERVAL 1 MICROSECOND',
+        );
+        $refresh = new DbalExecutorEvidenceRefreshStore(
+            $this->connection(), new FixedQueueTokens(), 120, 90, 128,
+        );
+        $policyClaim = $refresh->claimDue(self::id('evidence-policy-worker'), $this->now);
+        self::assertNotNull($policyClaim);
+        $policyGuestIds = array_map(
+            static fn (\App\Application\Backup\Execution\ExecutorEvidenceRefreshSubject $subject): ?string => $subject->guestId,
+            $refresh->subjects($policyClaim, null, 10),
+        );
+        self::assertContains(null, $policyGuestIds, 'Every configured target/node needs activation evidence.');
+        self::assertContains(self::id('guest'), $policyGuestIds, 'The included policy guest must be projected.');
+        self::assertNotContains(self::id('guest-b'), $policyGuestIds, 'The policy exclusion must win.');
+        $refresh->fail(
+            $policyClaim,
+            \App\Application\Backup\Execution\ExecutorEvidenceRefreshFailureCode::Transport,
+            $this->now,
+        );
+
+        $this->store()->promote(new ShadowPromotion(
+            self::id('request-evidence-guest-b'), self::id('decision-b'), $this->now,
+            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $this->connection()->executeStatement(
+            'UPDATE executor_evidence_refresh_state SET next_due_at = UTC_TIMESTAMP(6) - INTERVAL 1 MICROSECOND',
+        );
+        $requestClaim = $refresh->claimDue(self::id('evidence-request-worker'), $this->now);
+        self::assertNotNull($requestClaim);
+        $requestGuestIds = array_map(
+            static fn (\App\Application\Backup\Execution\ExecutorEvidenceRefreshSubject $subject): ?string => $subject->guestId,
+            $refresh->subjects($requestClaim, null, 10),
+        );
+        self::assertContains(self::id('guest-b'), $requestGuestIds,
+            'A non-terminal request must remain an executor-evidence subject despite policy exclusion.');
+
+        $refresh->fail(
+            $requestClaim,
+            \App\Application\Backup\Execution\ExecutorEvidenceRefreshFailureCode::Transport,
+            $this->now,
+        );
+        $this->connection()->update('backup_requests', [
+            'state' => 'cancelled', 'terminal_code' => 'cancelled_before_claim',
+            'terminal_at' => $now, 'updated_at' => $now,
+        ], ['id' => self::id('request-evidence-guest-b')]);
+        $this->connection()->executeStatement(
+            'UPDATE executor_evidence_refresh_state SET next_due_at = UTC_TIMESTAMP(6) - INTERVAL 1 MICROSECOND',
+        );
+        $terminalClaim = $refresh->claimDue(self::id('evidence-terminal-worker'), $this->now);
+        self::assertNotNull($terminalClaim);
+        $terminalGuestIds = array_map(
+            static fn (\App\Application\Backup\Execution\ExecutorEvidenceRefreshSubject $subject): ?string => $subject->guestId,
+            $refresh->subjects($terminalClaim, null, 10),
+        );
+        self::assertNotContains(self::id('guest-b'), $terminalGuestIds,
+            'A terminal request must not override the active policy exclusion.');
+    }
+
+    public function testExecutorEvidenceSubjectPagingTraversesTheCompositeKeyWithoutGapsOrDuplicates(): void
+    {
+        $now = self::format($this->now);
+        $this->connection()->insert('pve_nodes', [
+            'id' => self::id('paging-node-b'), 'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'), 'node_name' => 'node-b', 'api_status' => 'online',
+            'inventory_state' => 'active', 'first_seen_run_id' => self::id('inventory-run'),
+            'last_seen_run_id' => self::id('inventory-run'), 'first_seen_at' => $now, 'last_seen_at' => $now,
+        ]);
+        $this->connection()->insert('backup_target_allowed_nodes', [
+            'target_id' => self::id('target'), 'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'), 'node_id' => self::id('paging-node-b'), 'created_at' => $now,
+        ]);
+        $this->connection()->insert('backup_targets', [
+            'id' => self::id('paging-target-b'), 'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'), 'storage_id' => self::id('storage'),
+            'display_name' => 'Paging target B', 'status' => 'disabled', 'revision' => 1,
+            'minimum_free_bytes' => '1', 'fixed_parallel_limit' => 1,
+            'created_at' => $now, 'updated_at' => $now, 'disabled_at' => $now,
+        ]);
+        $this->connection()->insert('backup_target_allowed_nodes', [
+            'target_id' => self::id('paging-target-b'), 'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'), 'node_id' => self::id('node'), 'created_at' => $now,
+        ]);
+        $this->connection()->executeStatement(
+            'UPDATE executor_evidence_refresh_state SET next_due_at = UTC_TIMESTAMP(6) - INTERVAL 1 MICROSECOND',
+        );
+        $refresh = new DbalExecutorEvidenceRefreshStore(
+            $this->connection(), new FixedQueueTokens(), 120, 90, 128,
+        );
+        $claim = $refresh->claimDue(self::id('evidence-paging-worker'), $this->now);
+        self::assertNotNull($claim);
+        $expected = array_map(
+            static fn (\App\Application\Backup\Execution\ExecutorEvidenceRefreshSubject $subject): string => $subject->cursor(),
+            $refresh->subjects($claim, null, 100),
+        );
+        self::assertGreaterThan(4, count($expected));
+        self::assertGreaterThan(1, count(array_unique(array_map(
+            static fn (string $value): string => substr($value, 0, 16),
+            $expected,
+        ))), 'The fixture must cross a target_id cursor boundary.');
+        self::assertGreaterThan(1, count(array_unique(array_map(
+            static fn (string $value): string => substr($value, 16, 16),
+            $expected,
+        ))), 'The fixture must cross a node_id cursor boundary.');
+
+        $actual = [];
+        $cursor = null;
+        while (true) {
+            $page = $refresh->subjects($claim, $cursor, 1);
+            if ([] === $page) {
+                break;
+            }
+            self::assertCount(1, $page);
+            $next = $page[0]->cursor();
+            if (null !== $cursor) {
+                self::assertLessThan(0, strcmp($cursor, $next), 'The composite cursor must advance strictly.');
+            }
+            $actual[] = $next;
+            $cursor = $next;
+        }
+
+        self::assertSame($expected, $actual);
+        self::assertSameSize(array_unique(array_map('bin2hex', $actual)), $actual);
+        self::assertSame([], $refresh->subjects($claim, $cursor, 1));
     }
 
     public function testAutomaticShadowSourceProjectsExecutorEvidenceFailClosed(): void
@@ -1258,6 +1429,12 @@ SQL, ['guest' => self::id('guest')]);
     private function seedBackupCredential(): void
     {
         $now = self::format($this->now);
+        if (false !== $this->connection()->fetchOne(
+            "SELECT id FROM proxmox_credentials WHERE connection_id = :connection AND purpose = 'backup'",
+            ['connection' => self::id('connection')],
+        )) {
+            return;
+        }
         $this->connection()->insert('proxmox_credentials', [
             'id' => self::id('backup-credential'), 'connection_id' => self::id('connection'),
             'purpose' => 'backup', 'auth_scheme' => 'api_token', 'principal' => 'backup@pve',
@@ -1493,6 +1670,8 @@ SQL, ['id' => $requestId]);
             'vm_backup_authorized' => 1, 'datastore_allocate_authorized' => 1,
             'authorized' => 1, 'observed_at' => $now, 'revision' => 1,
         ]);
+        $this->seedExecutorEvidenceFixtureConfiguration($connection);
+        $this->publishExecutorEvidenceFixture($connection);
         $this->connection()->insert('scheduler_evaluation_runs', [
             'id' => $evaluation, 'cycle_token' => $cycle, 'collector_fencing_token' => 1,
             'evaluator_version' => 1, 'payload_hash' => hash('sha256', 'evaluation', true),
@@ -1607,13 +1786,18 @@ SQL, ['id' => $requestId]);
         $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
         try {
             foreach ([
+                'backup_run_log_entries', 'backup_run_events', 'backup_notification_outbox',
+                'backup_problem_states', 'backup_operation_commands', 'backup_runs',
                 'backup_capacity_reservations', 'backup_request_events', 'backup_requests',
-                'backup_target_slots', 'backup_node_slots', 'executor_permission_evidence',
+                'backup_target_slots', 'backup_node_slots',
+                'executor_evidence_refresh_projection_stage', 'executor_evidence_refresh_subject_stage',
+                'executor_permission_evidence', 'executor_evidence_refresh_state',
                 'scheduler_decision_gates', 'scheduler_decisions', 'scheduler_evaluation_runs',
                 'backup_policy_guest_overrides', 'backup_policy_assignments', 'backup_policies',
                 'backup_target_allowed_nodes', 'backup_targets', 'guest_placements', 'guests',
                 'pve_node_storage_state', 'pve_storages', 'pve_nodes', 'pve_clusters',
-                'proxmox_capability_snapshots', 'inventory_sync_runs', 'proxmox_connections', 'collector_cycles',
+                'proxmox_capability_snapshots', 'inventory_sync_runs', 'proxmox_credentials',
+                'proxmox_connection_endpoints', 'proxmox_connections', 'collector_cycles',
                 'collector_schedule', 'worker_heartbeats',
             ] as $table) {
                 $this->connection()->executeStatement('DELETE FROM '.$table);
@@ -1648,6 +1832,17 @@ SQL, ['id' => $requestId]);
     private static function id(string $label): string
     {
         return substr(hash('sha256', $label, true), 0, 16);
+    }
+
+    private function runtimeBackupWorker(): \Doctrine\DBAL\Connection
+    {
+        $password = file_get_contents('/run/secrets/mariadb_backup_worker_password');
+        self::assertIsString($password);
+
+        return DriverManager::getConnection(array_replace($this->connection()->getParams(), [
+            'user' => 'hoddmimir_backup_worker',
+            'password' => trim($password),
+        ]));
     }
 
     private function prepareSubmissionForPolicy(string $policy): \App\Application\Backup\Execution\PreparedBackupSubmission
@@ -1692,6 +1887,28 @@ final class FixedQueueTokens implements QueueClaimTokenSource
     public function next(): string
     {
         return substr(hash('sha256', 'queue-token-'.++$this->sequence, true), 0, 16);
+    }
+}
+
+final class IntegratedCapturingBackupClientFactory implements PveBackupClientFactory
+{
+    public ?PveBackupEndpointConfiguration $configuration = null;
+    public ?\App\Application\Proxmox\Pve\PveVersion $version = null;
+    public IntegratedJournalBackupClient $client;
+
+    public function __construct()
+    {
+        $this->client = new IntegratedJournalBackupClient('/dev/null', false);
+    }
+
+    public function create(
+        PveBackupEndpointConfiguration $configuration,
+        \App\Application\Proxmox\Pve\PveVersion $version,
+    ): PveBackupClient {
+        $this->configuration = $configuration;
+        $this->version = $version;
+
+        return $this->client;
     }
 }
 

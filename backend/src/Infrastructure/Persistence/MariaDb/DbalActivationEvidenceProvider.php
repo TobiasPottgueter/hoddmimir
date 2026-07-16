@@ -49,7 +49,7 @@ JOIN backup_targets target
   ON target.id=allowed.target_id
  AND target.connection_id=allowed.connection_id
  AND target.cluster_id=allowed.cluster_id
-LEFT JOIN executor_permission_evidence evidence
+LEFT JOIN current_executor_permission_evidence evidence
   ON evidence.connection_id=allowed.connection_id AND evidence.cluster_id=allowed.cluster_id
  AND evidence.node_id=allowed.node_id
  AND evidence.target_id=allowed.target_id AND evidence.guest_id IS NULL

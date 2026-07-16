@@ -19,7 +19,6 @@ final class BackupQueuePrivilegeTest extends DatabaseTestCase
         'backup_node_slots',
         'backup_target_slots',
         'backup_capacity_reservations',
-        'executor_permission_evidence',
         'backup_problem_states',
         'backup_notification_outbox',
     ];

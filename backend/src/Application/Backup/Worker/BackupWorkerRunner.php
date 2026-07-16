@@ -6,6 +6,9 @@ namespace App\Application\Backup\Worker;
 
 use App\Application\Backup\Execution\SubmissionExecutionStatus;
 use App\Application\Backup\Execution\BackupExecutionGate;
+use App\Application\Backup\Execution\ExecutorEvidenceLeaseOwnershipLost;
+use App\Application\Backup\Execution\ExecutorEvidenceRefresh;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshFailure;
 use App\Application\Backup\Execution\SubmitClaimedBackup;
 use App\Application\Backup\Execution\SubmitClaimedBackupCommand;
 use App\Application\Backup\Monitoring\MonitorClaimedBackup;
@@ -21,6 +24,7 @@ use RuntimeException;
 final readonly class BackupWorkerRunner implements BackupWorkerRuntime
 {
     public function __construct(
+        private ExecutorEvidenceRefresh $executorEvidence,
         private BackupQueueStore $queue,
         private BackupExecutionGate $executionGate,
         private SubmitClaimedBackup $submit,
@@ -35,6 +39,12 @@ final readonly class BackupWorkerRunner implements BackupWorkerRuntime
     public function runOnce(string $workerId): BackupWorkerTickStatus
     {
         if (16 !== \strlen($workerId)) throw new InvalidArgumentException('The backup worker identifier must contain 16 bytes.');
+        try {
+            $this->executorEvidence->refreshDue($workerId);
+        } catch (ExecutorEvidenceRefreshFailure|ExecutorEvidenceLeaseOwnershipLost) {
+            // Expected refresh failures are already represented by fail-closed evidence state.
+            // They must not interrupt monitoring, reconciliation, or notification delivery.
+        }
         $now = $this->clock->now();
         $claim = $this->queue->claim(new ClaimNextBackupCommand(
             $workerId,

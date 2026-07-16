@@ -34,25 +34,12 @@ final readonly class DbalPveBackupClientProvider implements PveBackupClientProvi
             throw PveBackupApiFailure::for(PveBackupApiFailureCode::Configuration);
         }
         $row = $this->connection->fetchAssociative(<<<'SQL'
-SELECT endpoint.host, endpoint.port, endpoint.tls_mode, endpoint.custom_ca_pem,
-       endpoint.sha256_fingerprint, credential.id AS credential_id,
-       credential.principal, credential.token_name, credential.secret_envelope,
-       capability.version_major, capability.version_minor, capability.version_patch,
-       capability.release_name, capability.raw_version
-FROM backup_requests request
-JOIN proxmox_connections connection
-  ON connection.id = request.connection_id AND connection.enabled = 1 AND connection.product = 'pve'
-JOIN proxmox_connection_endpoints endpoint
-  ON endpoint.connection_id = connection.id AND endpoint.enabled = 1
-JOIN backup_credentials credential ON credential.connection_id = connection.id
-JOIN proxmox_capability_snapshots capability
-  ON capability.id = (
-      SELECT latest.id FROM proxmox_capability_snapshots latest
-      WHERE latest.connection_id = connection.id AND latest.product = 'pve'
-      ORDER BY latest.last_observed_at DESC, latest.id DESC LIMIT 1
-  )
-WHERE request.id = :request
-ORDER BY endpoint.priority, endpoint.id
+SELECT host, port, tls_mode, custom_ca_pem, sha256_fingerprint, credential_id,
+       principal, token_name, secret_envelope, version_major, version_minor,
+       version_patch, release_name, raw_version
+FROM backup_request_client_configurations
+WHERE request_id = :request
+ORDER BY priority, endpoint_id
 LIMIT 1
 SQL, ['request' => $requestId]);
         if (false === $row) {

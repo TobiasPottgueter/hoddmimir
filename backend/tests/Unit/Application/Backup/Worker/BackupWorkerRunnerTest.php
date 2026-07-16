@@ -7,6 +7,11 @@ namespace App\Tests\Unit\Application\Backup\Worker;
 use App\Application\Backup\Execution\BackupExecutionGate;
 use App\Application\Backup\Execution\BackupSubmissionTransaction;
 use App\Application\Backup\Execution\DefinitiveBackupFailureNotice;
+use App\Application\Backup\Execution\ExecutorEvidenceLeaseOwnershipLost;
+use App\Application\Backup\Execution\ExecutorEvidenceRefresh;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshFailure;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshFailureCode;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshStatus;
 use App\Application\Backup\Execution\ExistingSubmissionStatus;
 use App\Application\Backup\Execution\PreparedBackupSubmission;
 use App\Application\Backup\Execution\SubmissionPreparation;
@@ -60,13 +65,111 @@ final class BackupWorkerRunnerTest extends TestCase
 {
     public function testNoWorkStillDeliversOneNotificationAndHonoursExecutionGate(): void
     {
-        $queue = new RunnerQueue();
-        $notifications = new RunnerNotifications();
-        $runner = $this->runner($queue, false, $notifications);
+        $events = new RunnerEvents();
+        $queue = new RunnerQueue(events: $events);
+        $notifications = new RunnerNotifications($events);
+        $refresh = new RunnerEvidenceRefresh(events: $events);
+        $runner = $this->runner($queue, false, $notifications, refresh: $refresh);
 
         self::assertSame(BackupWorkerTickStatus::NoWork, $runner->runOnce(self::id('worker')));
+        self::assertSame([self::id('worker')], $refresh->workerIds);
+        self::assertSame(['refresh', 'claim', 'notification'], $events->values);
         self::assertFalse($queue->allowNewClaims);
         self::assertSame(1, $notifications->calls);
+    }
+
+    public function testARecordedRefreshFailureDoesNotInterruptMonitoringAndNotifications(): void
+    {
+        $events = new RunnerEvents();
+        $queue = new RunnerQueue($this->claim('running'), $events);
+        $notifications = new RunnerNotifications($events);
+        $refresh = new RunnerEvidenceRefresh(ExecutorEvidenceRefreshStatus::Failed, events: $events);
+
+        self::assertSame(
+            BackupWorkerTickStatus::Monitored,
+            $this->runner($queue, false, $notifications, refresh: $refresh)->runOnce(self::id('worker')),
+        );
+        self::assertSame(['refresh', 'claim', 'monitor', 'notification'], $events->values);
+        self::assertFalse($queue->allowNewClaims);
+    }
+
+    #[DataProvider('expectedRefreshFailureProvider')]
+    public function testExpectedRefreshExceptionsDoNotInterruptReconciliation(\Throwable $failure): void
+    {
+        $events = new RunnerEvents();
+        $queue = new RunnerQueue($this->claim('reconcile_required'), $events);
+        $notifications = new RunnerNotifications($events);
+        $refresh = new RunnerEvidenceRefresh(failure: $failure, events: $events);
+
+        self::assertSame(
+            BackupWorkerTickStatus::Reconciled,
+            $this->runner($queue, false, $notifications, refresh: $refresh)->runOnce(self::id('worker')),
+        );
+        self::assertFalse($queue->allowNewClaims);
+        self::assertSame(1, $notifications->calls);
+        self::assertSame(['refresh', 'claim', 'reconcile', 'notification'], $events->values);
+    }
+
+    /** @return iterable<string, array{\Throwable}> */
+    public static function expectedRefreshFailureProvider(): iterable
+    {
+        yield 'remote evidence failure' => [ExecutorEvidenceRefreshFailure::for(ExecutorEvidenceRefreshFailureCode::Transport)];
+        yield 'lease ownership lost' => [new ExecutorEvidenceLeaseOwnershipLost()];
+    }
+
+    public function testUnexpectedRefreshFailuresRemainVisibleAndPreventQueueAccess(): void
+    {
+        $queue = new RunnerQueue();
+        $failure = new \LogicException('unexpected refresh defect');
+
+        try {
+            $this->runner(
+                $queue,
+                false,
+                new RunnerNotifications(),
+                refresh: new RunnerEvidenceRefresh(failure: $failure),
+            )->runOnce(self::id('worker'));
+            self::fail('Expected the unexpected refresh defect to remain visible.');
+        } catch (\LogicException $caught) {
+            self::assertSame($failure, $caught);
+        }
+        self::assertSame([], $queue->events->values);
+    }
+
+    public function testInvalidWorkerIdentifierIsRejectedBeforeRefreshOrQueueIo(): void
+    {
+        $queue = new RunnerQueue();
+        $refresh = new RunnerEvidenceRefresh();
+
+        try {
+            $this->runner($queue, false, new RunnerNotifications(), refresh: $refresh)->runOnce('bad');
+            self::fail('Expected an invalid worker identifier failure.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame([], $refresh->workerIds);
+            self::assertSame([], $queue->events->values);
+        }
+    }
+
+    public function testQueueAndNotificationTimeAreReadAfterSynchronousRefresh(): void
+    {
+        $before = $this->now();
+        $after = $before->modify('+45 seconds');
+        $clock = new MutableRunnerClock($before);
+        $queue = new RunnerQueue();
+        $notifications = new RunnerNotifications();
+
+        self::assertSame(
+            BackupWorkerTickStatus::NoWork,
+            $this->runner(
+                $queue,
+                false,
+                $notifications,
+                refresh: new AdvancingRunnerEvidenceRefresh($clock, $after),
+                clock: $clock,
+            )->runOnce(self::id('worker')),
+        );
+        self::assertSame($after, $queue->claimedAt);
+        self::assertSame($after, $notifications->deliveredAt);
     }
 
     #[DataProvider('activeStates')]
@@ -113,17 +216,26 @@ final class BackupWorkerRunnerTest extends TestCase
         )->runOnce(self::id('worker'));
     }
 
-    private function runner(RunnerQueue $queue, bool $enabled, RunnerNotifications $notifications, ?RunnerSubmissionTransaction $submission = null, ?RunnerIds $identifiers = null): BackupWorkerRunner
+    private function runner(
+        RunnerQueue $queue,
+        bool $enabled,
+        RunnerNotifications $notifications,
+        ?RunnerSubmissionTransaction $submission = null,
+        ?RunnerIds $identifiers = null,
+        ?ExecutorEvidenceRefresh $refresh = null,
+        ?Clock $clock = null,
+    ): BackupWorkerRunner
     {
-        $clock = new RunnerClock($this->now());
+        $clock ??= new RunnerClock($this->now());
         $transaction = $submission ?? new RunnerSubmissionTransaction();
         $client = new RunnerClient();
         return new BackupWorkerRunner(
+            $refresh ?? new RunnerEvidenceRefresh(),
             $queue,
             new RunnerExecutionGate($enabled),
             new SubmitClaimedBackup(new RunnerExecutionGate($enabled), $transaction, $client, new ControlledRetryPolicy()),
-            new MonitorClaimedBackup(new RunnerMonitoringTransaction(), $client, new PveTaskStatusClassifier(), $clock),
-            new ReconcileAmbiguousSubmission(new RunnerReconciliationStore(), new RunnerReconciliationSource(), $clock),
+            new MonitorClaimedBackup(new RunnerMonitoringTransaction($queue->events), $client, new PveTaskStatusClassifier(), $clock, new RunnerExecutionGate($enabled)),
+            new ReconcileAmbiguousSubmission(new RunnerReconciliationStore($queue->events), new RunnerReconciliationSource(), $clock),
             $identifiers ?? new RunnerIds(),
             $notifications,
             $clock,
@@ -141,15 +253,56 @@ final class BackupWorkerRunnerTest extends TestCase
 final class RunnerQueue implements BackupQueueStore
 {
     public bool $allowNewClaims = true;
-    public function __construct(private ?ClaimedBackupRequest $claim = null) {}
+    public ?DateTimeImmutable $claimedAt = null;
+    public RunnerEvents $events;
+    public function __construct(private ?ClaimedBackupRequest $claim = null, ?RunnerEvents $events = null) { $this->events = $events ?? new RunnerEvents(); }
     public function promote(ShadowPromotion $promotion): string { return $promotion->requestId; }
-    public function claim(ClaimNextBackupCommand $command): ?ClaimedBackupRequest { $this->allowNewClaims = $command->allowNewClaims; return $this->claim; }
+    public function claim(ClaimNextBackupCommand $command): ?ClaimedBackupRequest { $this->events->record('claim'); $this->allowNewClaims = $command->allowNewClaims; $this->claimedAt = $command->now; return $this->claim; }
     public function finalize(FinalizeClaimedBackupCommand $command): bool { return true; }
 }
 final readonly class RunnerExecutionGate implements BackupExecutionGate { public function __construct(private bool $enabled) {} public function enabled(): bool { return $this->enabled; } }
 final class RunnerIds implements BackupRunIdentifierSource { public function __construct(private ?string $value = null) {} public function next(): string { return $this->value ?? substr(hash('sha256', 'runner-run', true), 0, 16); } }
-final class RunnerNotifications implements BackupNotificationDeliveryHook { public int $calls=0; public function deliverOne(DateTimeImmutable $now): void { ++$this->calls; } }
+final class RunnerNotifications implements BackupNotificationDeliveryHook
+{
+    public int $calls = 0;
+    public ?DateTimeImmutable $deliveredAt = null;
+    public function __construct(private ?RunnerEvents $events = null) {}
+    public function deliverOne(DateTimeImmutable $now): void { ++$this->calls; $this->deliveredAt = $now; $this->events?->record('notification'); }
+}
 final readonly class RunnerClock implements Clock { public function __construct(private DateTimeImmutable $now) {} public function now(): DateTimeImmutable { return $this->now; } }
+
+final class MutableRunnerClock implements Clock
+{
+    public function __construct(public DateTimeImmutable $current) {}
+    public function now(): DateTimeImmutable { return $this->current; }
+}
+
+final readonly class AdvancingRunnerEvidenceRefresh implements ExecutorEvidenceRefresh
+{
+    public function __construct(private MutableRunnerClock $clock, private DateTimeImmutable $afterRefresh) {}
+    public function refreshDue(string $workerId): ExecutorEvidenceRefreshStatus
+    {
+        $this->clock->current = $this->afterRefresh;
+        return ExecutorEvidenceRefreshStatus::Published;
+    }
+}
+
+final class RunnerEvidenceRefresh implements ExecutorEvidenceRefresh
+{
+    /** @var list<string> */ public array $workerIds = [];
+    public function __construct(
+        private ExecutorEvidenceRefreshStatus $status = ExecutorEvidenceRefreshStatus::NoDueConnection,
+        private ?\Throwable $failure = null,
+        private ?RunnerEvents $events = null,
+    ) {}
+    public function refreshDue(string $workerId): ExecutorEvidenceRefreshStatus
+    {
+        $this->workerIds[] = $workerId;
+        $this->events?->record('refresh');
+        if ($this->failure instanceof \Throwable) throw $this->failure;
+        return $this->status;
+    }
+}
 
 final class RunnerSubmissionTransaction implements BackupSubmissionTransaction
 {
@@ -171,8 +324,9 @@ final class RunnerClient implements PveBackupClient, PveBackupClientProvider
 }
 final class RunnerMonitoringTransaction implements BackupMonitoringTransaction
 {
+    public function __construct(private ?RunnerEvents $events = null) {}
     public function renew(MonitorClaimedBackupCommand $command): bool { return true; }
-    public function prepare(MonitorClaimedBackupCommand $command): ?PreparedBackupMonitoring { return null; }
+    public function prepare(MonitorClaimedBackupCommand $command): ?PreparedBackupMonitoring { $this->events?->record('monitor'); return null; }
     public function claimStopAttempt(MonitorClaimedBackupCommand $command, PveUpid $upid): bool { return false; }
     public function appendLogPage(MonitorClaimedBackupCommand $command, PveUpid $upid, PveTaskLogPage $page): void {}
     public function recordStopAttempt(MonitorClaimedBackupCommand $command, PveUpid $upid, ?\App\Application\Proxmox\Pve\PveTaskStopStatus $status, ?PveBackupApiFailureCode $failure): void {}
@@ -180,9 +334,16 @@ final class RunnerMonitoringTransaction implements BackupMonitoringTransaction
 }
 final class RunnerReconciliationStore implements AmbiguousSubmissionReconciliationStore
 {
+    public function __construct(private ?RunnerEvents $events = null) {}
     public function renew(ReconcileAmbiguousSubmissionCommand $command): bool { return true; }
-    public function prepare(ReconcileAmbiguousSubmissionCommand $command): ?AmbiguousSubmissionIdentity { return null; }
+    public function prepare(ReconcileAmbiguousSubmissionCommand $command): ?AmbiguousSubmissionIdentity { $this->events?->record('reconcile'); return null; }
     public function record(ReconcileAmbiguousSubmissionCommand $command, RecoveryOutcome $outcome): void {}
+}
+
+final class RunnerEvents
+{
+    /** @var list<string> */ public array $values = [];
+    public function record(string $event): void { $this->values[] = $event; }
 }
 final class RunnerReconciliationSource implements AmbiguousSubmissionTaskSource
 {

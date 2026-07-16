@@ -87,6 +87,10 @@ final class DbalBackupTargetCandidateReadModelTest extends DatabaseTestCase
             'node_id'=>$node,'storage_id'=>$storage['id'],'guest_id'=>null,'vm_backup_authorized'=>1,
             'datastore_allocate_authorized'=>1,'authorized'=>1,'observed_at'=>self::NOW,'revision'=>1,
         ]);
+        $connectionId = $storage['connection_id'] ?? null;
+        self::assertIsString($connectionId);
+        $this->seedExecutorEvidenceFixtureConfiguration($connectionId);
+        $this->publishExecutorEvidenceFixture($connectionId);
         $authorized = $this->candidate('local-a')->executor;
         self::assertSame('authorized', $authorized->status->value);
         self::assertTrue($authorized->usable());

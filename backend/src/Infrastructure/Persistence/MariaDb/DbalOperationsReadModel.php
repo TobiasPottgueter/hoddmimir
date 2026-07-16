@@ -78,7 +78,7 @@ SELECT
  (SELECT COUNT(*) FROM guest_placements WHERE observed_at < :cutoff) +
  (SELECT COUNT(*) FROM pve_node_storage_state WHERE observed_at < :cutoff) +
  (SELECT COUNT(*) FROM pbs_datastore_capacity_state WHERE observed_at < :cutoff) +
- (SELECT COUNT(*) FROM executor_permission_evidence WHERE observed_at < :cutoff) +
+ (SELECT COUNT(*) FROM current_executor_permission_evidence WHERE observed_at < :cutoff) +
  (SELECT COUNT(*) FROM proxmox_capability_snapshots WHERE last_observed_at < :cutoff)
 SQL, ['cutoff'=>$cutoff]));
         $lastSuccessful = $this->connection->fetchOne("SELECT MAX(applied_at) FROM inventory_sync_runs WHERE status='succeeded' AND authoritative=1 AND applied_at IS NOT NULL");

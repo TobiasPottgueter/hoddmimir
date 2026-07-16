@@ -324,6 +324,8 @@ final class DbalConfiguredBackupTargetReadModelTest extends DatabaseTestCase
                 'vm_backup_authorized' => 1, 'datastore_allocate_authorized' => 1,
                 'authorized' => 1, 'observed_at' => self::NOW, 'revision' => 1,
             ]);
+            $this->seedExecutorEvidenceFixtureConfiguration($connection);
+            $this->publishExecutorEvidenceFixture($connection);
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         }
@@ -389,6 +391,8 @@ final class DbalConfiguredBackupTargetReadModelTest extends DatabaseTestCase
                 'vm_backup_authorized' => 1, 'datastore_allocate_authorized' => 1,
                 'authorized' => 1, 'observed_at' => $observedAt, 'revision' => 1,
             ]);
+            $this->seedExecutorEvidenceFixtureConfiguration($target['connection_id']);
+            $this->publishExecutorEvidenceFixture($target['connection_id']);
         } finally {
             $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         }

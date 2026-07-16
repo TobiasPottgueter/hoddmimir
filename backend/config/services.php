@@ -84,6 +84,10 @@ use App\Application\Backup\Queue\BackupQueueStore;
 use App\Application\Backup\Queue\QueueClaimTokenSource;
 use App\Application\Backup\Execution\BackupExecutionGate;
 use App\Application\Backup\Execution\BackupSubmissionTransaction;
+use App\Application\Backup\Execution\ExecutorEvidenceRefresh;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshSource;
+use App\Application\Backup\Execution\ExecutorEvidenceRefreshStore;
+use App\Application\Backup\Execution\RefreshExecutorPermissionEvidence;
 use App\Application\Backup\Monitoring\BackupMonitoringTransaction;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionReconciliationStore;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionTaskSource;
@@ -102,9 +106,15 @@ use App\Application\Qa\QaFixtureSeeder;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupWorkerHeartbeatStore;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupSubmissionStore;
+use App\Infrastructure\Persistence\MariaDb\DbalExecutorEvidenceRefreshStore;
+use App\Infrastructure\Persistence\MariaDb\DbalPveExecutorEvidenceConfigurationSource;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupMonitoringStore;
 use App\Infrastructure\Persistence\MariaDb\DbalAmbiguousSubmissionReconciliationStore;
 use App\Infrastructure\Persistence\MariaDb\DbalPveBackupClientProvider;
+use App\Infrastructure\Proxmox\ExecutorEvidence\NativePveExecutorEvidenceRefreshSource;
+use App\Infrastructure\Proxmox\ExecutorEvidence\PveExecutorEvidenceConfigurationSource;
+use App\Infrastructure\Proxmox\ExecutorEvidence\PveExecutorEvidenceHttpClientFactory;
+use App\Infrastructure\Proxmox\ExecutorEvidence\PveNativeExecutorEvidenceHttpClientFactory;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupNotificationDeliveryStore;
 use App\Infrastructure\Persistence\MariaDb\DbalOperationsReadModel;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupOperationCommandRepository;
@@ -228,6 +238,10 @@ return static function (ContainerConfigurator $container): void {
         ->set('env(PBS_CONTENT_SNAPSHOT_BODY_BYTES)', '67108864')
         ->set('env(MONITOR_HISTORY_OVERLAP_SECONDS)', '300')
         ->set('env(EVIDENCE_FRESHNESS_SECONDS)', '300')
+        ->set('env(EXECUTOR_EVIDENCE_REFRESH_CADENCE_SECONDS)', '120')
+        ->set('env(EXECUTOR_EVIDENCE_REFRESH_LEASE_SECONDS)', '90')
+        ->set('env(EXECUTOR_EVIDENCE_REFRESH_PAGE_SIZE)', '256')
+        ->set('env(EXECUTOR_EVIDENCE_REFRESH_MAX_SUBJECTS)', '65536')
         ->set('env(BACKUP_QUEUE_DEFER_SECONDS)', '120')
         ->set('env(BACKUP_EXECUTION_ENABLED)', '0')
         ->set('env(BACKUP_WORKER_HEARTBEAT_TTL_SECONDS)', '150')
@@ -351,6 +365,21 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(BackupQueueStore::class, DbalBackupQueueStore::class);
     $services->set(SystemQueueClaimTokenSource::class);
     $services->alias(QueueClaimTokenSource::class, SystemQueueClaimTokenSource::class);
+    $services->set(DbalExecutorEvidenceRefreshStore::class)
+        ->arg('$cadenceSeconds', '%env(int:EXECUTOR_EVIDENCE_REFRESH_CADENCE_SECONDS)%')
+        ->arg('$leaseSeconds', '%env(int:EXECUTOR_EVIDENCE_REFRESH_LEASE_SECONDS)%')
+        ->arg('$maximumSubjects', '%env(int:EXECUTOR_EVIDENCE_REFRESH_MAX_SUBJECTS)%');
+    $services->alias(ExecutorEvidenceRefreshStore::class, DbalExecutorEvidenceRefreshStore::class);
+    $services->set(DbalPveExecutorEvidenceConfigurationSource::class);
+    $services->alias(PveExecutorEvidenceConfigurationSource::class, DbalPveExecutorEvidenceConfigurationSource::class);
+    $services->set(PveNativeExecutorEvidenceHttpClientFactory::class);
+    $services->alias(PveExecutorEvidenceHttpClientFactory::class, PveNativeExecutorEvidenceHttpClientFactory::class);
+    $services->set(NativePveExecutorEvidenceRefreshSource::class);
+    $services->alias(ExecutorEvidenceRefreshSource::class, NativePveExecutorEvidenceRefreshSource::class);
+    $services->set(RefreshExecutorPermissionEvidence::class)
+        ->arg('$subjectPageSize', '%env(int:EXECUTOR_EVIDENCE_REFRESH_PAGE_SIZE)%')
+        ->arg('$maximumSubjects', '%env(int:EXECUTOR_EVIDENCE_REFRESH_MAX_SUBJECTS)%');
+    $services->alias(ExecutorEvidenceRefresh::class, RefreshExecutorPermissionEvidence::class);
     $services->set(ControlledRetryPolicy::class);
     $services->set(PolicyResolver::class);
     $services->set(EnvironmentBackupExecutionGate::class)->arg('$executionEnabled', '%env(bool:BACKUP_EXECUTION_ENABLED)%');
