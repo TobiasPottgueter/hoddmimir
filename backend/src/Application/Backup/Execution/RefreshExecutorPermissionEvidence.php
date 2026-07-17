@@ -65,33 +65,37 @@ final readonly class RefreshExecutorPermissionEvidence implements ExecutorEviden
         $this->store->bindSnapshotEndpoint($claim, $snapshot->endpointId, $observedAt);
         $cursor = null;
         $subjectCount = 0;
-        for ($remainingPages = $this->maximumSubjects + 1; $remainingPages > 0; --$remainingPages) {
+        $remainingPageReads = $this->maximumSubjects + 1;
+        while ($remainingPageReads > 0) {
+            --$remainingPageReads;
             $this->store->renew($claim, $this->clock->now());
             $subjects = $this->store->subjects($claim, $cursor, $this->subjectPageSize);
             if ([] === $subjects) {
                 $this->store->publish($claim, $observedAt);
                 return ExecutorEvidenceRefreshStatus::Published;
             }
-            if (\count($subjects) > $this->subjectPageSize) {
-                return $this->invalidPage($claim);
-            }
-            $subjectCount += \count($subjects);
-            if ($subjectCount > $this->maximumSubjects) {
-                return $this->invalidPage($claim);
-            }
-
-            $projections = [];
-            foreach ($subjects as $subject) {
-                /** @phpstan-ignore instanceof.alwaysTrue (store adapters are a runtime trust boundary) */
-                if (!$subject instanceof ExecutorEvidenceRefreshSubject
-                    || $subject->connectionId !== $claim->connectionId
-                    || (null !== $cursor && $subject->cursor() <= $cursor)) {
+            if ($remainingPageReads > 0) {
+                if (\count($subjects) > $this->subjectPageSize) {
                     return $this->invalidPage($claim);
                 }
-                $projections[] = $this->projector->project($snapshot, $subject);
-                $cursor = $subject->cursor();
+                $subjectCount += \count($subjects);
+                if ($subjectCount > $this->maximumSubjects) {
+                    return $this->invalidPage($claim);
+                }
+
+                $projections = [];
+                foreach ($subjects as $subject) {
+                    /** @phpstan-ignore instanceof.alwaysTrue (store adapters are a runtime trust boundary) */
+                    if (!$subject instanceof ExecutorEvidenceRefreshSubject
+                        || $subject->connectionId !== $claim->connectionId
+                        || (null !== $cursor && $subject->cursor() <= $cursor)) {
+                        return $this->invalidPage($claim);
+                    }
+                    $projections[] = $this->projector->project($snapshot, $subject);
+                    $cursor = $subject->cursor();
+                }
+                $this->store->stage($claim, $projections);
             }
-            $this->store->stage($claim, $projections);
         }
 
         return $this->invalidPage($claim);
