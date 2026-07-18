@@ -128,6 +128,8 @@ if [ ! -e "$group_vars_file" ]; then
     {
         printf '%s\n' '---'
         printf '%s\n' '# Real production configuration. This mode-0600 file is ignored by Git.'
+        printf '%s\n' 'hoddmimir_image_repository: ""'
+        printf '%s\n' 'hoddmimir_registry_index_digests: {}'
         printf '%s\n' 'hoddmimir_data_worker_image: ""'
         printf '%s\n' 'hoddmimir_backup_worker_image: ""'
         printf '%s\n' 'hoddmimir_webapp_image: ""'

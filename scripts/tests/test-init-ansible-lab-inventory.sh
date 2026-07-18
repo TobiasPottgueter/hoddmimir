@@ -40,6 +40,8 @@ grep -q '^hoddmimir_deployment_profile: lab$' "$main" || fail 'lab profile missi
 grep -q '^hoddmimir_manage_https: false$' "$main" || fail 'HTTPS was not disabled'
 grep -q '^hoddmimir_project_name: hoddmimir-lab$' "$main" || fail 'lab project is not isolated'
 grep -q '^hoddmimir_database_name: hoddmimir_lab$' "$main" || fail 'lab database is not isolated'
+grep -q '^hoddmimir_image_repository: ""$' "$main" || fail 'image repository placeholder missing'
+grep -q '^hoddmimir_registry_index_digests: {}$' "$main" || fail 'registry digest evidence placeholder missing'
 grep -q '^hoddmimir_web_port: 18080$' "$main" || fail 'lab port missing'
 grep -q '^hoddmimir_backup_execution_required_ack: ENABLE_LAB_BACKUPS$' "$main" || fail 'lab acknowledgement missing'
 

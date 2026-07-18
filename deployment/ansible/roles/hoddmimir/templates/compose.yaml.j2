@@ -31,6 +31,7 @@ x-app-security: &app-security
 services:
   mariadb:
     image: {{ hoddmimir_mariadb_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     environment:
       MARIADB_DATABASE: {{ hoddmimir_database_name | to_json }}
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
@@ -62,6 +63,7 @@ services:
 
   data-worker:
     image: {{ hoddmimir_data_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     command: [hoddmimir:worker:data]
     env_file: [./runtime.env]
     environment:
@@ -83,6 +85,7 @@ services:
 
   backup-worker:
     image: {{ hoddmimir_backup_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     command: [hoddmimir:worker:backup, "--interval={{ hoddmimir_backup_worker_poll_interval_seconds }}"]
     env_file: [./runtime.env]
     environment:
@@ -104,6 +107,7 @@ services:
 
   webapp:
     image: {{ hoddmimir_webapp_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     env_file: [./runtime.env]
     environment:
       <<: *app-environment

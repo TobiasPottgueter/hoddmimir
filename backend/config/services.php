@@ -87,6 +87,7 @@ use App\Application\Backup\Execution\BackupSubmissionTransaction;
 use App\Application\Backup\Execution\ExecutorEvidenceRefresh;
 use App\Application\Backup\Execution\ExecutorEvidenceRefreshSource;
 use App\Application\Backup\Execution\ExecutorEvidenceRefreshStore;
+use App\Application\Backup\Execution\ReadModel\ExecutorPermissionEvidenceReadModel;
 use App\Application\Backup\Execution\RefreshExecutorPermissionEvidence;
 use App\Application\Backup\Monitoring\BackupMonitoringTransaction;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionReconciliationStore;
@@ -107,6 +108,7 @@ use App\Infrastructure\Persistence\MariaDb\DbalBackupQueueStore;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupWorkerHeartbeatStore;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupSubmissionStore;
 use App\Infrastructure\Persistence\MariaDb\DbalExecutorEvidenceRefreshStore;
+use App\Infrastructure\Persistence\MariaDb\DbalExecutorPermissionEvidenceReadModel;
 use App\Infrastructure\Persistence\MariaDb\DbalPveExecutorEvidenceConfigurationSource;
 use App\Infrastructure\Persistence\MariaDb\DbalBackupMonitoringStore;
 use App\Infrastructure\Persistence\MariaDb\DbalAmbiguousSubmissionReconciliationStore;
@@ -370,6 +372,9 @@ return static function (ContainerConfigurator $container): void {
         ->arg('$leaseSeconds', '%env(int:EXECUTOR_EVIDENCE_REFRESH_LEASE_SECONDS)%')
         ->arg('$maximumSubjects', '%env(int:EXECUTOR_EVIDENCE_REFRESH_MAX_SUBJECTS)%');
     $services->alias(ExecutorEvidenceRefreshStore::class, DbalExecutorEvidenceRefreshStore::class);
+    $services->set(DbalExecutorPermissionEvidenceReadModel::class)
+        ->arg('$evidenceFreshnessSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
+    $services->alias(ExecutorPermissionEvidenceReadModel::class, DbalExecutorPermissionEvidenceReadModel::class);
     $services->set(DbalPveExecutorEvidenceConfigurationSource::class);
     $services->alias(PveExecutorEvidenceConfigurationSource::class, DbalPveExecutorEvidenceConfigurationSource::class);
     $services->set(PveNativeExecutorEvidenceHttpClientFactory::class);

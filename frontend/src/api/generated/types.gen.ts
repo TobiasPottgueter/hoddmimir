@@ -865,6 +865,34 @@ export type InventoryResourcePage = {
   page: PageMetadata;
 };
 
+export type ExecutorPermissionName = "VM.Backup" | "Datastore.AllocateSpace";
+
+export type ExecutorPermissionEvidence = {
+  id: CanonicalUuid;
+  connectionId: CanonicalUuid;
+  clusterId: CanonicalUuid;
+  targetId: CanonicalUuid;
+  nodeId: CanonicalUuid;
+  storageId: CanonicalUuid;
+  guestId: CanonicalUuid;
+  evidenceSetRevision: string;
+  endpointId: CanonicalUuid;
+  connectionRevision: number;
+  backupCredentialRevision: number;
+  scanCredentialRevision: number;
+  observedAt: UtcTimestamp;
+  freshness: "fresh" | "stale" | "future";
+  vmBackupAuthorized: boolean;
+  datastoreAllocateAuthorized: boolean;
+  authorized: boolean;
+  missingPermissions: Array<ExecutorPermissionName>;
+};
+
+export type ExecutorPermissionEvidencePage = {
+  items: Array<ExecutorPermissionEvidence>;
+  page: PageMetadata;
+};
+
 export type BackupTargetBlockerCode =
   | "storage_inventory_evidence_missing"
   | "storage_inventory_evidence_stale"
@@ -1167,7 +1195,8 @@ export type ShadowGateCode =
   | "minimum_free_space"
   | "node_concurrency"
   | "target_concurrency"
-  | "pbs_mapping_valid";
+  | "pbs_mapping_valid"
+  | "higher_ranked_candidate_absent";
 
 export type ShadowGateScope =
   | "connection"
@@ -1198,7 +1227,8 @@ export type ShadowGateDetailCode =
   | "concurrency_limit_reached"
   | "invalid_mapping"
   | "incompatible"
-  | "active_request_exists";
+  | "active_request_exists"
+  | "higher_ranked_candidate";
 
 export type ShadowEvaluation = {
   id: CanonicalUuid;
@@ -1584,6 +1614,12 @@ export type ConnectionId = CanonicalUuid;
 
 export type ClusterId = CanonicalUuid;
 
+export type TargetId = CanonicalUuid;
+
+export type NodeId = CanonicalUuid;
+
+export type GuestId = CanonicalUuid;
+
 export type Search = string;
 
 export type Enabled = boolean;
@@ -1711,6 +1747,53 @@ export type ListBackupTargetCandidatesResponses = {
 
 export type ListBackupTargetCandidatesResponse =
   ListBackupTargetCandidatesResponses[keyof ListBackupTargetCandidatesResponses];
+
+export type ListExecutorPermissionEvidenceData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: PageCursor;
+    connectionId?: CanonicalUuid;
+    clusterId?: CanonicalUuid;
+    targetId?: CanonicalUuid;
+    nodeId?: CanonicalUuid;
+    guestId?: CanonicalUuid;
+  };
+  url: "/api/v1/executor-permission-evidence";
+};
+
+export type ListExecutorPermissionEvidenceErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError;
+};
+
+export type ListExecutorPermissionEvidenceError =
+  ListExecutorPermissionEvidenceErrors[keyof ListExecutorPermissionEvidenceErrors];
+
+export type ListExecutorPermissionEvidenceResponses = {
+  /**
+   * A bounded stable keyset page of guest-specific current executor permission evidence.
+   */
+  200: ExecutorPermissionEvidencePage;
+};
+
+export type ListExecutorPermissionEvidenceResponse =
+  ListExecutorPermissionEvidenceResponses[keyof ListExecutorPermissionEvidenceResponses];
 
 export type UpdateBackupTargetData = {
   body: TargetCommandRequest;

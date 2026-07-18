@@ -172,6 +172,8 @@ if [ ! -e "$group_vars_file" ]; then
         printf '%s\n' 'hoddmimir_install_directory: /opt/hoddmimir-lab'
         printf '%s\n' 'hoddmimir_secrets_directory: /etc/hoddmimir-lab/secrets'
         printf '%s\n' 'hoddmimir_database_name: hoddmimir_lab'
+        printf '%s\n' 'hoddmimir_image_repository: ""'
+        printf '%s\n' 'hoddmimir_registry_index_digests: {}'
         printf '%s\n' 'hoddmimir_data_worker_image: ""'
         printf '%s\n' 'hoddmimir_backup_worker_image: ""'
         printf '%s\n' 'hoddmimir_webapp_image: ""'

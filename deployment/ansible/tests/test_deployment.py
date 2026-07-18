@@ -58,11 +58,19 @@ def run(command: list[str], *, cwd: Path = ANSIBLE_ROOT, env: dict[str, str] | N
 
 
 def valid_variables() -> dict[str, object]:
+    image_repository = "registry.example/hoddmimir"
+    worker_image = f"{image_repository}/worker@sha256:{'a' * 64}"
     variables: dict[str, object] = {
-        "hoddmimir_data_worker_image": f"registry.example/data-worker@sha256:{'a' * 64}",
-        "hoddmimir_backup_worker_image": f"registry.example/backup-worker@sha256:{'b' * 64}",
-        "hoddmimir_webapp_image": f"registry.example/webapp@sha256:{'c' * 64}",
-        "hoddmimir_mariadb_image": f"registry.example/mariadb@sha256:{'d' * 64}",
+        "hoddmimir_image_repository": image_repository,
+        "hoddmimir_registry_index_digests": {
+            "worker": "sha256:" + "1" * 64,
+            "web": "sha256:" + "2" * 64,
+            "mariadb": "sha256:" + "3" * 64,
+        },
+        "hoddmimir_data_worker_image": worker_image,
+        "hoddmimir_backup_worker_image": worker_image,
+        "hoddmimir_webapp_image": f"{image_repository}/web@sha256:{'c' * 64}",
+        "hoddmimir_mariadb_image": f"{image_repository}/mariadb@sha256:{'d' * 64}",
         "hoddmimir_backup_execution_enabled": False,
         "hoddmimir_backup_execution_activation_ack": "",
         "hoddmimir_timezone": "UTC",
@@ -153,6 +161,14 @@ class InventoryGeneratorTest(unittest.TestCase):
                 'hoddmimir_public_domain: "hoddmimir.example.test"',
                 group_vars_file.read_text(encoding="utf-8"),
             )
+            self.assertIn(
+                'hoddmimir_image_repository: ""',
+                group_vars_file.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "hoddmimir_registry_index_digests: {}",
+                group_vars_file.read_text(encoding="utf-8"),
+            )
             host_result = run(["ansible-inventory", "--inventory", str(inventory_file), "--host", "hoddmimir-production"])
             self.assertEqual(0, host_result.returncode, host_result.stderr)
             host = json.loads(host_result.stdout)
@@ -234,6 +250,7 @@ class PreflightTest(unittest.TestCase):
             "hoddmimir_webapp_image",
             "hoddmimir_data_worker_image",
             "hoddmimir_backup_worker_image",
+            "hoddmimir_mariadb_image",
         )
         invalid_references = (
             "registry.example/application:latest",
@@ -246,6 +263,58 @@ class PreflightTest(unittest.TestCase):
                     variables = valid_variables()
                     variables[image_variable] = invalid_reference
                     self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_requires_one_project_repository_same_worker_digest_and_amd64(self) -> None:
+        invalid_mutations = (
+            ("hoddmimir_backup_worker_image", f"registry.example/hoddmimir/worker@sha256:{'b' * 64}"),
+            ("hoddmimir_webapp_image", f"registry.example/other/web@sha256:{'c' * 64}"),
+            ("hoddmimir_mariadb_image", f"registry.example/library/mariadb@sha256:{'d' * 64}"),
+            ("hoddmimir_release_platform", "linux/arm64"),
+        )
+        for variable, value in invalid_mutations:
+            with self.subTest(variable=variable):
+                variables = valid_variables()
+                variables[variable] = value
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_missing_or_noncanonical_project_image_repository(self) -> None:
+        for repository in ("", "registry.example/hoddmimir:latest", "Registry.example/hoddmimir"):
+            with self.subTest(repository=repository):
+                variables = valid_variables()
+                variables["hoddmimir_image_repository"] = repository
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+    def test_rejects_missing_invalid_duplicate_or_platform_reused_as_any_registry_index_digest(self) -> None:
+        invalid_evidence = (
+            {},
+            {"worker": "sha256:" + "1" * 64, "web": "sha256:" + "2" * 64},
+            {
+                "worker": "sha256:" + "A" * 64,
+                "web": "sha256:" + "2" * 64,
+                "mariadb": "sha256:" + "3" * 64,
+            },
+        )
+        for evidence in invalid_evidence:
+            with self.subTest(evidence=evidence):
+                variables = valid_variables()
+                variables["hoddmimir_registry_index_digests"] = evidence
+                self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables["hoddmimir_registry_index_digests"]["worker"] = "sha256:" + "a" * 64
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables["hoddmimir_registry_index_digests"]["web"] = "sha256:" + "a" * 64
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables["hoddmimir_registry_index_digests"]["web"] = variables["hoddmimir_registry_index_digests"]["worker"]
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
+
+        variables = valid_variables()
+        variables["hoddmimir_webapp_image"] = variables["hoddmimir_webapp_image"].split("@", maxsplit=1)[0] + "@sha256:" + "a" * 64
+        self.assertNotEqual(0, self.run_preflight(variables).returncode)
 
     def test_rejects_unacknowledged_backup_execution(self) -> None:
         variables = valid_variables()
@@ -664,6 +733,9 @@ class ComposeContractTest(unittest.TestCase):
             self.assertEqual(EXPECTED_SERVICES, set(services))
             self.assertTrue(all("build" not in service for service in services.values()))
             self.assertTrue(all("@sha256:" in service["image"] for service in services.values()))
+            self.assertTrue(all(service["platform"] == "linux/amd64" for service in services.values()))
+            self.assertEqual(services["data-worker"]["image"], services["backup-worker"]["image"])
+            self.assertTrue(services["mariadb"]["image"].startswith("registry.example/hoddmimir/mariadb@sha256:"))
             self.assertEqual("hoddmimir", services["mariadb"]["environment"]["MARIADB_DATABASE"])
             self.assertEqual("localhost", services["mariadb"]["environment"]["MARIADB_ROOT_HOST"])
             self.assertEqual("hoddmimir", services["data-worker"]["environment"]["DATABASE_NAME"])
@@ -797,6 +869,8 @@ class ComposeContractTest(unittest.TestCase):
             migration_model = json.loads(migration_configured.stdout)
             self.assertEqual(EXPECTED_SERVICES | {"schema-migration"}, set(migration_model["services"]))
             migration = migration_model["services"]["schema-migration"]
+            self.assertEqual("linux/amd64", migration["platform"])
+            self.assertEqual(services["data-worker"]["image"], migration["image"])
             self.assertEqual(services["data-worker"]["image"], migration["image"])
             self.assertIn("@sha256:", migration["image"])
             self.assertEqual("hoddmimir_migration", migration["environment"]["DATABASE_USER"])

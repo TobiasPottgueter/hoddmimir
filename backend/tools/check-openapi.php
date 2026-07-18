@@ -108,6 +108,7 @@ $expectedResponses = [
     '/api/v1/inventory/overview' => '#/components/schemas/InventoryOverview',
     '/api/v1/inventory/resources' => '#/components/schemas/InventoryResourcePage',
     '/api/v1/backup-target-candidates' => '#/components/schemas/BackupTargetCandidatePage',
+    '/api/v1/executor-permission-evidence' => '#/components/schemas/ExecutorPermissionEvidencePage',
     '/api/v1/backup-targets' => '#/components/schemas/ConfiguredBackupTargetPage',
     '/api/v1/policies' => '#/components/schemas/PolicyPage',
     '/api/v1/policies/{id}/selection' => '#/components/schemas/PolicySelectionPage',
@@ -212,6 +213,7 @@ foreach ($contract['paths'] as $route => $pathItem) {
     }
     if (in_array($route, [
         '/api/v1/backup-target-candidates',
+        '/api/v1/executor-permission-evidence',
         '/api/v1/backup-targets',
         '/api/v1/policies',
         '/api/v1/policies/{id}/selection',
@@ -259,6 +261,30 @@ if ([
     '#/components/parameters/ClusterId',
 ] !== $publishedTargetParameters) {
     failContract('OpenAPI target-candidate query surface drifted.');
+}
+$executorEvidenceParameters = nestedValue(
+    $contract,
+    ['paths', '/api/v1/executor-permission-evidence', 'get', 'parameters'],
+);
+$publishedExecutorEvidenceParameters = [];
+if (is_array($executorEvidenceParameters)) {
+    foreach ($executorEvidenceParameters as $parameter) {
+        if (!is_array($parameter) || !is_string($parameter['$ref'] ?? null)) {
+            failContract('OpenAPI executor-evidence query parameters are not exact references.');
+        }
+        $publishedExecutorEvidenceParameters[] = $parameter['$ref'];
+    }
+}
+if ([
+    '#/components/parameters/Limit',
+    '#/components/parameters/Cursor',
+    '#/components/parameters/ConnectionId',
+    '#/components/parameters/ClusterId',
+    '#/components/parameters/TargetId',
+    '#/components/parameters/NodeId',
+    '#/components/parameters/GuestId',
+] !== $publishedExecutorEvidenceParameters) {
+    failContract('OpenAPI executor-evidence query surface drifted.');
 }
 $configuredTargetParameters = nestedValue(
     $contract,
@@ -423,6 +449,13 @@ $requiredObjects = [
         'storageType', 'shared', 'inventoryState', 'observedAt', 'canEnable', 'nodes', 'executor', 'pbs', 'blockers',
     ],
     'BackupTargetCandidatePage' => ['items', 'page'],
+    'ExecutorPermissionEvidence' => [
+        'id', 'connectionId', 'clusterId', 'targetId', 'nodeId', 'storageId', 'guestId',
+        'evidenceSetRevision', 'endpointId', 'connectionRevision', 'backupCredentialRevision',
+        'scanCredentialRevision', 'observedAt', 'freshness', 'vmBackupAuthorized',
+        'datastoreAllocateAuthorized', 'authorized', 'missingPermissions',
+    ],
+    'ExecutorPermissionEvidencePage' => ['items', 'page'],
     'OperationsWorkerHealth' => [
         'status', 'heartbeatAt', 'expiresAt', 'fresh', 'nextActionAt', 'buildVersion', 'currentActivity',
     ],
@@ -682,6 +715,26 @@ $targetNodeItems = nestedValue(
 if ('#/components/schemas/BackupTargetCandidate' !== $targetPageItems
     || '#/components/schemas/BackupTargetNodeEvidence' !== $targetNodeItems) {
     failContract('OpenAPI target-candidate page or node evidence reference drifted.');
+}
+$executorEvidencePageItems = nestedValue(
+    $schemas,
+    ['ExecutorPermissionEvidencePage', 'properties', 'items', 'items', '$ref'],
+);
+$executorEvidenceSetRevision = nestedValue(
+    $schemas,
+    ['ExecutorPermissionEvidence', 'properties', 'evidenceSetRevision'],
+);
+if ('#/components/schemas/ExecutorPermissionEvidence' !== $executorEvidencePageItems
+    || ['VM.Backup', 'Datastore.AllocateSpace'] !== ($schemas['ExecutorPermissionName']['enum'] ?? null)
+    || ['fresh', 'stale', 'future'] !== nestedValue(
+        $schemas,
+        ['ExecutorPermissionEvidence', 'properties', 'freshness', 'enum'],
+    )
+    || !is_array($executorEvidenceSetRevision)
+    || 'string' !== ($executorEvidenceSetRevision['type'] ?? null)
+    || '^(?:0|[1-9][0-9]{0,19})$' !== ($executorEvidenceSetRevision['pattern'] ?? null)
+    || UInt64Decimal::MAXIMUM !== ($executorEvidenceSetRevision['x-maximum'] ?? null)) {
+    failContract('OpenAPI executor-evidence page, permission, or freshness contract drifted.');
 }
 $configuredTargetPageItems = nestedValue(
     $schemas,

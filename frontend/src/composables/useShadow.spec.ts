@@ -15,6 +15,9 @@ describe("useShadow", () => {
 
   it("liefert vollständig geschlossene erklärbare Labels", () => {
     expect(shadowGateLabel("guest_enabled")).toBe("Gast aktiviert");
+    expect(shadowGateLabel("higher_ranked_candidate_absent")).toBe(
+      "Kein höher priorisierter Kandidat",
+    );
     expect(shadowOutcomeLabel("eligible")).toBe("Geeignet");
     expect(shadowOutcomeLabel("blocked")).toBe("Blockiert");
     expect(shadowOutcomeLabel("not_due")).toBe("Nicht fällig");
@@ -24,6 +27,9 @@ describe("useShadow", () => {
     expect(shadowScopeLabel("pbs_mapping")).toBe("PBS-Zuordnung");
     expect(shadowDetailLabel("active_request_exists")).toBe(
       "Aktive Anforderung vorhanden",
+    );
+    expect(shadowDetailLabel("higher_ranked_candidate")).toBe(
+      "Höher priorisierter Kandidat vorhanden",
     );
   });
 

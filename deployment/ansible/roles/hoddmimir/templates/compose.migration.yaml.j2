@@ -2,6 +2,7 @@
 services:
   schema-migration:
     image: {{ hoddmimir_data_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     command: [doctrine:migrations:migrate, --no-interaction, --allow-no-migration, --no-ansi]
     environment:
       APP_ENV: prod

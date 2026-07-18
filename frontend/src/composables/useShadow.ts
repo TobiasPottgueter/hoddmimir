@@ -32,6 +32,7 @@ const gateLabels: Record<ShadowGateCode, string> = {
   node_concurrency: "Node-Parallelität verfügbar",
   target_concurrency: "Ziel-Parallelität verfügbar",
   pbs_mapping_valid: "PBS-Zuordnung gültig",
+  higher_ranked_candidate_absent: "Kein höher priorisierter Kandidat",
 };
 
 const outcomeLabels: Record<ShadowOutcome, string> = {
@@ -76,6 +77,7 @@ const detailLabels: Record<ShadowGateDetailCode, string> = {
   invalid_mapping: "Ungültige Zuordnung",
   incompatible: "Nicht kompatibel",
   active_request_exists: "Aktive Anforderung vorhanden",
+  higher_ranked_candidate: "Höher priorisierter Kandidat vorhanden",
 };
 
 export const shadowGateLabel = (code: ShadowGateCode): string =>

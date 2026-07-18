@@ -75,6 +75,35 @@
         }
       }
     },
+    "/api/v1/executor-permission-evidence": {
+      "get": {
+        "operationId": "listExecutorPermissionEvidence",
+        "description": "List only current, revision-bound, guest-specific PVE executor authorization evidence. Activation-only rows are never exposed.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" },
+          { "$ref": "#/components/parameters/ConnectionId" },
+          { "$ref": "#/components/parameters/ClusterId" },
+          { "$ref": "#/components/parameters/TargetId" },
+          { "$ref": "#/components/parameters/NodeId" },
+          { "$ref": "#/components/parameters/GuestId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A bounded stable keyset page of guest-specific current executor permission evidence.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ExecutorPermissionEvidencePage" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/InvalidQuery" },
+          "401": { "$ref": "#/components/responses/AuthenticationRequired" },
+          "403": { "$ref": "#/components/responses/PermissionDenied" },
+          "503": { "$ref": "#/components/responses/ReadModelUnavailable" }
+        }
+      }
+    },
     "/api/v1/backup-targets/{id}": {
       "put": {
         "operationId": "updateBackupTarget",
@@ -1463,6 +1492,21 @@
       },
       "ClusterId": {
         "name": "clusterId",
+        "in": "query",
+        "schema": { "$ref": "#/components/schemas/CanonicalUuid" }
+      },
+      "TargetId": {
+        "name": "targetId",
+        "in": "query",
+        "schema": { "$ref": "#/components/schemas/CanonicalUuid" }
+      },
+      "NodeId": {
+        "name": "nodeId",
+        "in": "query",
+        "schema": { "$ref": "#/components/schemas/CanonicalUuid" }
+      },
+      "GuestId": {
+        "name": "guestId",
         "in": "query",
         "schema": { "$ref": "#/components/schemas/CanonicalUuid" }
       },
@@ -3129,6 +3173,62 @@
           "page": { "$ref": "#/components/schemas/PageMetadata" }
         }
       },
+      "ExecutorPermissionName": {
+        "type": "string",
+        "enum": ["VM.Backup", "Datastore.AllocateSpace"]
+      },
+      "ExecutorPermissionEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "connectionId", "clusterId", "targetId", "nodeId", "storageId", "guestId",
+          "evidenceSetRevision", "endpointId", "connectionRevision", "backupCredentialRevision",
+          "scanCredentialRevision", "observedAt", "freshness", "vmBackupAuthorized",
+          "datastoreAllocateAuthorized", "authorized", "missingPermissions"
+        ],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "connectionId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "clusterId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "targetId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "nodeId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "storageId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "guestId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "evidenceSetRevision": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,19})$",
+            "x-maximum": "18446744073709551615"
+          },
+          "endpointId": { "$ref": "#/components/schemas/CanonicalUuid" },
+          "connectionRevision": { "type": "integer", "minimum": 1 },
+          "backupCredentialRevision": { "type": "integer", "minimum": 1 },
+          "scanCredentialRevision": { "type": "integer", "minimum": 1 },
+          "observedAt": { "$ref": "#/components/schemas/UtcTimestamp" },
+          "freshness": { "type": "string", "enum": ["fresh", "stale", "future"] },
+          "vmBackupAuthorized": { "type": "boolean" },
+          "datastoreAllocateAuthorized": { "type": "boolean" },
+          "authorized": { "type": "boolean" },
+          "missingPermissions": {
+            "type": "array",
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": { "$ref": "#/components/schemas/ExecutorPermissionName" }
+          }
+        }
+      },
+      "ExecutorPermissionEvidencePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "page"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": { "$ref": "#/components/schemas/ExecutorPermissionEvidence" }
+          },
+          "page": { "$ref": "#/components/schemas/PageMetadata" }
+        }
+      },
       "BackupTargetBlockerCode": {
         "type": "string",
         "enum": [
@@ -3859,7 +3959,8 @@
           "minimum_free_space",
           "node_concurrency",
           "target_concurrency",
-          "pbs_mapping_valid"
+          "pbs_mapping_valid",
+          "higher_ranked_candidate_absent"
         ]
       },
       "ShadowGateScope": {
@@ -3896,7 +3997,8 @@
           "concurrency_limit_reached",
           "invalid_mapping",
           "incompatible",
-          "active_request_exists"
+          "active_request_exists",
+          "higher_ranked_candidate"
         ]
       },
       "ShadowEvaluation": {

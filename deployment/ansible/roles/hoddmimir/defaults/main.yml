@@ -51,6 +51,9 @@ hoddmimir_https_healthcheck_url: "https://{{ hoddmimir_public_domain }}/api/heal
 hoddmimir_docker_subnet: ""
 hoddmimir_docker_gateway: ""
 
+hoddmimir_image_repository: ""
+hoddmimir_release_platform: linux/amd64
+hoddmimir_registry_index_digests: {}
 hoddmimir_data_worker_image: ""
 hoddmimir_backup_worker_image: ""
 hoddmimir_webapp_image: ""

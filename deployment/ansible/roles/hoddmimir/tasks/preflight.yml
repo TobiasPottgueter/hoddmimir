@@ -45,6 +45,11 @@
       - hoddmimir_deployment_profile in ['production', 'lab']
       - hoddmimir_manage_https is boolean
       - hoddmimir_project_name is match('^[a-z0-9][a-z0-9_-]{0,62}$')
+      - hoddmimir_image_repository is string
+      - hoddmimir_image_repository is match('^[a-z0-9.-]+/[a-z0-9._-]+(?:/[a-z0-9._-]+)*$')
+      - hoddmimir_release_platform == 'linux/amd64'
+      - hoddmimir_registry_index_digests is mapping
+      - (hoddmimir_registry_index_digests.keys() | list | sort) == ['mariadb', 'web', 'worker']
       - hoddmimir_data_worker_image | length > 0
       - hoddmimir_backup_worker_image | length > 0
       - hoddmimir_webapp_image | length > 0
@@ -163,7 +168,46 @@
       - hoddmimir_backup_worker_image is match('^.+@sha256:[0-9a-f]{64}$')
       - hoddmimir_webapp_image is match('^.+@sha256:[0-9a-f]{64}$')
       - hoddmimir_mariadb_image is match('^.+@sha256:[0-9a-f]{64}$')
-    fail_msg: Pin every production image with an @sha256 digest before deployment.
+      - hoddmimir_data_worker_image == hoddmimir_backup_worker_image
+      - >-
+        hoddmimir_data_worker_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - >-
+        hoddmimir_webapp_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - >-
+        hoddmimir_mariadb_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - hoddmimir_registry_index_digests.values() | list | unique | length == 3
+      - >-
+        [
+          hoddmimir_data_worker_image | regex_replace('^.*@', ''),
+          hoddmimir_webapp_image | regex_replace('^.*@', ''),
+          hoddmimir_mariadb_image | regex_replace('^.*@', '')
+        ] | unique | length == 3
+      - >-
+        hoddmimir_data_worker_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/worker'
+      - >-
+        hoddmimir_webapp_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/web'
+      - >-
+        hoddmimir_mariadb_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/mariadb'
+    fail_msg: Pin the exact published Hoddmímir worker, web, and MariaDB linux/amd64 platform manifests; both workers must use the same worker digest.
+
+- name: Validate the three corresponding OCI registry index digests
+  ansible.builtin.assert:
+    that:
+      - item.value is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: Supply one valid OCI registry index digest for each published Hoddmímir image.
+  loop: "{{ hoddmimir_registry_index_digests | dict2items }}"
 
 - name: Require strong generated application and database secrets
   ansible.builtin.assert:

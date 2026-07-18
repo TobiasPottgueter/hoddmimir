@@ -9,7 +9,7 @@ on: # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
       publish_images:
-        description: Publish linux/amd64 worker and web images after all release gates
+        description: Publish linux/amd64 worker, web, and MariaDB images after all release gates
         required: true
         default: false
         type: boolean
@@ -736,8 +736,13 @@ jobs:
         include:
           - target: worker
             dockerfile: docker/php/Dockerfile
+            build_target: worker
           - target: web
             dockerfile: docker/web/Dockerfile
+            build_target: web
+          - target: mariadb
+            dockerfile: docker/mariadb/Dockerfile
+            build_target: ""
     steps:
       - name: Validate explicit publication input
         env:
@@ -789,6 +794,7 @@ jobs:
       - name: Publish linux/amd64 image
         id: image
         env:
+          BUILD_TARGET: ${{ matrix.build_target }}
           DOCKERFILE: ${{ matrix.dockerfile }}
           IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
@@ -797,9 +803,8 @@ jobs:
         run: |
           set -eu
           metadata_file="$RUNNER_TEMP/$TARGET-build-metadata.json"
-          docker buildx build \
+          set -- docker buildx build \
             --platform linux/amd64 \
-            --target "$TARGET" \
             --file "$DOCKERFILE" \
             --tag "$IMAGE:$IMAGE_TAG" \
             --label "org.opencontainers.image.revision=$SOURCE_SHA" \
@@ -810,43 +815,39 @@ jobs:
             --cache-from "type=gha,scope=publish-$TARGET-linux-amd64" \
             --cache-to "type=gha,mode=max,scope=publish-$TARGET-linux-amd64" \
             --metadata-file "$metadata_file" \
-            --push \
-            .
-          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+            --push
+          if test -n "$BUILD_TARGET"; then
+            set -- "$@" --target "$BUILD_TARGET"
+          fi
+          set -- "$@" .
+          "$@"
+          registry_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata_file")
+          printf 'registry_digest=%s\n' "$registry_digest" >> "$GITHUB_OUTPUT"
 
-      - name: Write immutable per-image reference
+      - name: Prove anonymous registry and linux/amd64 platform digests
         env:
-          DIGEST: ${{ steps.image.outputs.digest }}
           IMAGE: ${{ steps.identity.outputs.image }}
           IMAGE_TAG: ${{ steps.identity.outputs.image_tag }}
+          REGISTRY_DIGEST: ${{ steps.image.outputs.registry_digest }}
+          REPOSITORY: ${{ github.repository }}
           SOURCE_REF: ${{ steps.identity.outputs.source_ref }}
           SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
           TARGET: ${{ matrix.target }}
         run: |
           set -eu
           mkdir -p artifacts/publication
-          jq -n \
-            --arg target "$TARGET" \
-            --arg imageTag "$IMAGE_TAG" \
-            --arg image "$IMAGE" \
-            --arg sourceRef "$SOURCE_REF" \
-            --arg sourceSha "$SOURCE_SHA" \
-            --arg tag "$IMAGE:$IMAGE_TAG" \
-            --arg digest "$DIGEST" \
-            --arg reference "$IMAGE@$DIGEST" \
-            '{
-              target: $target,
-              imageTag: $imageTag,
-              image: $image,
-              sourceRef: $sourceRef,
-              sourceSha: $sourceSha,
-              tag: $tag,
-              digest: $digest,
-              reference: $reference
-            }' > "artifacts/publication/$TARGET.json"
+          repository=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          python3 scripts/ci/publication_evidence.py image \
+            --target "$TARGET" \
+            --image "$IMAGE" \
+            --repository "ghcr.io/$repository" \
+            --image-tag "$IMAGE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --source-sha "$SOURCE_SHA" \
+            --registry-digest "$REGISTRY_DIGEST" \
+            --output "artifacts/publication/$TARGET.json"
 
-      - name: Retain immutable per-image reference
+      - name: Retain immutable per-image digest evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hoddmimir-published-image-${{ matrix.target }}
@@ -859,7 +860,7 @@ jobs:
         run: docker logout ghcr.io || true
 
   publish-images:
-    name: Publish worker and web linux/amd64 images
+    name: Publish worker, web, and MariaDB linux/amd64 images
     if: always() && github.event_name == 'workflow_dispatch' && inputs.publish_images == true
     needs: publish-image
     permissions:
@@ -867,26 +868,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Require both parallel publish builds
+      - name: Require all three parallel publish builds
         run: test "${{ needs.publish-image.result }}" = success
 
-      - name: Download both immutable per-image references
+      - name: Check out dispatched source without credentials
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download all three immutable per-image evidence documents
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: hoddmimir-published-image-*
           path: artifacts/publication
           merge-multiple: true
 
-      - name: Set up pinned Buildx for anonymous digest proof
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-        with:
-          version: v0.35.0
-          driver-opts: |
-            image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
-          buildkitd-flags: --oci-worker-net bridge
-          cache-binary: false
-
-      - name: Validate, prove, and combine exactly both images
+      - name: Validate and combine the closed three-image evidence set
         env:
           EXPECTED_IMAGE_TAG: ${{ inputs.image_tag }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
@@ -894,39 +891,15 @@ jobs:
           EXPECTED_SOURCE_SHA: ${{ github.sha }}
         run: |
           set -eu
-          test "$(find artifacts/publication -type f -name '*.json' | wc -l | tr -d ' ')" -eq 2
-          jq -s -e '
-            length == 2
-            and ([.[].target] | sort) == ["web", "worker"]
-            and all(.[]; .imageTag == env.EXPECTED_IMAGE_TAG)
-            and all(.[]; .sourceRef == env.EXPECTED_SOURCE_REF)
-            and all(.[]; .sourceSha == env.EXPECTED_SOURCE_SHA)
-            and all(.[]; .image == ("ghcr.io/" + (env.EXPECTED_REPOSITORY | ascii_downcase) + "/" + .target))
-            and all(.[]; .digest | test("^sha256:[0-9a-f]{64}$"))
-            and all(.[]; .tag == (.image + ":" + .imageTag))
-            and all(.[]; .reference == (.image + "@" + .digest))
-          ' artifacts/publication/*.json >/dev/null
-
-          anonymous_config=$(mktemp -d)
-          trap 'rm -rf "$anonymous_config"' EXIT HUP INT TERM
-          for reference in $(jq -r '.reference' artifacts/publication/*.json); do
-            DOCKER_CONFIG="$anonymous_config" docker buildx imagetools inspect "$reference" >/dev/null
-          done
-
-          jq -s '
-            sort_by(.target) as $items
-            | {
-                imageTag: $items[0].imageTag,
-                sourceRef: $items[0].sourceRef,
-                sourceSha: $items[0].sourceSha,
-                images: (reduce $items[] as $image ({};
-                  .[$image.target] = {
-                    tag: $image.tag,
-                    digest: $image.digest,
-                    reference: $image.reference
-                  }))
-              }
-          ' artifacts/publication/*.json > artifacts/published-images.json
+          test "$(find artifacts/publication -type f -name '*.json' | wc -l | tr -d ' ')" -eq 3
+          repository=$(printf '%s' "$EXPECTED_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          python3 scripts/ci/publication_evidence.py combine \
+            --repository "ghcr.io/$repository" \
+            --image-tag "$EXPECTED_IMAGE_TAG" \
+            --source-ref "$EXPECTED_SOURCE_REF" \
+            --source-sha "$EXPECTED_SOURCE_SHA" \
+            --output artifacts/published-images.json \
+            artifacts/publication/*.json
 
       - name: Retain immutable deployment references
         id: references
@@ -943,10 +916,14 @@ jobs:
         run: |
           set -eu
           IMAGE_TAG=$(jq -r '.imageTag' artifacts/published-images.json)
-          SOURCE_REF=$(jq -r '.sourceRef' artifacts/published-images.json)
-          SOURCE_SHA=$(jq -r '.sourceSha' artifacts/published-images.json)
-          WORKER_REFERENCE=$(jq -r '.images.worker.reference' artifacts/published-images.json)
-          WEB_REFERENCE=$(jq -r '.images.web.reference' artifacts/published-images.json)
+          SOURCE_REF=$(jq -r '.source.ref' artifacts/published-images.json)
+          SOURCE_SHA=$(jq -r '.source.sha' artifacts/published-images.json)
+          WORKER_REGISTRY_REFERENCE=$(jq -r '.images.worker.registry.reference' artifacts/published-images.json)
+          WORKER_PLATFORM_REFERENCE=$(jq -r '.images.worker.platform.reference' artifacts/published-images.json)
+          WEB_REGISTRY_REFERENCE=$(jq -r '.images.web.registry.reference' artifacts/published-images.json)
+          WEB_PLATFORM_REFERENCE=$(jq -r '.images.web.platform.reference' artifacts/published-images.json)
+          MARIADB_REGISTRY_REFERENCE=$(jq -r '.images.mariadb.registry.reference' artifacts/published-images.json)
+          MARIADB_PLATFORM_REFERENCE=$(jq -r '.images.mariadb.platform.reference' artifacts/published-images.json)
           # Markdown backticks are intentionally literal.
           # shellcheck disable=SC2016
           {
@@ -954,8 +931,12 @@ jobs:
             printf -- '- Source ref: `%s`\n' "$SOURCE_REF"
             printf -- '- Source commit: `%s`\n' "$SOURCE_SHA"
             printf -- '- Discovery tag: `%s`\n' "$IMAGE_TAG"
-            printf -- '- Worker: `%s`\n' "$WORKER_REFERENCE"
-            printf -- '- Web: `%s`\n' "$WEB_REFERENCE"
+            printf -- '- Worker registry index: `%s`\n' "$WORKER_REGISTRY_REFERENCE"
+            printf -- '- Worker linux/amd64 manifest: `%s`\n' "$WORKER_PLATFORM_REFERENCE"
+            printf -- '- Web registry index: `%s`\n' "$WEB_REGISTRY_REFERENCE"
+            printf -- '- Web linux/amd64 manifest: `%s`\n' "$WEB_PLATFORM_REFERENCE"
+            printf -- '- MariaDB registry index: `%s`\n' "$MARIADB_REGISTRY_REFERENCE"
+            printf -- '- MariaDB linux/amd64 manifest: `%s`\n' "$MARIADB_PLATFORM_REFERENCE"
             printf -- '- Digest artifact SHA-256: `%s`\n' "$ARTIFACT_DIGEST"
-            printf '\nUse only the `@sha256:` references for deployment.\n'
+            printf '\nUse only the exported linux/amd64 manifest references for deployment.\n'
           } >> "$GITHUB_STEP_SUMMARY"

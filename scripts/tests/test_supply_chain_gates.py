@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import re
-import shutil
 import subprocess
-import tempfile
 import unittest
 
 
@@ -434,19 +431,20 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("docker/setup-qemu-action", self.build_job)
         self.assertNotIn("tonistiigi/binfmt", self.build_job)
 
-    def test_exact_worker_and_web_amd64_images_are_published(self) -> None:
-        self.assertEqual(2, self.build_job.count("          - target:"))
-        self.assertIn("target: worker", self.build_job)
-        self.assertIn("dockerfile: docker/php/Dockerfile", self.build_job)
-        self.assertIn("target: web", self.build_job)
-        self.assertIn("dockerfile: docker/web/Dockerfile", self.build_job)
+    def test_exact_three_scanned_amd64_images_are_published(self) -> None:
+        self.assertEqual(3, self.build_job.count("          - target:"))
+        for target, dockerfile, build_target in TARGETS:
+            self.assertIn(f"target: {target}", self.build_job)
+            self.assertIn(f"dockerfile: {dockerfile}", self.build_job)
+            expected_target = f"build_target: {build_target}" if build_target else 'build_target: ""'
+            self.assertIn(expected_target, self.build_job)
         self.assertEqual(1, self.build_job.count("docker buildx build"))
         self.assertEqual(1, self.build_job.count("--platform linux/amd64"))
         self.assertNotIn("linux/arm64", self.build_job)
         self.assertEqual(1, self.build_job.count("--push"))
-        self.assertNotIn("docker/mariadb/Dockerfile", self.build_job)
         self.assertIn("--provenance=mode=max", self.build_job)
         self.assertIn("--sbom=true", self.build_job)
+        self.assertIn('if test -n "$BUILD_TARGET"', self.build_job)
         for scope in (
             "container-$TARGET-linux-amd64",
             "publish-$TARGET-linux-amd64",
@@ -454,92 +452,30 @@ class ImagePublicationWorkflowContractTest(unittest.TestCase):
             self.assertIn(scope, self.build_job)
 
     def test_image_digests_are_validated_and_exported_for_deployment(self) -> None:
-        self.assertEqual(
-            1,
-            self.build_job.count(
-                'select(test("^sha256:[0-9a-f]{64}$"))'
-            ),
-        )
-        self.assertIn('([.[].target] | sort) == ["web", "worker"]', self.final_job)
+        self.assertIn('select(test("^sha256:[0-9a-f]{64}$"))', self.build_job)
+        self.assertIn("publication_evidence.py image", self.build_job)
+        self.assertIn("publication_evidence.py combine", self.final_job)
         self.assertIn("EXPECTED_REPOSITORY: ${{ github.repository }}", self.final_job)
         self.assertIn("artifacts/published-images.json", self.final_job)
-        self.assertIn(".images.worker.reference", self.final_job)
-        self.assertIn(".images.web.reference", self.final_job)
+        for target in ("worker", "web", "mariadb"):
+            self.assertIn(f".images.{target}.registry.reference", self.final_job)
+            self.assertIn(f".images.{target}.platform.reference", self.final_job)
         self.assertIn("artifact-digest", self.final_job)
-        self.assertIn("Use only the `@sha256:` references for deployment.", self.final_job)
-
-    def test_combined_publication_manifest_is_valid_jq_and_has_expected_shape(self) -> None:
-        jq = shutil.which("jq")
-        self.assertIsNotNone(jq, "jq is required to validate the publication manifest")
-
-        start = "          jq -s '\n"
-        end = "\n          ' artifacts/publication/*.json > artifacts/published-images.json"
-        self.assertIn(start, self.final_job)
-        program, separator, _ = self.final_job.split(start, maxsplit=1)[1].partition(end)
-        self.assertEqual(end, separator)
-
-        digest_worker = "sha256:" + ("1" * 64)
-        digest_web = "sha256:" + ("2" * 64)
-        inputs = [
-            {
-                "target": "worker",
-                "imageTag": "phase7-test",
-                "sourceRef": "refs/heads/codex/test",
-                "sourceSha": "a" * 40,
-                "tag": "ghcr.io/example/hoddmimir/worker:phase7-test",
-                "digest": digest_worker,
-                "reference": f"ghcr.io/example/hoddmimir/worker@{digest_worker}",
-            },
-            {
-                "target": "web",
-                "imageTag": "phase7-test",
-                "sourceRef": "refs/heads/codex/test",
-                "sourceSha": "a" * 40,
-                "tag": "ghcr.io/example/hoddmimir/web:phase7-test",
-                "digest": digest_web,
-                "reference": f"ghcr.io/example/hoddmimir/web@{digest_web}",
-            },
-        ]
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            paths = []
-            for publication in reversed(inputs):
-                path = pathlib.Path(temporary_directory) / f"{publication['target']}.json"
-                path.write_text(json.dumps(publication), encoding="utf-8")
-                paths.append(str(path))
-
-            result = subprocess.run(
-                [jq, "-s", program, *paths],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-        self.assertEqual(0, result.returncode, msg=result.stderr)
-        self.assertEqual(
-            {
-                "imageTag": "phase7-test",
-                "sourceRef": "refs/heads/codex/test",
-                "sourceSha": "a" * 40,
-                "images": {
-                    publication["target"]: {
-                        "tag": publication["tag"],
-                        "digest": publication["digest"],
-                        "reference": publication["reference"],
-                    }
-                    for publication in inputs
-                },
-            },
-            json.loads(result.stdout),
-        )
+        self.assertIn("Use only the exported linux/amd64 manifest references", self.final_job)
 
     def test_anonymous_digest_pull_is_proved_before_references_are_exported(self) -> None:
-        proof = self.final_job.index("docker buildx imagetools inspect")
-        export = self.final_job.index("artifacts/published-images.json")
+        proof = self.build_job.index("publication_evidence.py image")
+        export = self.build_job.index('artifacts/publication/$TARGET.json')
         self.assertLess(proof, export)
-        self.assertEqual(1, self.final_job.count("docker buildx imagetools inspect"))
-        self.assertIn('DOCKER_CONFIG="$anonymous_config"', self.final_job)
+        self.assertNotIn("docker buildx imagetools inspect", self.build_job)
+        self.assertNotIn("DOCKER_CONFIG", self.build_job)
+        evidence_script = read("scripts/ci/publication_evidence.py")
+        self.assertIn("class AnonymousRegistryClient", evidence_script)
+        self.assertIn("verify_content(index_raw", evidence_script)
+        self.assertIn("verify_content(config_raw", evidence_script)
+        self.assertIn("vnd.docker.reference.digest", evidence_script)
+        self.assertNotIn("DOCKER_AUTH_CONFIG", evidence_script)
+        self.assertNotIn("GITHUB_TOKEN", evidence_script)
         self.assertNotIn("docker/login-action", self.final_job)
         self.assertIn(
             "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY",

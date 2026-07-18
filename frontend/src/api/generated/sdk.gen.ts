@@ -128,6 +128,9 @@ import type {
   ListConnectionsData,
   ListConnectionsErrors,
   ListConnectionsResponses,
+  ListExecutorPermissionEvidenceData,
+  ListExecutorPermissionEvidenceErrors,
+  ListExecutorPermissionEvidenceResponses,
   ListInventoryResourcesData,
   ListInventoryResourcesErrors,
   ListInventoryResourcesResponses,
@@ -263,6 +266,34 @@ export const listBackupTargetCandidates = <
       },
     ],
     url: "/api/v1/backup-target-candidates",
+    ...options,
+  });
+
+/**
+ * List only current, revision-bound, guest-specific PVE executor authorization evidence. Activation-only rows are never exposed.
+ */
+export const listExecutorPermissionEvidence = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<ListExecutorPermissionEvidenceData, ThrowOnError>,
+): RequestResult<
+  ListExecutorPermissionEvidenceResponses,
+  ListExecutorPermissionEvidenceErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListExecutorPermissionEvidenceResponses,
+    ListExecutorPermissionEvidenceErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "hoddmimir_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/api/v1/executor-permission-evidence",
     ...options,
   });
 

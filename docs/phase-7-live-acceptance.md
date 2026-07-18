@@ -135,13 +135,15 @@ Hoddmímir-API-Authentifizierung oder Verbindungspersistenz.
       Kandidaten-SHA festlegen.
 - [ ] Alle vom geänderten Arbeitsstand betroffenen lokalen Quality Gates auf
       exakt diesem Kandidaten wiederholen.
-- [ ] Worker und Web ausschließlich für `linux/amd64` in die freigegebene
-      Registry veröffentlichen.
+- [ ] Worker, Web und das eigene MariaDB-Image ausschließlich für
+      `linux/amd64` in die freigegebene Registry veröffentlichen.
 - [ ] Die tatsächlichen Registry- und Plattformdigests,
       Trivy-Ergebnisse und CycloneDX-SBOMs dem Kandidaten zuordnen.
-- [ ] Alle vier Produktionsimage-Referenzen einschließlich MariaDB als
-      `image@sha256:...` pinnen; lokale OCI-Archivprüfsummen sind kein Ersatz
-      für Registry-Digests.
+- [ ] Alle vier Produktionsimage-Referenzen auf die exportierten
+      `linux/amd64`-Plattformmanifeste pinnen: Data- und Backup-Worker verwenden
+      dieselbe Worker-Referenz, Web und das gescannte eigene MariaDB-Image ihre
+      jeweilige Referenz. Registry-Index- und lokale OCI-Archivprüfsummen sind
+      kein Ersatz für den Plattformdigest.
 
 Externe Mutation: Registry-Push. Dafür werden Registry-Ziel, Authentifizierung
 und Veröffentlichungsfreigabe benötigt.
