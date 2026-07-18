@@ -1,22 +1,29 @@
-# Dormant PVE backup-write contract
+# PVE backup-write runtime contract
 
 ## Status and activation boundary
 
-This slice defines the typed PVE 7/8/9 contract required by the future backup
-worker. It is intentionally dormant:
+This document defines the typed PVE 7/8/9 write contract used by the backup
+worker. The runtime is wired, but remains fail-closed at its process and
+deployment boundaries:
 
-- the current `BackupWorkerCommand` does not receive or construct a PVE write
-  client;
+- only `BackupWorkerCommand` can reach the PVE backup client provider,
+  submission, monitoring, reconciliation and stop paths;
 - the collector has no path to the client and remains read-only;
-- no Web API endpoint exposes backup execution or task stopping;
-- `BACKUP_EXECUTION_ENABLED` still defaults to `false`;
-- production activation still requires the deployment acknowledgement
-  `ENABLE_PRODUCTION_BACKUPS` and a later application-level wiring change.
+- the Web API can persist manual requests and cancel intents, but never calls
+  PVE synchronously and never receives a PVE credential;
+- `BACKUP_EXECUTION_ENABLED` defaults to `false` and prevents new PVE write
+  dispatches while monitoring and reconciliation of existing tasks remain
+  available;
+- production activation additionally requires the deployment acknowledgement
+  `ENABLE_PRODUCTION_BACKUPS`; the isolated lab uses its separate
+  `ENABLE_LAB_BACKUPS` acknowledgement and does not authorize production;
+- enabled execution also requires enabled problem notification delivery with
+  a valid HTTPS Matrix webhook secret.
 
-The infrastructure namespace `Infrastructure/Proxmox/PveBackup` must remain
-excluded from Symfony's default service discovery until that activation work
-is implemented. This prevents constructor autowiring from turning a dormant
-transport into a reachable runtime service.
+`Infrastructure/Proxmox/PveBackup` remains excluded from broad Symfony service
+discovery. Its concrete factory and adapters are registered explicitly in the
+composition root, so adding a class to that namespace cannot make a new write
+path reachable by autowiring alone.
 
 ## Operations
 
@@ -32,7 +39,7 @@ invalid JSON/envelope, null data, malformed UPID, or node/VMID identity mismatch
 during `POST` yields the typed `ambiguous` submission outcome. Once the HTTP
 write has been dispatched, only a definitive non-2xx rejection or a valid,
 identity-matching UPID can remove that ambiguity. The client never invents a
-UPID. A future worker must persist the ambiguity and reconcile it against
+UPID. The worker persists the ambiguity and reconciles it against
 observed task inventory; it must not submit the same backup again merely
 because the response was lost or unusable. The same conservative ambiguity
 applies to an unusable response while stopping a task.
@@ -92,4 +99,5 @@ envelope. Contract tests prove the PVE 9 `maxfiles` absence, the strict payload
 allowlist, UPID identity matching, ordered task-log decoding, and null stop
 response. Unit tests separately prove the single-attempt write behavior,
 ambiguous outcomes, factory-owned TLS trust without request overrides, failure
-typing, and current worker isolation.
+typing, explicit composition-root wiring, execution-gate isolation and worker
+runtime behavior.

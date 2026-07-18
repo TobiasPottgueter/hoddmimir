@@ -367,6 +367,7 @@ SQL, ['id' => $binary], ['id' => ParameterType::BINARY]);
             'origin' => $this->text($row['origin'] ?? null), 'reason' => $this->text($row['reason'] ?? null),
             'priority' => $this->integer($row['priority'] ?? null), 'attempt' => $this->integer($row['attempt'] ?? null),
             'revision' => $this->integer($row['revision'] ?? null), 'guestId' => $this->uuid($row['guest_id'] ?? null),
+            'policyId' => $this->uuid($row['policy_id'] ?? null), 'targetId' => $this->uuid($row['target_id'] ?? null),
             'guestName' => $this->nullableText($row['guest_name'] ?? null), 'guestType' => $this->text($row['guest_type'] ?? null),
             'vmid' => $this->integer($row['vmid'] ?? null), 'nodeName' => $this->text($row['node_name'] ?? null),
             'policyName' => $this->text($row['policy_name'] ?? null), 'targetName' => $this->text($row['target_name'] ?? null),

@@ -28,6 +28,8 @@ const request = {
   terminalCode: null,
   revision: 1,
   guestId: id,
+  policyId: id,
+  targetId: id,
   guestName: "vm",
   guestType: "qemu" as const,
   vmid: 100,
@@ -116,6 +118,11 @@ describe("backup operations store", () => {
     await store.loadNotifications(client);
     await store.loadNotifications(client, true);
     expect(store.queue).toHaveLength(2);
+    expect(store.queue[0]).toMatchObject({
+      guestId: id,
+      policyId: id,
+      targetId: id,
+    });
     expect(store.runs).toHaveLength(2);
     expect(store.notificationHealth).not.toBeNull();
     expect(store.emptyQueue).toBe(false);

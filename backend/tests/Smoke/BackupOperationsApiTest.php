@@ -51,6 +51,12 @@ final class BackupOperationsApiTest extends WebTestCase
         $this->auth->authenticated=false; $this->client->request('GET','/api/v1/operations/dashboard'); self::assertResponseStatusCodeSame(401);
         $this->auth->authenticated=true; $this->auth->permissions=[]; $this->client->request('GET','/api/v1/operations/queue'); self::assertResponseStatusCodeSame(403);
         $this->auth->permissions=[Permission::InventoryRead]; $this->client->request('GET','/api/v1/operations/queue?limit=1'); self::assertResponseIsSuccessful();
+        $queue = $this->json()['items'] ?? null;
+        self::assertIsArray($queue);
+        $first = $queue[0] ?? null;
+        self::assertIsArray($first);
+        self::assertSame(self::POLICY_ID, $first['policyId'] ?? null);
+        self::assertSame(self::TARGET_ID, $first['targetId'] ?? null);
         $this->client->request('GET','/api/v1/operations/runs/'.self::UUID); self::assertResponseIsSuccessful();
         $this->client->request('GET','/api/v1/operations/runs/missing'); self::assertResponseStatusCodeSame(404);
     }
@@ -95,6 +101,8 @@ final class BackupOperationsApiTest extends WebTestCase
         $this->request('/api/v1/operations/requests/'.self::UUID.'/cancel',['expectedRevision'=>1]); self::assertResponseStatusCodeSame(503);
     }
     private const string UUID='00112233-4455-6677-8899-aabbccddeeff';
+    private const string POLICY_ID='10112233-4455-6677-8899-aabbccddeeff';
+    private const string TARGET_ID='20112233-4455-6677-8899-aabbccddeeff';
     /** @param array<string,mixed> $body */
     private function request(string $path,array $body): void { $csrf=rtrim(strtr(base64_encode(str_repeat("\x03",32)),'+/','-_'),'='); $this->client->jsonRequest('POST',$path,$body,['HTTP_X_CSRF_TOKEN'=>$csrf,'HTTP_IDEMPOTENCY_KEY'=>'operation-1']); }
     /** @return array<string,mixed> */ private function json(): array { $v=json_decode((string)$this->client->getResponse()->getContent(),true); self::assertIsArray($v); /** @var array<string,mixed> $v */ return $v; }
@@ -119,7 +127,7 @@ final class OperationsReadFake implements OperationsReadModel
 {
     public bool $fail=false;
     public function dashboard(bool $includeAudit): OperationsDashboard{if($this->fail)throw new \RuntimeException('closed'); return new OperationsDashboard(['collector'=>null,'backup'=>null],new OperationsCollectorSchedule('2026-07-13T00:02:00.000000Z',null,null,null),['systems'=>0,'nodes'=>0,'guests'=>0,'targets'=>0,'policies'=>0],[],['manual'=>0,'never_backed_up'=>0,'max_age'=>0,'bytes_written'=>0],[],null,null,0,0,0,$this->notificationHealth(),[],$includeAudit);}
-    public function queue(PageRequest $page,?BackupRequestState $state): OperationsPage{return new OperationsPage($page,[],null);}
+    public function queue(PageRequest $page,?BackupRequestState $state): OperationsPage{return new OperationsPage($page,[['policyId'=>'10112233-4455-6677-8899-aabbccddeeff','targetId'=>'20112233-4455-6677-8899-aabbccddeeff']],null);}
     public function runs(PageRequest $page,?BackupRunState $state): OperationsPage{return new OperationsPage($page,[],null);}
     public function run(string $id): ?array{return 'missing' === $id ? null : ['id'=>$id];}
     public function requestEvents(string $requestId,PageRequest $page): OperationsPage{return new OperationsPage($page,[],null);}

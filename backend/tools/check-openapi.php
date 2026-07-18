@@ -438,7 +438,7 @@ $requiredObjects = [
     'OperationsLastSuccessfulRun' => ['runId', 'guestName', 'vmid', 'nodeName', 'targetName', 'finishedAt'],
     'BackupRequest' => [
         'id', 'rootRequestId', 'runId', 'state', 'origin', 'reason', 'priority', 'attempt', 'revision',
-        'guestId', 'guestName', 'guestType', 'vmid', 'nodeName', 'policyName', 'targetName',
+        'guestId', 'policyId', 'targetId', 'guestName', 'guestType', 'vmid', 'nodeName', 'policyName', 'targetName',
         'scheduledAt', 'availableAt', 'createdAt', 'updatedAt', 'cancelRequestedAt', 'terminalCode',
     ],
     'BackupNotification' => [

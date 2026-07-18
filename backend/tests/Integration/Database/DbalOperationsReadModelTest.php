@@ -40,6 +40,8 @@ final class DbalOperationsReadModelTest extends DatabaseTestCase
 
         $firstPage = $readModel->queue(new PageRequest(1), null)->toArray();
         self::assertSame('c0000000-0000-4000-8000-000000000002', $firstPage['items'][0]['id'] ?? null);
+        self::assertSame('80000000-0000-4000-8000-000000000001', $firstPage['items'][0]['policyId'] ?? null);
+        self::assertSame('70000000-0000-4000-8000-000000000001', $firstPage['items'][0]['targetId'] ?? null);
         self::assertTrue($firstPage['page']['hasMore']);
         self::assertIsString($firstPage['page']['nextCursor']);
         $secondPage = $readModel->queue(

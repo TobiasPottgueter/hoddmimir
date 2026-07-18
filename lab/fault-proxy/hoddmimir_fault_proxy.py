@@ -10,18 +10,26 @@ import ipaddress
 import json
 import os
 import re
+import select
+import signal
 import socket
 import ssl
 import stat
 import struct
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
 ACTIVATION_ACK = "INJECT_AFTER_VERIFIED_UPSTREAM_RESPONSE"
+HOLD_ACTIVATION_ACK = "HOLD_AFTER_VERIFIED_UPSTREAM_RESPONSE"
+HOLD_RELEASE_DOCUMENT = b"RELEASE\n"
+HOLD_REQUIRED_UID = 0
+MINIMUM_HOLD_SECONDS = 0.1
+MAXIMUM_HOLD_SECONDS = 120.0
 MAXIMUM_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 MAXIMUM_RESPONSE_BODY_BYTES = 8 * 1024 * 1024
 HOP_BY_HOP_HEADERS = frozenset(
@@ -50,6 +58,10 @@ class ConfigurationError(RuntimeError):
 
 class MetricsError(RuntimeError):
     """Sanitized evidence could not be persisted safely."""
+
+
+class HoldControlError(RuntimeError):
+    """The deterministic response hold could not be controlled safely."""
 
 
 class FaultRoute(str, Enum):
@@ -89,7 +101,17 @@ class FaultPlan:
 
 
 class SanitizedCounters:
-    FIELDS = ("received", "upstreamResponses", "responsesForwarded", "faultsInjected")
+    FIELDS = (
+        "received",
+        "upstreamResponses",
+        "responsesForwarded",
+        "faultsInjected",
+        "upstream_complete",
+        "hold_entered",
+        "client_gone",
+        "released",
+        "fault",
+    )
 
     def __init__(self, destination: Path) -> None:
         self._destination = destination
@@ -99,12 +121,16 @@ class SanitizedCounters:
         self._persist_locked()
 
     def record(self, route: FaultRoute | None, field: str) -> None:
-        if field not in self.FIELDS:
+        self.record_many(route, (field,))
+
+    def record_many(self, route: FaultRoute | None, fields: tuple[str, ...]) -> None:
+        if not fields or any(field not in self.FIELDS for field in fields):
             raise MetricsError("Unknown sanitized counter field.")
         label = route.counter_label if route is not None else "OTHER /other"
         with self._lock:
             values = self._counters.setdefault(label, {name: 0 for name in self.FIELDS})
-            values[field] += 1
+            for field in fields:
+                values[field] += 1
             self._persist_locked()
 
     def _validate_destination(self) -> None:
@@ -147,6 +173,14 @@ class SanitizedCounters:
                 os.fsync(handle.fileno())
             os.replace(temporary_path, self._destination)
             temporary_path = None
+            directory_descriptor = os.open(
+                self._destination.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
         except OSError as error:
             raise MetricsError("The sanitized metrics file could not be written.") from error
         finally:
@@ -168,6 +202,9 @@ class ProxyConfiguration:
     metrics_file: Path
     routes: tuple[FaultRoute, ...]
     fault_count: int
+    hold_routes: tuple[FaultRoute, ...] = ()
+    hold_max_seconds: float = 30.0
+    hold_control_directory: Path | None = None
 
     @classmethod
     def from_arguments(cls, arguments: argparse.Namespace) -> "ProxyConfiguration":
@@ -197,6 +234,23 @@ class ProxyConfiguration:
             raise ConfigurationError("The listen host must be an explicit private or loopback IP address.")
         if arguments.upstream_timeout_seconds <= 0 or arguments.upstream_timeout_seconds > 300:
             raise ConfigurationError("The upstream timeout must be between 0 and 300 seconds.")
+
+        hold_routes = tuple(dict.fromkeys(FaultRoute(value) for value in (arguments.hold_route or ())))
+        hold_directory = Path(arguments.hold_control_directory) if arguments.hold_control_directory else None
+        if hold_routes:
+            if len(hold_routes) != 1:
+                raise ConfigurationError("Select exactly one response-hold route for the one-shot harness.")
+            if arguments.hold_activation_ack != HOLD_ACTIVATION_ACK:
+                raise ConfigurationError("The separate response-hold acknowledgement is missing.")
+            if hold_directory is None:
+                raise ConfigurationError("The response-hold control directory is required.")
+            if arguments.hold_count != 1:
+                raise ConfigurationError("The response hold is one-shot; --hold-count must be exactly 1.")
+            if not MINIMUM_HOLD_SECONDS <= arguments.hold_max_seconds <= MAXIMUM_HOLD_SECONDS:
+                raise ConfigurationError("The response hold must be between 0.1 and 120 seconds.")
+            _require_root_control_directory(hold_directory)
+        elif arguments.hold_activation_ack is not None or hold_directory is not None or arguments.hold_count != 1:
+            raise ConfigurationError("Response-hold options require one exact hold route.")
 
         certificate = Path(arguments.server_certificate)
         private_key = Path(arguments.server_private_key)
@@ -235,6 +289,9 @@ class ProxyConfiguration:
             metrics_file=Path(arguments.metrics_file),
             routes=routes,
             fault_count=arguments.fault_count,
+            hold_routes=hold_routes,
+            hold_max_seconds=arguments.hold_max_seconds,
+            hold_control_directory=hold_directory,
         )
 
 
@@ -249,12 +306,302 @@ def _require_regular_file(path: Path, label: str, *, private: bool = False) -> N
         raise ConfigurationError(f"The {label} must not be group- or world-accessible.")
 
 
+def _require_root_control_directory(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise ConfigurationError("The response-hold control directory is unavailable.") from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or path.is_symlink()
+        or os.geteuid() != HOLD_REQUIRED_UID
+        or metadata.st_uid != HOLD_REQUIRED_UID
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ConfigurationError("The response-hold control directory must be root-owned mode 0700.")
+    try:
+        if any(path.iterdir()):
+            raise ConfigurationError("The response-hold control directory contains stale artifacts.")
+    except OSError as error:
+        raise ConfigurationError("The response-hold control directory cannot be enumerated safely.") from error
+
+
+class HoldOutcome(str, Enum):
+    RELEASED = "released"
+    CLIENT_GONE = "client_gone"
+    FAULT = "fault"
+
+
+class HoldLatch:
+    """One bounded, sanitized post-upstream response gate."""
+
+    def __init__(
+        self,
+        directory: Path,
+        maximum_seconds: float,
+        counters: SanitizedCounters,
+        shutdown: threading.Event,
+    ) -> None:
+        _require_root_control_directory(directory)
+        directory_stat = directory.lstat()
+        self._directory = directory
+        self._directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+        try:
+            self._directory_fd = os.open(
+                directory,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+        except OSError as error:
+            raise HoldControlError("The response-hold control directory could not be bound.") from error
+        opened = os.fstat(self._directory_fd)
+        if (opened.st_dev, opened.st_ino) != self._directory_identity:
+            os.close(self._directory_fd)
+            raise HoldControlError("The response-hold control directory changed during binding.")
+        self._closed = False
+        self._state_descriptor: int | None = None
+        self._state_identity: tuple[int, int] | None = None
+        self._maximum_seconds = maximum_seconds
+        self._counters = counters
+        self._shutdown = shutdown
+        self._hold_lock = threading.Lock()
+        self._sequence_lock = threading.Lock()
+        self._sequence = 0
+
+    def hold(self, route: FaultRoute, client: socket.socket) -> HoldOutcome:
+        deadline = time.monotonic() + self._maximum_seconds
+        self._counters.record(route, "upstream_complete")
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self._hold_lock.acquire(timeout=remaining):
+            self._record_fault(route)
+            return HoldOutcome.FAULT
+        try:
+            sequence = self._next_sequence()
+            if self._entry_exists("release"):
+                self._record_fault(route, sequence)
+                return HoldOutcome.FAULT
+            self._write_state(route, "hold_entered", sequence)
+            self._counters.record(route, "hold_entered")
+            client_gone = False
+            while True:
+                if self._shutdown.is_set():
+                    self._record_fault(route, sequence)
+                    return HoldOutcome.FAULT
+                if not client_gone and self._client_is_gone(client):
+                    client_gone = True
+                    self._write_state(route, "client_gone", sequence)
+                    self._counters.record(route, "client_gone")
+                if self._entry_exists("release"):
+                    self._consume_release()
+                    self._write_state(route, "released", sequence)
+                    self._counters.record(route, "released")
+                    return HoldOutcome.CLIENT_GONE if client_gone else HoldOutcome.RELEASED
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._record_fault(route, sequence)
+                    return HoldOutcome.FAULT
+                self._shutdown.wait(min(0.02, remaining))
+        finally:
+            self._hold_lock.release()
+
+    def close(self) -> None:
+        self._shutdown.set()
+        acquired = self._hold_lock.acquire(timeout=self._maximum_seconds + 1.0)
+        if not acquired:
+            return
+        try:
+            # Signal/control evidence is intentionally retained.  Deleting an
+            # externally replaceable directory entry cannot be made inode-
+            # conditional with portable stdlib primitives; retaining it is the
+            # only fail-closed response to a concurrent swap.
+            if not self._closed:
+                if self._state_descriptor is not None:
+                    os.close(self._state_descriptor)
+                    self._state_descriptor = None
+                os.close(self._directory_fd)
+                self._closed = True
+        finally:
+            self._hold_lock.release()
+
+    def _record_fault(self, route: FaultRoute, sequence: int | None = None) -> None:
+        if sequence is not None:
+            self._write_state(route, "fault", sequence)
+        self._counters.record(route, "fault")
+
+    def _next_sequence(self) -> int:
+        with self._sequence_lock:
+            self._sequence += 1
+            return self._sequence
+
+    def _write_state(self, route: FaultRoute, state: str, sequence: int) -> None:
+        _require_active_control_directory(self._directory, self._directory_identity)
+        document = {
+            "schemaVersion": 1,
+            "route": route.counter_label,
+            "sequence": sequence,
+            "state": state,
+        }
+        payload = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        descriptor = self._bound_state_descriptor()
+        try:
+            self._require_bound_state_entry(descriptor, expected_size=None)
+            os.ftruncate(descriptor, 0)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError("short state write")
+                offset += written
+            os.fsync(descriptor)
+            self._require_bound_state_entry(descriptor, expected_size=len(payload))
+            self._fsync_directory()
+        except (OSError, HoldControlError) as error:
+            raise HoldControlError("The sanitized response-hold state could not be persisted.") from error
+
+    def _bound_state_descriptor(self) -> int:
+        if self._state_descriptor is not None:
+            return self._state_descriptor
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open("state.json", flags, 0o600, dir_fd=self._directory_fd)
+        except OSError as error:
+            raise HoldControlError("The sanitized response-hold state could not be bound.") from error
+        metadata = os.fstat(descriptor)
+        try:
+            _require_control_metadata(metadata, expected_size=0)
+        except HoldControlError:
+            os.close(descriptor)
+            raise
+        self._state_descriptor = descriptor
+        self._state_identity = (metadata.st_dev, metadata.st_ino)
+        return descriptor
+
+    def _require_bound_state_entry(self, descriptor: int, expected_size: int | None) -> None:
+        bound = os.fstat(descriptor)
+        _require_control_metadata(bound, expected_size=expected_size)
+        current = self._entry_stat("state.json")
+        if current is None:
+            raise HoldControlError("The sanitized response-hold state directory entry disappeared.")
+        _require_control_metadata(current, expected_size=expected_size)
+        identity = (bound.st_dev, bound.st_ino)
+        if self._state_identity != identity or (current.st_dev, current.st_ino) != identity:
+            raise HoldControlError("The sanitized response-hold state directory entry changed during use.")
+
+    def _consume_release(self) -> None:
+        _require_active_control_directory(self._directory, self._directory_identity)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open("release", flags, dir_fd=self._directory_fd)
+            try:
+                before = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or stat.S_IMODE(before.st_mode) != 0o600
+                    or before.st_uid != HOLD_REQUIRED_UID
+                    or before.st_nlink != 1
+                    or before.st_size != len(HOLD_RELEASE_DOCUMENT)
+                ):
+                    raise HoldControlError("The response-hold release control is unsafe.")
+                document = os.read(descriptor, len(HOLD_RELEASE_DOCUMENT) + 1)
+                after = os.fstat(descriptor)
+                if (
+                    (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                ):
+                    raise HoldControlError("The response-hold release control changed during use.")
+                current = os.stat("release", dir_fd=self._directory_fd, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                    raise HoldControlError("The response-hold release directory entry changed during use.")
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise HoldControlError("The response-hold release control is unsafe.") from error
+        if document != HOLD_RELEASE_DOCUMENT:
+            raise HoldControlError("The response-hold release control is invalid.")
+
+    @staticmethod
+    def _client_is_gone(client: socket.socket) -> bool:
+        try:
+            readable, _, exceptional = select.select((client,), (), (client,), 0)
+            if exceptional:
+                return True
+            if not readable:
+                return False
+            previous_timeout = client.gettimeout()
+            try:
+                client.settimeout(0.0)
+                return client.recv(1) == b""
+            except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                return False
+            finally:
+                try:
+                    client.settimeout(previous_timeout)
+                except OSError:
+                    pass
+        except (OSError, ssl.SSLError, ValueError):
+            return True
+
+    def _fsync_directory(self) -> None:
+        metadata = os.fstat(self._directory_fd)
+        if (metadata.st_dev, metadata.st_ino) != self._directory_identity:
+            raise HoldControlError("The response-hold control directory identity changed.")
+        os.fsync(self._directory_fd)
+
+    def _entry_stat(self, name: str) -> os.stat_result | None:
+        try:
+            return os.stat(name, dir_fd=self._directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise HoldControlError("The response-hold control entry is unavailable.") from error
+
+    def _entry_exists(self, name: str) -> bool:
+        return self._entry_stat(name) is not None
+
+
+def _require_active_control_directory(path: Path, expected_identity: tuple[int, int]) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise HoldControlError("The response-hold control directory disappeared.") from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or path.is_symlink()
+        or os.geteuid() != HOLD_REQUIRED_UID
+        or metadata.st_uid != HOLD_REQUIRED_UID
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or (metadata.st_dev, metadata.st_ino) != expected_identity
+    ):
+        raise HoldControlError("The response-hold control directory changed unsafely.")
+
+
+def _require_control_metadata(metadata: os.stat_result, expected_size: int | None) -> None:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != HOLD_REQUIRED_UID
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1
+        or (expected_size is not None and metadata.st_size != expected_size)
+        or metadata.st_size > 4096
+    ):
+        raise HoldControlError("The response-hold control file is unsafe.")
+
+
 @dataclass
 class ProxyRuntime:
     configuration: ProxyConfiguration
     fault_plan: FaultPlan
     counters: SanitizedCounters
     upstream_tls: ssl.SSLContext
+    hold_plan: FaultPlan | None = None
+    hold_latch: HoldLatch | None = None
+    shutdown: threading.Event | None = None
 
 
 class FaultProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -345,10 +692,36 @@ class FaultProxyHandler(http.server.BaseHTTPRequestHandler):
             connection.close()
             return
 
-        should_inject = 200 <= response.status < 300 and self.runtime.fault_plan.claim(route)
+        successful = 200 <= response.status < 300
+        should_hold = successful and self.runtime.hold_plan is not None and self.runtime.hold_plan.claim(route)
+        if should_hold:
+            latch = self.runtime.hold_latch
+            if latch is None or route is None:
+                response.close()
+                connection.close()
+                self._abort_client_connection()
+                return
+            try:
+                hold_outcome = latch.hold(route, self.connection)
+            except (HoldControlError, MetricsError, OSError):
+                try:
+                    self.runtime.counters.record(route, "fault")
+                except MetricsError:
+                    pass
+                response.close()
+                connection.close()
+                self._abort_client_connection()
+                return
+            if hold_outcome is not HoldOutcome.RELEASED:
+                response.close()
+                connection.close()
+                self._abort_client_connection()
+                return
+
+        should_inject = successful and self.runtime.fault_plan.claim(route)
         if should_inject:
             try:
-                self.runtime.counters.record(route, "faultsInjected")
+                self.runtime.counters.record_many(route, ("faultsInjected", "fault"))
             except MetricsError:
                 self._forward_response(response, response_body, route)
                 connection.close()
@@ -466,11 +839,22 @@ def build_server(configuration: ProxyConfiguration) -> FaultProxyServer:
     upstream_tls.minimum_version = ssl.TLSVersion.TLSv1_2
     upstream_tls.check_hostname = True
     upstream_tls.verify_mode = ssl.CERT_REQUIRED
+    counters = SanitizedCounters(configuration.metrics_file)
+    shutdown = threading.Event()
+    hold_plan = FaultPlan(configuration.hold_routes, 1) if configuration.hold_routes else None
+    hold_latch = (
+        HoldLatch(configuration.hold_control_directory, configuration.hold_max_seconds, counters, shutdown)
+        if configuration.hold_routes and configuration.hold_control_directory is not None
+        else None
+    )
     runtime = ProxyRuntime(
         configuration=configuration,
         fault_plan=FaultPlan(configuration.routes, configuration.fault_count),
-        counters=SanitizedCounters(configuration.metrics_file),
+        counters=counters,
         upstream_tls=upstream_tls,
+        hold_plan=hold_plan,
+        hold_latch=hold_latch,
+        shutdown=shutdown,
     )
     return FaultProxyServer((configuration.listen_host, configuration.listen_port), runtime, server_tls)
 
@@ -488,6 +872,11 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fault-route", action="append", choices=[route.value for route in FaultRoute])
     parser.add_argument("--fault-count", type=int, default=1)
     parser.add_argument("--activation-ack", required=True)
+    parser.add_argument("--hold-route", action="append", choices=[route.value for route in FaultRoute])
+    parser.add_argument("--hold-count", type=int, default=1, help="one-shot hold count; must be exactly 1")
+    parser.add_argument("--hold-max-seconds", type=float, default=30.0)
+    parser.add_argument("--hold-control-directory")
+    parser.add_argument("--hold-activation-ack")
     return parser
 
 
@@ -498,13 +887,29 @@ def main() -> int:
     except (ConfigurationError, MetricsError, OSError, ssl.SSLError, ValueError) as error:
         print(f"fault proxy refused to start: {error}", file=os.sys.stderr)
         return 2
+    previous_handlers: dict[int, object] = {}
+
+    def request_shutdown(_signum: int, _frame: object) -> None:
+        if server.runtime.shutdown is not None:
+            server.runtime.shutdown.set()
+        raise KeyboardInterrupt
+
     try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_shutdown)
         print("fault proxy armed; only sanitized counters are persisted", flush=True)
         server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:
         pass
     finally:
+        if server.runtime.shutdown is not None:
+            server.runtime.shutdown.set()
+        if server.runtime.hold_latch is not None:
+            server.runtime.hold_latch.close()
         server.server_close()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     return 0
 
 

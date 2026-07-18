@@ -54,6 +54,8 @@ export type BackupRequest = {
   attempt: number;
   revision: number;
   guestId: CanonicalUuid;
+  policyId: CanonicalUuid;
+  targetId: CanonicalUuid;
   guestName: string | null;
   guestType: "qemu" | "lxc";
   vmid: number;

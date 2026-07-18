@@ -23,6 +23,8 @@ const baseRequest = {
   attempt: 1,
   revision: 1,
   guestId: id,
+  policyId: id,
+  targetId: id,
   guestName: "vm",
   guestType: "qemu" as const,
   vmid: 100,

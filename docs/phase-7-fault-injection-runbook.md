@@ -38,6 +38,27 @@ wird nicht dauerhaft als Dienst eingerichtet.
   Fehleranzahl und den Wortlaut
   `INJECT_AFTER_VERIFIED_UPSTREAM_RESPONSE`. Ohne diese drei Angaben startet
   der Prozess nicht.
+- Der optionale Response-Hold ist davon getrennt und benötigt zusätzlich eine
+  exakte Hold-Route, exakt `--hold-count 1`, eine Laufzeitgrenze und den zweiten
+  ACK-Wortlaut `HOLD_AFTER_VERIFIED_UPSTREAM_RESPONSE`. Der Fault-ACK allein
+  aktiviert niemals den Hold-Latch. Ohne Hold-Route bleibt das bisherige
+  Proxyverhalten unverändert. Ein Hold-fähiger Harness-Prozess ist bewusst
+  one-shot; für einen weiteren Hold ist ein neuer Prozess mit neuer leerer
+  Control-Ablage zu starten. `--fault-count` bleibt davon unabhängig.
+- Der Hold beginnt ausschließlich nach vollständig gelesener, verifizierter
+  2xx-Upstream-Antwort und vor dem ersten Response-Byte an Hoddmímir. Er endet
+  durch eine exakt validierte Release-Datei, Client-Abbruch, SIGTERM oder die
+  maximal 120 Sekunden lange Hold-Grenze; Timeout und Kontrollfehler brechen
+  fail-closed ab.
+- Das Hold-Control-Verzeichnis ist eine leere, root-owned Ablage mit mode
+  `0700`. Der Harness bindet Verzeichnis und `state.json` an ihre Inodes und
+  validiert `release` über den bereits geöffneten Deskriptor. Beide Dateien sind
+  reguläre, nicht verlinkte root-owned Dateien mit mode `0600`. Ein unsicherer
+  Inode- oder Verzeichnistausch bricht fail-closed ab; der Harness löscht keine
+  extern austauschbaren Control-Einträge. Die Zustände `upstream_complete`,
+  `hold_entered`, `client_gone`, `released` und `fault` enthalten nur das
+  sanitierte Routenlabel und Zähler, niemals Header, Bodies, Tokens, Nodewerte,
+  Taskwerte oder UPIDs.
 - Der Listener akzeptiert ausschließlich eine explizite Loopback-, RFC1918-
   oder IPv6-ULA-Adresse; Hostnamen, Wildcard- und öffentliche Adressen werden
   bereits beim Start abgelehnt.
@@ -124,16 +145,71 @@ zu binden; niemals eine öffentliche oder Production-Adresse.
 
 ## Cancel-Abnahmelauf
 
-1. Einen ausreichend langen Wegwerfbackup-Lauf ohne Startfehler beginnen.
-2. Einen neuen Harness mit
-   `--fault-route delete-task-stop --fault-count 1` starten beziehungsweise
-   den temporären Backupendpunkt kontrolliert auf ihn umstellen.
-3. Einmal Cancel auslösen. PVE muss den Task stoppen, obwohl Hoddmímir keine
-   DELETE-Antwort erhält.
-4. Reconciliation bis zum tatsächlichen Task-Endzustand abwarten.
-5. In der Metrikdatei genau einen empfangenen DELETE, eine vollständige
-   Upstream-Antwort und eine Injektion nachweisen. Ein zweiter DELETE ist ein
-   Abnahmefehler.
+Dieser Ablauf ist speziell für das persistierte Cancel-`dispatching`-Fenster.
+Er darf ausschließlich gegen den freigegebenen Labworker und einen
+Wegwerfbackup-Lauf ausgeführt werden.
+
+1. Eine neue, leere Control-Ablage anlegen und vor dem Start prüfen:
+
+   ```sh
+   install -d -o root -g root -m 0700 /var/lib/hoddmimir-fault-lab/cancel-hold
+   ```
+
+2. Einen ausreichend langen Wegwerfbackup-Lauf ohne Startfehler beginnen und
+   einen neuen Harness mit genau einem DELETE-Fault und genau einem DELETE-Hold
+   starten:
+
+   ```sh
+   python3 lab/fault-proxy/hoddmimir_fault_proxy.py \
+     --listen-host 127.0.0.1 \
+     --listen-port 18443 \
+     --server-certificate /var/lib/hoddmimir-fault-lab/proxy.crt \
+     --server-private-key /var/lib/hoddmimir-fault-lab/proxy.key \
+     --upstream https://pve-lab.example.invalid:8006 \
+     --upstream-ca /var/lib/hoddmimir-fault-lab/pve-ca.crt \
+     --metrics-file /var/lib/hoddmimir-fault-lab/cancel-counters.json \
+     --fault-route delete-task-stop \
+     --fault-count 1 \
+     --activation-ack INJECT_AFTER_VERIFIED_UPSTREAM_RESPONSE \
+     --hold-route delete-task-stop \
+     --hold-count 1 \
+     --hold-max-seconds 60 \
+     --hold-control-directory /var/lib/hoddmimir-fault-lab/cancel-hold \
+     --hold-activation-ack HOLD_AFTER_VERIFIED_UPSTREAM_RESPONSE
+   ```
+
+3. Genau einmal Cancel auslösen. Erst fortfahren, wenn `state.json` den Zustand
+   `hold_entered` und die Metrik für die sanitierte DELETE-Route exakt
+   `upstream_complete=1` sowie `hold_entered=1` zeigt. Zu diesem Zeitpunkt ist
+   die erfolgreiche PVE-Antwort vollständig verifiziert, aber Hoddmímir hat
+   garantiert noch kein Response-Byte erhalten. Zusätzlich read-only prüfen,
+   dass der Cancel-Versuch weiterhin persistent `dispatching` ist.
+4. Jetzt ausschließlich den freigegebenen Lab-Backupworker mit SIGKILL beenden.
+   Der Harness muss anschließend `client_gone=1` melden. Kein anderer Container
+   und kein PVE-/PBS-Prozess darf beendet werden.
+5. Den Latch durch eine atomar erzeugte, root-owned mode-`0600` Datei mit exakt
+   `RELEASE\n` lösen:
+
+   ```sh
+   umask 077
+   release_tmp="$(mktemp /var/lib/hoddmimir-fault-lab/cancel-hold/.release.XXXXXX)"
+   printf 'RELEASE\n' >"${release_tmp}"
+   chmod 0600 "${release_tmp}"
+   mv "${release_tmp}" /var/lib/hoddmimir-fault-lab/cancel-hold/release
+   ```
+
+6. Den Lab-Backupworker neu starten. Der persistierte Versuch muss in
+   `dispatch_unknown` wechseln; der Worker darf keinen zweiten DELETE senden.
+   Reconciliation anschließend bis zum tatsächlichen Task-Endzustand abwarten.
+7. Der finale Nachweis enthält exakt `received=1`, `upstreamResponses=1`,
+   `upstream_complete=1`, `hold_entered=1`, `client_gone=1`, `released=1` und
+   `responsesForwarded=0` für die DELETE-Route. Ein zweiter DELETE, eine andere
+   Route oder ein fehlendes `dispatch_unknown` ist ein Abnahmefehler.
+
+Erreicht der Hold seine Grenze oder wird die Control-Datei unsicher, entsteht
+`fault=1` und kein Response wird weitergeleitet. Dieser Lauf ist nicht als
+erfolgreicher Crashfenster-Nachweis zu werten und muss mit frischem Prozess,
+frischer Metrik- und frischer Control-Ablage wiederholt werden.
 
 ## Lokaler Contract-Nachweis
 
@@ -146,8 +222,12 @@ Routen und nahe False Positives, einen einzigen Fehler bei mehreren Requests,
 vollständigen Upstream-Response vor Abbruch, die Ablehnung eines vorzeitig
 abgebrochenen `Content-Length`-Responses ohne Verbrauch des Fault-Kontingents,
 echte TLS-Hostname-/CA-Prüfung, fail-closed Aktivierung, Symlink-Ablehnung,
-Dateimodus und das Ausbleiben von Header-, Token-, Body-, Node- und Taskwerten
-in Output und Metrik.
+Dateimodus, getrennten Hold-ACK, Response-Byte-Timing, den festen One-shot-
+Hold-Count, Timeout,
+Client-Abbruch, Release, SIGTERM-Abbruch mit erhaltener sanitierter Evidenz,
+Inode-/Verzeichnistausch, lesbare partielle TLS-Records unter der Hold-Deadline
+und das Ausbleiben von Header-, Token-, Body-, Node-, Task- und UPID-Werten in
+Output und Metrik.
 
 ## Abschluss und Bereinigung
 
@@ -155,6 +235,11 @@ in Output und Metrik.
   PVE-Verbindung wieder verifizieren.
 - Proxyprozess beenden und bestätigen, dass kein Prozess mehr auf dem
   Labport lauscht.
+- Bei einem Hold-Lauf `state.json`, die optionale `release`-Datei und die Metrik
+  nach Prozessende als sanitisierten Nachweis sichern. Erst nachdem bestätigt
+  ist, dass der Proxyprozess beendet ist, die ausschließlich diesem Lauf
+  zugeordnete Control-Ablage entfernen. Der Proxy löscht diese extern
+  austauschbaren Einträge absichtlich nicht selbst.
 - Nur den sanitisierten JSON-Nachweis aufbewahren. Temporäre Zertifikate,
   Private Keys und lokale Trust-Dateien sicher entfernen.
 - Keine Harness-Konfiguration, Tokens, realen Hosts, CAs oder Schlüssel in Git

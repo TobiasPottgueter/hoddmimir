@@ -11,10 +11,24 @@ application component, included in an application image, or installed by the
 production Ansible roles.
 
 The proxy accepts TLS from Hoddmímir, verifies the PVE upstream certificate and
-hostname, forwards the request, reads the complete upstream response, and can
-then terminate the client connection before sending any response bytes. Its
-only persistent output is an atomic mode-`0600` JSON file with sanitized route
-and stage counters.
+hostname, forwards the request, and reads the complete upstream response. It
+can then either terminate the client connection or, with a second explicit
+activation acknowledgement, hold an allowlisted response before sending its
+first client byte. A hold-enabled process is deliberately one-shot:
+`--hold-count` must be exactly `1`, while the independent fault count remains
+configurable. The bounded latch makes the persisted cancel-`dispatching`
+worker-crash window deterministic without adding a production dependency.
+
+The hold control directory must be root-owned mode `0700`. The proxy binds that
+directory and `state.json` by inode, and validates the exact `RELEASE\n` control
+file through an opened descriptor. Both files are mode `0600`; neither contains
+headers, bodies, credentials, node names, task identifiers or UPIDs. The proxy
+never deletes externally replaceable control entries. Sanitized state and the
+release file therefore remain as evidence until the stopped process's dedicated
+control directory is archived or removed by the operator.
+The sanitized metrics add the states `upstream_complete`, `hold_entered`,
+`client_gone`, `released` and `fault`. With no hold route configured, behavior
+is unchanged.
 
 Run the local contract suite with:
 
