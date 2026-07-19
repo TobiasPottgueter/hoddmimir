@@ -451,6 +451,17 @@ unzulässig.
 
 „Alles unittesten“ wird so umgesetzt, dass jede deterministische Entscheidung ohne externe Systeme als Unit-Test existiert. HTTP, MariaDB, Container und Browser werden zusätzlich auf ihrer realen Grenze getestet.
 
+Die Ausführung dieser Tests ist risikobasiert gestuft: Während der
+Implementierung laufen die kleinsten fokussierten Unit-, Contract-, Static-
+Analysis- oder Component-Tests, die die Änderung und ihre direkten Grenzen
+abdecken. Unerwartete Fehler oder querschnittliche Änderungen erweitern den
+Prüfumfang. Vollständige Suites, Coverage, MariaDB-, Mutation-, Container-,
+Browser- und Supply-Chain-Gates laufen an der jeweils relevanten Commit-/PR-
+Merge-, Release- oder Deployment-Grenze sowie bei Änderungen, die mehrere
+Architekturschichten berühren. Ein bereits grünes Vollgate wird nicht allein
+wegen einer davon unabhängigen Änderung wiederholt; entscheidend ist, ob sich
+seine Eingaben oder Annahmen geändert haben.
+
 ### 8.1 PHP Unit-Tests
 
 Werkzeuge: PHPUnit, data providers, Clock-/UUID-/HTTP-/Repository-Fakes.

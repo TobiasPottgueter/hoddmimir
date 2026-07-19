@@ -57,6 +57,14 @@ Do not read from or modify the old project unless a task explicitly requests rea
 - Add Playwright tests for critical administration flows when those flows are implemented.
 - A behavior change is incomplete until its tests pass.
 
+### Proportional verification
+
+- During implementation, run the smallest focused unit, contract, static-analysis, or component test set that covers the changed behavior and its immediate boundaries.
+- Expand the test scope when a focused check fails unexpectedly, when shared interfaces or cross-cutting contracts change, or when risk analysis shows wider impact.
+- Run the complete backend/frontend suites, full coverage, MariaDB integration, mutation, container, browser, and supply-chain gates at their relevant commit/PR merge, release-publication, or deployment boundary. Full gates are also required for cross-cutting core changes that affect several architectural layers.
+- Do not rerun an unchanged full gate merely because an unrelated file changed after it passed. Record the exact tested source state and rerun only gates whose inputs or relevant assumptions changed.
+- A small isolated change does not by itself justify executing every repository test. Verification must remain proportionate while still satisfying the mandatory gate for the next publication or deployment boundary.
+
 ## Development rules
 
 - Use strict types in every PHP file.
