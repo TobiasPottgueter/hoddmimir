@@ -10,12 +10,19 @@ use Doctrine\DBAL\Exception;
 
 final class BackupWorkerGuestStatePrivilegeTest extends DatabaseTestCase
 {
-    public function testBackupWorkerCannotReadOrMutateCollectorGuestState(): void
+    public function testBackupWorkerCanReadOnlyThePlacementColumnsNeededForRevalidation(): void
     {
         $backupWorker = $this->backupWorkerConnection();
         try {
+            self::assertSame([], $backupWorker->fetchAllAssociative(<<<'SQL'
+                SELECT guest_id, connection_id, cluster_id, node_id, placement_revision, observed_at
+                FROM guest_placements
+                LIMIT 0
+                SQL));
+
             foreach ([
-                'SELECT placement_revision FROM guest_placements LIMIT 0',
+                'SELECT sync_run_id FROM guest_placements LIMIT 0',
+                'SELECT * FROM guest_placements LIMIT 0',
                 'SELECT diskwrite_bytes, observed_at, authoritative_sync_run_id FROM guest_write_states LIMIT 0',
             ] as $sql) {
                 $this->assertDenied(static fn () => $backupWorker->fetchAllAssociative($sql));
@@ -68,7 +75,7 @@ final class BackupWorkerGuestStatePrivilegeTest extends DatabaseTestCase
     {
         try {
             $operation();
-            self::fail('The backup-worker database user exceeded its readiness-only grants.');
+            self::fail('The backup-worker database user exceeded its bounded revalidation grants.');
         } catch (Exception) {
             self::addToAssertionCount(1);
         }
