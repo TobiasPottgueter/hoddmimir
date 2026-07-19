@@ -13,6 +13,7 @@ use App\Application\Inventory\Connection\ProxmoxProduct;
 use App\Application\Inventory\InventoryIdentifier;
 use App\Application\Inventory\InventoryIdentifierGenerator;
 use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pve\PveInventorySnapshot;
 use App\Domain\Shared\Clock;
 
@@ -96,7 +97,7 @@ final readonly class RunSelectedEndpointMonitoring implements SelectedEndpointMo
                 $window = $this->windows->plan(
                     $read->connectionId,
                     MonitoringCursorKind::PbsTasksWindow,
-                    [$read->snapshot->node],
+                    [PbsNodeRoute::Local->value],
                     $cutoff,
                     $this->pbsMaximumWindowSeconds,
                 );
@@ -104,13 +105,12 @@ final readonly class RunSelectedEndpointMonitoring implements SelectedEndpointMo
                     $read->connectionId,
                     $read->endpointId,
                     $read->expectedRevision,
-                    $read->snapshot->node,
                     $window->pbs(),
                     $checkpoint,
                 );
                 $observedAt = $this->clock->now();
                 $jobsCommit = $this->mapper->pbsJobs($jobs, $snapshot, $observedAt);
-                $tasksCommit = $this->mapper->pbsTasks($tasks, $snapshot, $read->snapshot->node, $window, $observedAt);
+                $tasksCommit = $this->mapper->pbsTasks($tasks, $snapshot, $window, $observedAt);
             }
             $checkpoint->checkpoint();
         } catch (CollectorLeaseOwnershipLost $critical) {

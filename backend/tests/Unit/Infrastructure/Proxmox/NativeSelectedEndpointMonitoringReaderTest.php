@@ -83,7 +83,7 @@ final class NativeSelectedEndpointMonitoringReaderTest extends TestCase
         $reader = $this->reader(pbsFactory: $factory);
 
         $snapshot = $reader->readPbs(
-            self::connectionId(), self::endpointId(), 3, 'pbs-a', new PbsTaskWindow(100, 200),
+            self::connectionId(), self::endpointId(), 3, new PbsTaskWindow(100, 200),
             new NativeMonitoringCheckpoint(),
         );
 
@@ -112,7 +112,7 @@ final class NativeSelectedEndpointMonitoringReaderTest extends TestCase
         $pbs = $this->reader(pbsFactory: new FixedNativePbsMonitoringFactory(new PbsReadConnectorFactoryFailure()));
         $this->expectException(EndpointReadFailure::class);
         $pbs->readPbs(
-            self::connectionId(), self::endpointId(), 1, 'pbs-a', new PbsTaskWindow(100, 200),
+            self::connectionId(), self::endpointId(), 1, new PbsTaskWindow(100, 200),
             new NativeMonitoringCheckpoint(),
         );
     }
@@ -137,7 +137,7 @@ final class NativeSelectedEndpointMonitoringReaderTest extends TestCase
                 failures: ['acl', 'prune', 'verify'],
             )),
         )->readPbs(
-            self::connectionId(), self::endpointId(), 1, 'pbs-a', new PbsTaskWindow(100, 200),
+            self::connectionId(), self::endpointId(), 1, new PbsTaskWindow(100, 200),
             new NativeMonitoringCheckpoint(),
         );
         self::assertNull($pbs->acl);
@@ -341,7 +341,7 @@ final class FixedNativePbsMonitoringClient implements PbsMonitoringClient
         $this->failWhenConfigured('verify');
         return $this->jobs(PbsJobKind::Verify);
     }
-    public function page(string $node, PbsTaskListQuery $query): PbsTaskPage
+    public function page(PbsTaskListQuery $query): PbsTaskPage
     {
         ++$this->pages;
         return new PbsTaskPage([], 0, 0);

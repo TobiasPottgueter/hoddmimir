@@ -13,7 +13,6 @@ final readonly class PbsEndpointReadConnector implements PbsReadConnector
         private PbsApiTransport $transport,
         private PbsVersionReader $versionReader,
         private PbsPingReader $pingReader,
-        private PbsNodesReader $nodesReader,
         private PbsPermissionReader $permissionReader,
         private PbsNodeStatusReader $nodeStatusReader,
         private PbsInstanceIdentityReader $identityReader,
@@ -28,7 +27,6 @@ final readonly class PbsEndpointReadConnector implements PbsReadConnector
         $this->pingReader->assertPbs($this->transport->get(PbsRequest::ping()));
         return new PbsHttpReadClient(
             $this->transport,
-            $this->nodesReader,
             $this->permissionReader,
             $this->nodeStatusReader,
             $this->identityReader,

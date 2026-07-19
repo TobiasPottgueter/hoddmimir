@@ -43,10 +43,9 @@ final class PbsConfigurationTest extends TestCase
         $builder = new PbsApiUrlBuilder('PBS.Example.Test');
         self::assertSame('https://pbs.example.test:8007/api2/json/version', $builder->build(PbsRequest::version()));
         self::assertSame('https://pbs.example.test:8007/api2/json/ping', $builder->build(PbsRequest::ping()));
-        self::assertSame('https://pbs.example.test:8007/api2/json/nodes', $builder->build(PbsRequest::nodes()));
         self::assertSame('https://pbs.example.test:8007/api2/json/access/permissions?path=%2Fsystem%2Fstatus', $builder->build(PbsRequest::permission('/system/status')));
-        self::assertSame('https://pbs.example.test:8007/api2/json/nodes/pbs-1/status', $builder->build(PbsRequest::nodeStatus('pbs-1')));
-        self::assertSame('https://pbs.example.test:8007/api2/json/nodes/pbs-1/identity', $builder->build(PbsRequest::instanceIdentity('pbs-1')));
+        self::assertSame('https://pbs.example.test:8007/api2/json/nodes/localhost/status', $builder->build(PbsRequest::localNodeStatus()));
+        self::assertSame('https://pbs.example.test:8007/api2/json/nodes/localhost/identity', $builder->build(PbsRequest::localInstanceIdentity()));
         self::assertSame('https://pbs.example.test:8007/api2/json/config/datastore', $builder->build(PbsRequest::datastoreConfigurations()));
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/datastore', $builder->build(PbsRequest::datastores()));
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/datastore/store_a/status?verbose=0', $builder->build(PbsRequest::datastoreStatus(new PbsDatastoreId('store_a'))));
@@ -54,8 +53,8 @@ final class PbsConfigurationTest extends TestCase
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/sync?sync-direction=all', $builder->build(PbsRequest::syncJobs()));
         self::assertSame('https://pbs.example.test:8007/api2/json/admin/verify', $builder->build(PbsRequest::verifyJobs()));
         self::assertSame(
-            'https://pbs.example.test:8007/api2/json/nodes/pbs-1/tasks?start=0&limit=256&typefilter=backup&running=1',
-            $builder->build(PbsRequest::tasks('pbs-1', new PbsTaskListQuery(
+            'https://pbs.example.test:8007/api2/json/nodes/localhost/tasks?start=0&limit=256&typefilter=backup&running=1',
+            $builder->build(PbsRequest::localTasks(new PbsTaskListQuery(
                 PbsTaskFilterFamily::Backup,
                 PbsTaskPass::Running,
                 0,
@@ -64,8 +63,8 @@ final class PbsConfigurationTest extends TestCase
             ))),
         );
         self::assertSame(
-            'https://pbs.example.test:8007/api2/json/nodes/pbs-1/tasks?start=256&limit=256&typefilter=verif&since=100&until=200',
-            $builder->build(PbsRequest::tasks('pbs-1', new PbsTaskListQuery(
+            'https://pbs.example.test:8007/api2/json/nodes/localhost/tasks?start=256&limit=256&typefilter=verif&since=100&until=200',
+            $builder->build(PbsRequest::localTasks(new PbsTaskListQuery(
                 PbsTaskFilterFamily::Verify,
                 PbsTaskPass::History,
                 256,
@@ -74,10 +73,10 @@ final class PbsConfigurationTest extends TestCase
             ))),
         );
         self::assertSame(65_536, PbsRequest::version()->maximumBodyBytes);
-        self::assertSame(262_144, PbsRequest::nodeStatus('pbs')->maximumBodyBytes);
+        self::assertSame(262_144, PbsRequest::localNodeStatus()->maximumBodyBytes);
         self::assertSame(8_388_608, PbsRequest::datastores()->maximumBodyBytes);
         self::assertSame(4_194_304, PbsRequest::pruneJobs()->maximumBodyBytes);
-        self::assertSame(2_097_152, PbsRequest::tasks('pbs', new PbsTaskListQuery(
+        self::assertSame(2_097_152, PbsRequest::localTasks(new PbsTaskListQuery(
             PbsTaskFilterFamily::Sync,
             PbsTaskPass::Running,
             0,
@@ -87,13 +86,10 @@ final class PbsConfigurationTest extends TestCase
         self::assertSame('https://[2001:db8::1]:8443/api2/json/ping', (new PbsApiUrlBuilder('2001:db8::1', 8443))->build(PbsRequest::ping()));
     }
 
-    public function testInvalidHostsPortsNodesAndPermissionPathsFailLocally(): void
+    public function testInvalidHostsPortsAndPermissionPathsFailLocally(): void
     {
         foreach ([['https://pbs', 8007], ['bad/path', 8007], ['pbs', 0], ['pbs', 65536]] as [$host, $port]) {
             try { new PbsApiUrlBuilder($host, $port); self::fail('invalid endpoint'); } catch (InvalidArgumentException) {}
-        }
-        foreach (["bad\n", '-bad', str_repeat('a', 64)] as $node) {
-            try { PbsRequest::nodeStatus($node); self::fail('invalid node'); } catch (InvalidArgumentException) {}
         }
         foreach (['/', '/datastore/ab', '/datastore/bad//child'] as $path) {
             try { PbsRequest::permission($path); self::fail('invalid permission path'); } catch (InvalidArgumentException) {}

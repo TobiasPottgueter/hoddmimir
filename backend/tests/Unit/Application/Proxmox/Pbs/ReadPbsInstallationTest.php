@@ -14,6 +14,7 @@ use App\Application\Proxmox\Pbs\PbsEffectivePermission;
 use App\Application\Proxmox\Pbs\PbsInstanceIdentity;
 use App\Application\Proxmox\Pbs\PbsInventoryIssueCode;
 use App\Application\Proxmox\Pbs\PbsMountStatus;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsNodeStatus;
 use App\Application\Proxmox\Pbs\PbsReadClient;
 use App\Application\Proxmox\Pbs\PbsReadConnector;
@@ -50,8 +51,9 @@ final class ReadPbsInstallationTest extends TestCase
         $snapshot = (new ReadPbsInstallation(new FixturePbsConnector($client), PbsDatastoreScanScope::installationWide()))->read();
         self::assertTrue($snapshot->isComplete());
         self::assertNull($snapshot->instanceIdentity);
+        self::assertSame(PbsNodeRoute::Local->value, $snapshot->node);
         self::assertSame([
-            'version', 'nodes', 'permission:/system/status', 'node-status:pbs', 'permission:/datastore',
+            'version', 'permission:/system/status', 'node-status:localhost', 'permission:/datastore',
             'config', 'datastores', 'status:store_a', 'status:store_b', 'config',
         ], $client->calls);
     }
@@ -65,22 +67,21 @@ final class ReadPbsInstallationTest extends TestCase
         self::assertNotNull($snapshot->instanceIdentity);
         self::assertCount(1, $snapshot->datastores);
         self::assertSame([
-            'version', 'nodes', 'permission:/system/status', 'node-status:pbs', 'identity:pbs',
+            'version', 'permission:/system/status', 'node-status:localhost', 'identity:localhost',
             'permission:/datastore/store_b', 'config', 'datastores', 'status:store_b', 'config',
         ], $client->calls);
     }
 
-    public function testInvalidNodeCardinalityFailsBeforeInventoryReads(): void
+    public function testCanonicalLocalNodeRequiresNoNodeDiscoveryRead(): void
     {
         $client = FixturePbsClient::pbs3();
-        $client->nodes = [];
-        try {
-            (new ReadPbsInstallation(new FixturePbsConnector($client), PbsDatastoreScanScope::installationWide()))->read();
-            self::fail('Expected invalid node set.');
-        } catch (PbsReadFailure $failure) {
-            self::assertSame(PbsReadFailureCode::InvalidResponse, $failure->failureCode);
-            self::assertSame(['version', 'nodes'], $client->calls);
-        }
+        $snapshot = (new ReadPbsInstallation(
+            new FixturePbsConnector($client),
+            PbsDatastoreScanScope::installationWide(),
+        ))->read();
+
+        self::assertSame(PbsNodeRoute::Local->value, $snapshot->node);
+        self::assertNotContains('nodes', $client->calls);
     }
 
     public function testPartialReadsRetainPositiveObservationsAndNeverAuthorizeDeletion(): void
@@ -88,7 +89,7 @@ final class ReadPbsInstallationTest extends TestCase
         $client = FixturePbsClient::pbs42();
         $client->permissions['/system/status'] = new PbsEffectivePermission('/system/status', []);
         $client->permissions['/datastore'] = new PbsEffectivePermission('/datastore', ['Datastore.Audit' => false]);
-        $client->failures = ['node-status:pbs', 'identity:pbs', 'status:store_b'];
+        $client->failures = ['node-status:localhost', 'identity:localhost', 'status:store_b'];
         $client->definitions[0] = new PbsDatastoreDefinition(
             new PbsDatastoreId('store_a'),
             PbsDatastoreBackendType::Filesystem,
@@ -247,7 +248,6 @@ final class FixturePbsConnector implements PbsReadConnector
 final class FixturePbsClient implements PbsReadClient
 {
     /** @var list<string> */ public array $calls = [];
-    /** @var list<string> */ public array $nodes = ['pbs'];
     /** @var array<string, PbsEffectivePermission> */ public array $permissions;
     /** @var list<PbsDatastoreDefinition> */ public array $definitions;
     /** @var list<string> */ public array $failures = [];
@@ -277,19 +277,20 @@ final class FixturePbsClient implements PbsReadClient
     public static function pbs42(): self { return new self(new PbsVersion(4, 2, 2, '4.2.2', '1', 'abcdef12')); }
 
     public function version(): PbsVersion { $this->calls[] = 'version'; return $this->pbsVersion; }
-    public function nodeNames(): array { $this->calls[] = 'nodes'; return $this->nodes; }
     public function permission(string $path): PbsEffectivePermission
     {
         $key = 'permission:'.$path; $this->calls[] = $key; $this->fail($key);
         return $this->permissions[$path] ?? new PbsEffectivePermission($path, []);
     }
-    public function nodeStatus(string $node): PbsNodeStatus
+    public function nodeStatus(): PbsNodeStatus
     {
+        $node = PbsNodeRoute::Local->value;
         $key = 'node-status:'.$node; $this->calls[] = $key; $this->fail($key);
         return new PbsNodeStatus($node, 1, 2, 1, 10, 2, 8);
     }
-    public function instanceIdentity(string $node): PbsInstanceIdentity
+    public function instanceIdentity(): PbsInstanceIdentity
     {
+        $node = PbsNodeRoute::Local->value;
         $key = 'identity:'.$node; $this->calls[] = $key; $this->fail($key);
         return new PbsInstanceIdentity(str_repeat('a', 32));
     }

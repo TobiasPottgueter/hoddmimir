@@ -277,7 +277,7 @@ final class PbsContentModelTest extends TestCase
     public function testRunHeadersFailuresAndCommitRejectInvalidContracts(): void
     {
         $endpoint = new EndpointId(str_repeat('e', 16));
-        $binding = InstallationBinding::pbsLegacyNode('pbs', $endpoint);
+        $binding = InstallationBinding::pbsLegacyEndpoint($endpoint);
         $id = new InventoryIdentifier(str_repeat('i', 16));
         $snapshot = new PbsContentSnapshot(
             [new PbsNamespaceObservation(new PbsDatastoreId('store_a'), PbsNamespace::root())],
@@ -296,7 +296,7 @@ final class PbsContentModelTest extends TestCase
         foreach ([
             [$id, $id, $id, $endpoint, $binding, 0, new DateTimeImmutable()],
             [$id, $id, $id, $endpoint, InstallationBinding::pveStandalone('pve-a'), 1, new DateTimeImmutable()],
-            [$id, $id, $id, $endpoint, InstallationBinding::pbsLegacyNode('pbs', new EndpointId(str_repeat('x', 16))), 1, new DateTimeImmutable()],
+            [$id, $id, $id, $endpoint, InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('x', 16))), 1, new DateTimeImmutable()],
         ] as $arguments) {
             try {
                 new PbsContentRunStart(...$arguments);
@@ -317,7 +317,7 @@ final class PbsContentModelTest extends TestCase
         foreach ([
             [$id, $id, $id, $endpoint, $binding, 0, $snapshot, new DateTimeImmutable()],
             [$id, $id, $id, $endpoint, InstallationBinding::pveStandalone('pve-a'), 1, $snapshot, new DateTimeImmutable()],
-            [$id, $id, $id, $endpoint, InstallationBinding::pbsLegacyNode('pbs', new EndpointId(str_repeat('x', 16))), 1, $snapshot, new DateTimeImmutable()],
+            [$id, $id, $id, $endpoint, InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('x', 16))), 1, $snapshot, new DateTimeImmutable()],
         ] as $arguments) {
             try {
                 new PbsContentCommit(...$arguments);

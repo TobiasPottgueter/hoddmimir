@@ -11,6 +11,7 @@ use App\Application\Proxmox\Pbs\PbsReadFailureCode;
 use App\Application\Proxmox\Pbs\PbsTaskFilterFamily;
 use App\Application\Proxmox\Pbs\PbsTaskListQuery;
 use App\Application\Proxmox\Pbs\PbsTaskPass;
+use App\Application\Proxmox\Pbs\PbsTaskScanner;
 use App\Application\Proxmox\Pbs\PbsTaskWindow;
 use App\Infrastructure\Proxmox\Pbs\PbsApiEnvelope;
 use App\Infrastructure\Proxmox\Pbs\PbsApiTransport;
@@ -179,7 +180,7 @@ final class PbsTasksAndJobsReadersTest extends TestCase
         self::assertSame(PbsJobKind::Prune, $client->pruneJobs()->kind);
         self::assertSame(PbsJobKind::Sync, $client->syncJobs()->kind);
         self::assertSame(PbsJobKind::Verify, $client->verifyJobs()->kind);
-        $page = $client->page('pbs-four', new PbsTaskListQuery(
+        $page = $client->page(new PbsTaskListQuery(
             PbsTaskFilterFamily::Backup,
             PbsTaskPass::History,
             0,
@@ -189,8 +190,26 @@ final class PbsTasksAndJobsReadersTest extends TestCase
         self::assertSame(0, $page->total);
         self::assertSame([
             '/access/permissions', '/access/permissions', '/access/permissions',
-            '/admin/prune', '/admin/sync', '/admin/verify', '/nodes/pbs-four/tasks',
+            '/admin/prune', '/admin/sync', '/admin/verify', '/nodes/localhost/tasks',
         ], $transport->paths);
+    }
+
+    public function testReportedNodeCannotInfluenceAnyFollowingTaskRoute(): void
+    {
+        $transport = new AdversarialTasksTransport();
+        $client = new PbsHttpTasksAndJobsClient(
+            $transport,
+            new PbsPermissionReader(),
+            new PbsJobListReader(),
+            new PbsTaskPageReader(),
+        );
+
+        $snapshot = (new PbsTaskScanner($client))->scan(new PbsTaskWindow(100, 200));
+
+        self::assertSame(array_fill(0, 8, '/nodes/localhost/tasks'), $transport->paths);
+        self::assertCount(1, $snapshot->tasks);
+        self::assertSame('pbs-four', $snapshot->tasks[0]->reportedNode);
+        self::assertSame('pbs-four', $snapshot->tasks[0]->upid->node);
     }
 
     private function taskRow(string $type, string $id, bool $terminal): \stdClass
@@ -261,6 +280,36 @@ final class TasksJobsRecordingTransport implements PbsApiTransport
         TestCase::assertSame([
             'start' => 0, 'limit' => 256, 'typefilter' => 'backup', 'since' => 100, 'until' => 200,
         ], $request->query);
+        return new PbsApiEnvelope([], null, 0);
+    }
+}
+
+final class AdversarialTasksTransport implements PbsApiTransport
+{
+    /** @var list<string> */ public array $paths = [];
+
+    public function get(PbsRequest $request): PbsApiEnvelope
+    {
+        $path = '/'.implode('/', $request->pathSegments);
+        $this->paths[] = $path;
+        TestCase::assertSame('/nodes/localhost/tasks', $path);
+
+        if ('backup' === ($request->query['typefilter'] ?? null)
+            && isset($request->query['since'])) {
+            return new PbsApiEnvelope([(object) [
+                'upid' => 'UPID:pbs-four:0000002A:000F4240:00000064:00000064:backup:store_a:root@pam:',
+                'node' => 'pbs-four',
+                'pid' => 42,
+                'pstart' => 1_000_000,
+                'starttime' => 100,
+                'worker_type' => 'backup',
+                'worker_id' => 'store_a',
+                'user' => 'root@pam',
+                'status' => 'OK',
+                'endtime' => 101,
+            ]], null, 1);
+        }
+
         return new PbsApiEnvelope([], null, 0);
     }
 }

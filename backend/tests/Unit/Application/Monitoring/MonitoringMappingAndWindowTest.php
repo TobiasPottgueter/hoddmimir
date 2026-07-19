@@ -175,7 +175,6 @@ final class MonitoringMappingAndWindowTest extends TestCase
                     'tasks' => 'permission_denied',
                 ],
             ),
-            'pbs-a',
             new \App\Application\Monitoring\MonitoringWindowPlan(100, 200, true),
             new DateTimeImmutable('@250'),
         );
@@ -187,14 +186,14 @@ final class MonitoringMappingAndWindowTest extends TestCase
 
         $actual = array_map($this->scopeProjection(...), $commit->scopes);
         self::assertSame([
-            ['pbs_tasks_running', 'pbs-a', 'running', 'backup', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
-            ['pbs_tasks_running', 'pbs-a', 'running', 'prune', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
-            ['pbs_tasks_running', 'pbs-a', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
-            ['pbs_tasks_running', 'pbs-a', 'running', 'verif', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'backup', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'prune', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'syncjob', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'verif', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_running', 'localhost', 'running', 'backup', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'localhost', 'running', 'prune', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'localhost', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_running', 'localhost', 'running', 'verif', 'failed', null, null, 0, 0, 0, false, false, 'permission_denied', 250],
+            ['pbs_tasks_window', 'localhost', 'history', 'backup', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'localhost', 'history', 'prune', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'localhost', 'history', 'syncjob', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
+            ['pbs_tasks_window', 'localhost', 'history', 'verif', 'failed', 100, 200, 0, 0, 0, false, true, 'permission_denied', 250],
         ], $actual);
     }
 
@@ -305,16 +304,15 @@ final class MonitoringMappingAndWindowTest extends TestCase
         $commit = (new MapSelectedEndpointMonitoring())->pbsTasks(
             $this->monitoringRun(),
             $snapshot,
-            'pbs-a',
             new \App\Application\Monitoring\MonitoringWindowPlan(100, 200, true),
             new DateTimeImmutable('@200'),
         );
         self::assertSame(MonitoringRunStatus::Partial, $commit->status());
         self::assertSame([
-            ['pbs_tasks_running', 'pbs-a', 'running', 'backup', 'partial', null, null, 1, 1, 0, false, false, 'acl_incomplete', 200],
-            ['pbs_tasks_running', 'pbs-a', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'read_failed', 200],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'prune', 'partial', 100, 200, 1, 1, 0, true, true, 'page_cap_exceeded', 200],
-            ['pbs_tasks_window', 'pbs-a', 'history', 'verif', 'partial', 100, 200, 1, 0, 0, false, true, 'history_gap', 200],
+            ['pbs_tasks_running', 'localhost', 'running', 'backup', 'partial', null, null, 1, 1, 0, false, false, 'acl_incomplete', 200],
+            ['pbs_tasks_running', 'localhost', 'running', 'syncjob', 'failed', null, null, 0, 0, 0, false, false, 'read_failed', 200],
+            ['pbs_tasks_window', 'localhost', 'history', 'prune', 'partial', 100, 200, 1, 1, 0, true, true, 'page_cap_exceeded', 200],
+            ['pbs_tasks_window', 'localhost', 'history', 'verif', 'partial', 100, 200, 1, 0, 0, false, true, 'history_gap', 200],
         ], array_map($this->scopeProjection(...), $commit->scopes));
     }
 
@@ -323,7 +321,6 @@ final class MonitoringMappingAndWindowTest extends TestCase
         $commit = (new MapSelectedEndpointMonitoring())->pbsTasks(
             $this->monitoringRun(),
             $this->snapshot(false),
-            'pbs-a',
             new \App\Application\Monitoring\MonitoringWindowPlan(100, 200, false),
             new DateTimeImmutable('@200'),
         );
@@ -340,7 +337,6 @@ final class MonitoringMappingAndWindowTest extends TestCase
         $commit = (new MapSelectedEndpointMonitoring())->pbsTasks(
             $this->monitoringRun(),
             $this->snapshot(true),
-            'pbs-a',
             new \App\Application\Monitoring\MonitoringWindowPlan(100, 200, false),
             new DateTimeImmutable('@200'),
         );
@@ -447,7 +443,7 @@ final class MonitoringMappingAndWindowTest extends TestCase
             $product,
             ProxmoxProduct::Pve === $product
                 ? InstallationBinding::pveStandalone('pve-a')
-                : InstallationBinding::pbsLegacyNode('pbs-a', $endpoint),
+                : InstallationBinding::pbsLegacyEndpoint($endpoint),
             $kind,
             1,
             new DateTimeImmutable('@100'),

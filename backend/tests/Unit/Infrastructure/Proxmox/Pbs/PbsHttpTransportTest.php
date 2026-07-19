@@ -19,7 +19,6 @@ use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConnector;
 use App\Infrastructure\Proxmox\Pbs\PbsHttpTransport;
 use App\Infrastructure\Proxmox\Pbs\PbsInstanceIdentityReader;
 use App\Infrastructure\Proxmox\Pbs\PbsJsonEnvelopeDecoder;
-use App\Infrastructure\Proxmox\Pbs\PbsNodesReader;
 use App\Infrastructure\Proxmox\Pbs\PbsNodeStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPermissionReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPingReader;
@@ -332,26 +331,25 @@ final class PbsHttpTransportTest extends TestCase
         $transport = new PbsRecordingTransport();
         $connector = new PbsEndpointReadConnector(
             $transport,
-            new PbsVersionReader(), new PbsPingReader(), new PbsNodesReader(), new PbsPermissionReader(),
+            new PbsVersionReader(), new PbsPingReader(), new PbsPermissionReader(),
             new PbsNodeStatusReader(), new PbsInstanceIdentityReader(), new PbsDatastoreConfigurationReader(),
             new PbsDatastoreListReader(), new PbsDatastoreStatusReader(),
         );
         $client = $connector->connect();
         self::assertSame(4, $client->version()->major);
-        self::assertSame(['pbs'], $client->nodeNames());
         self::assertTrue($client->permission('/system/status')->grants('Sys.Audit'));
-        self::assertSame(10, $client->nodeStatus('pbs')->rootTotalBytes);
-        self::assertSame(str_repeat('a', 32), $client->instanceIdentity('pbs')->value);
+        self::assertSame(10, $client->nodeStatus()->rootTotalBytes);
+        self::assertSame(str_repeat('a', 32), $client->instanceIdentity()->value);
         self::assertSame(str_repeat('b', 64), $client->datastoreConfigurations()->digest);
         $definitions = $client->datastores();
         self::assertCount(1, $definitions);
         self::assertSame(100, $client->datastoreStatus($definitions[0]->id, $definitions[0]->backendType)->totalBytes);
         self::assertSame([
-            ['version'], ['ping'], ['nodes'], ['access', 'permissions'], ['nodes', 'pbs', 'status'],
-            ['nodes', 'pbs', 'identity'], ['config', 'datastore'], ['admin', 'datastore'],
+            ['version'], ['ping'], ['access', 'permissions'], ['nodes', 'localhost', 'status'],
+            ['nodes', 'localhost', 'identity'], ['config', 'datastore'], ['admin', 'datastore'],
             ['admin', 'datastore', 'store_a', 'status'],
         ], array_map(static fn (PbsRequest $request): array => $request->pathSegments, $transport->requests));
-        self::assertSame(['verbose' => 0], $transport->requests[8]->query);
+        self::assertSame(['verbose' => 0], $transport->requests[7]->query);
     }
 
     private function transport(HttpClientInterface $http, PbsRequestAuthenticator $auth, PbsRetryDelay $delay): PbsHttpTransport
@@ -458,14 +456,16 @@ final class PbsRecordingTransport implements PbsApiTransport
     /** @var list<PbsRequest> */ public array $requests = [];
     public function get(PbsRequest $request): PbsApiEnvelope
     {
+        if (['nodes'] === $request->pathSegments) {
+            throw PbsReadFailure::for(PbsReadFailureCode::PermissionDenied);
+        }
         $this->requests[] = $request;
         return match ($request->pathSegments) {
             ['version'] => new PbsApiEnvelope((object) ['version' => '4.2.2', 'release' => '1', 'repoid' => 'abcdef12'], null),
             ['ping'] => new PbsApiEnvelope((object) ['pong' => true], null),
-            ['nodes'] => new PbsApiEnvelope([(object) ['node' => 'pbs']], null),
             ['access', 'permissions'] => new PbsApiEnvelope((object) [(string) ($request->query['path'] ?? '') => (object) ['Sys.Audit' => false]], null),
-            ['nodes', 'pbs', 'status'] => new PbsApiEnvelope((object) ['uptime' => 1, 'memory' => (object) ['total' => 2, 'used' => 1], 'root' => (object) ['total' => 10, 'used' => 2, 'avail' => 8]], null),
-            ['nodes', 'pbs', 'identity'] => new PbsApiEnvelope((object) ['pbs-instance-id' => str_repeat('a', 32)], null),
+            ['nodes', 'localhost', 'status'] => new PbsApiEnvelope((object) ['uptime' => 1, 'memory' => (object) ['total' => 2, 'used' => 1], 'root' => (object) ['total' => 10, 'used' => 2, 'avail' => 8]], null),
+            ['nodes', 'localhost', 'identity'] => new PbsApiEnvelope((object) ['pbs-instance-id' => str_repeat('a', 32)], null),
             ['config', 'datastore'] => new PbsApiEnvelope([(object) ['name' => 'store_a']], str_repeat('b', 64)),
             ['admin', 'datastore'] => new PbsApiEnvelope([(object) ['store' => 'store_a', 'mount-status' => 'mounted', 'backend-type' => 'filesystem']], null),
             ['admin', 'datastore', 'store_a', 'status'] => new PbsApiEnvelope((object) ['total' => 100, 'used' => 20, 'avail' => 80, 'backend-type' => 'filesystem'], null),

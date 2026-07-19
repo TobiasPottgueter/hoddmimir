@@ -20,11 +20,7 @@ final readonly class ReadPbsInstallation
     {
         $client = $this->connector->connect();
         $version = $client->version();
-        $nodes = $client->nodeNames();
-        if (1 !== count($nodes)) {
-            throw PbsReadFailure::for(PbsReadFailureCode::InvalidResponse);
-        }
-        $node = $nodes[0];
+        $node = PbsNodeRoute::Local->value;
         $issues = [];
 
         $systemPermission = $this->permission($client, '/system/status');
@@ -37,7 +33,7 @@ final readonly class ReadPbsInstallation
 
         $nodeStatus = null;
         try {
-            $nodeStatus = $client->nodeStatus($node);
+            $nodeStatus = $client->nodeStatus();
         } catch (PbsReadFailure) {
             $issues[] = new PbsInventoryIssue(PbsInventoryIssueCode::NodeStatusReadFailed, sprintf('/nodes/%s/status', $node));
         }
@@ -45,7 +41,7 @@ final readonly class ReadPbsInstallation
         $identity = null;
         if ($version->supportsInstanceIdentity()) {
             try {
-                $identity = $client->instanceIdentity($node);
+                $identity = $client->instanceIdentity();
             } catch (PbsReadFailure) {
                 $issues[] = new PbsInventoryIssue(PbsInventoryIssueCode::IdentityReadFailed, sprintf('/nodes/%s/identity', $node));
             }
@@ -112,7 +108,6 @@ final readonly class ReadPbsInstallation
 
         return new PbsInstallationSnapshot(
             $version,
-            $node,
             $nodeStatus,
             $identity,
             $this->scope,

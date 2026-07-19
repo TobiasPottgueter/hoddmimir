@@ -277,7 +277,7 @@ final class DbalPbsContentStoreTest extends DatabaseTestCase
         ]);
         $this->connection()->insert('proxmox_installation_bindings', [
             'connection_id' => $this->connectionId->binary(), 'product' => 'pbs',
-            'identity_kind' => 'pbs_legacy_node', 'identity_value' => 'pbs-a',
+            'identity_kind' => 'pbs_legacy_node', 'identity_value' => 'localhost',
             'legacy_endpoint_id' => $this->endpointId->bytes,
             'first_bound_run_id' => $seedRun->binary(), 'last_verified_run_id' => $seedRun->binary(),
             'first_bound_at' => $at, 'last_verified_at' => $at,
@@ -320,7 +320,7 @@ final class DbalPbsContentStoreTest extends DatabaseTestCase
 
     private function binding(): InstallationBinding
     {
-        return InstallationBinding::pbsLegacyNode('pbs-a', $this->endpointId);
+        return InstallationBinding::pbsLegacyEndpoint($this->endpointId);
     }
 
     private function scope(

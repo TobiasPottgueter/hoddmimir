@@ -67,7 +67,7 @@ final class MonitoringModelTest extends TestCase
         new MonitoringRunStart(
             self::id('run-legacy'), self::id('parent-legacy'), self::id('connection-legacy'),
             self::endpoint('selected'), ProxmoxProduct::Pbs,
-            InstallationBinding::pbsLegacyNode('pbs-a', self::endpoint('bound')),
+            InstallationBinding::pbsLegacyEndpoint(self::endpoint('bound')),
             MonitoringRunKind::ObservedTasks, 1, new DateTimeImmutable(),
         );
     }

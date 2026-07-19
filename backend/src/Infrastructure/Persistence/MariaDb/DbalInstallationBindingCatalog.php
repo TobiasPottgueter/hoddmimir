@@ -7,6 +7,7 @@ namespace App\Infrastructure\Persistence\MariaDb;
 use App\Application\Inventory\Connection\ConnectionId;
 use App\Application\Inventory\Connection\InstallationBinding;
 use App\Application\Inventory\Connection\InstallationBindingCatalog;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use Doctrine\DBAL\Connection;
 use RuntimeException;
 
@@ -67,7 +68,10 @@ final readonly class DbalInstallationBindingCatalog implements InstallationBindi
             if (!is_string($endpoint) || 16 !== strlen($endpoint)) {
                 throw new RuntimeException('A legacy PBS binding has no valid endpoint.');
             }
-            return InstallationBinding::pbsLegacyNode($identity, new \App\Application\Inventory\Connection\EndpointId($endpoint));
+            if (!hash_equals(PbsNodeRoute::Local->value, $identity)) {
+                throw new RuntimeException('A legacy PBS binding has a non-canonical identity.');
+            }
+            return InstallationBinding::pbsLegacyEndpoint(new \App\Application\Inventory\Connection\EndpointId($endpoint));
         }
 
         throw new RuntimeException('MariaDB returned an unsupported installation binding.');

@@ -156,7 +156,7 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
         $pbsRunner->execute($this->lease(), self::id('parent-pbs'), $this->pbsRead(), $checkpoint);
         self::assertSame([[
             'kind' => MonitoringCursorKind::PbsTasksWindow,
-            'scopeKeys' => ['pbs-a'],
+            'scopeKeys' => ['localhost'],
         ]], $pbsCursors->calls);
     }
 
@@ -360,11 +360,10 @@ final class RunSelectedEndpointMonitoringTest extends TestCase
             new ConnectionId(self::bytes('connection')),
             1,
             new EndpointId(self::bytes('endpoint')),
-            InstallationBinding::pbsLegacyNode('pbs-a', new EndpointId(self::bytes('endpoint'))),
+            InstallationBinding::pbsLegacyEndpoint(new EndpointId(self::bytes('endpoint'))),
             new PbsInstallationSnapshot(
                 new PbsVersion(3, 4, 4, '3.4.4', '1', 'repo'),
-                'pbs-a',
-                new PbsNodeStatus('pbs-a', 1, 100, 20, 100, 20, 80),
+                new PbsNodeStatus('localhost', 1, 100, 20, 100, 20, 80),
                 null,
                 PbsDatastoreScanScope::installationWide(),
                 $configuration,
@@ -483,7 +482,6 @@ final class RecordingMonitoringReader implements SelectedEndpointMonitoringReade
         ConnectionId $connectionId,
         EndpointId $endpointId,
         int $expectedRevision,
-        string $node,
         PbsTaskWindow $window,
         ConnectionReadCheckpoint $checkpoint,
     ): PbsExternalMonitoringSnapshot {

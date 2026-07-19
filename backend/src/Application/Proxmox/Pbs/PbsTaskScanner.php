@@ -13,7 +13,7 @@ final readonly class PbsTaskScanner
         private PbsTasksAndJobsLimits $limits = new PbsTasksAndJobsLimits(),
     ) {}
 
-    public function scan(string $node, PbsTaskWindow $window): PbsTaskScanSnapshot
+    public function scan(PbsTaskWindow $window): PbsTaskScanSnapshot
     {
         if ($window->until - $window->since > $this->limits->maximumHistoryWindowSeconds) {
             throw new InvalidArgumentException('The PBS task history window exceeds the configured limit.');
@@ -23,7 +23,7 @@ final readonly class PbsTaskScanner
         $streams = [];
         foreach (PbsTaskFilterFamily::cases() as $family) {
             foreach ([PbsTaskPass::Running, PbsTaskPass::History] as $pass) {
-                [$streamTasks, $issue, $stream] = $this->scanStream($node, $family, $pass, $window);
+                [$streamTasks, $issue, $stream] = $this->scanStream($family, $pass, $window);
                 foreach ($streamTasks as $task) {
                     $tasks[] = $task;
                 }
@@ -38,7 +38,6 @@ final readonly class PbsTaskScanner
 
     /** @return array{list<PbsTaskObservation>, ?PbsTaskScanIssue, PbsTaskStreamResult} */
     private function scanStream(
-        string $node,
         PbsTaskFilterFamily $family,
         PbsTaskPass $pass,
         PbsTaskWindow $window,
@@ -61,7 +60,7 @@ final readonly class PbsTaskScanner
                 $pageLimit = $remainingRows;
             }
             try {
-                $page = $this->source->page($node, new PbsTaskListQuery(
+                $page = $this->source->page(new PbsTaskListQuery(
                     $family,
                     $pass,
                     $start,

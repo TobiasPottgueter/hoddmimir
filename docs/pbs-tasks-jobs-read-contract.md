@@ -32,15 +32,16 @@ Only these fixed GET descriptors are added by the slice:
 - `/api2/json/admin/prune`;
 - `/api2/json/admin/sync?sync-direction=all`;
 - `/api2/json/admin/verify`;
-- `/api2/json/nodes/{validated-node}/tasks`;
+- `/api2/json/nodes/localhost/tasks`;
 - `/api2/json/access/permissions?path=%2Fsystem%2Ftasks`;
 - `/api2/json/access/permissions?path=%2Fdatastore`;
 - `/api2/json/access/permissions?path=%2Fremote`.
 
 Job list bodies are capped at 4 MiB; task-list bodies are capped at 2 MiB.
-Node names and permission paths are validated locally before a request is
-constructed. The sync-job request always includes `sync-direction=all` so
-pull and push jobs are visible.
+The task route contains no caller-supplied node: the application and request
+descriptor always use PBS's canonical local alias `localhost`. Permission
+paths are validated locally before a request is constructed. The sync-job
+request always includes `sync-direction=all` so pull and push jobs are visible.
 
 ## Job model
 
@@ -70,9 +71,9 @@ responses fail closed.
 
 The raw PBS UPID is retained up to 2,048 bytes and parsed into node, PID,
 process-start, task ID, start time, worker type, optional worker ID, and auth
-ID. The node reported in the list row is separate evidence: `localhost` or a
-different valid node can be reported without contradicting the node embedded
-in the UPID.
+ID. The optional node reported in the list row and the node embedded in the
+UPID are separate observation evidence. Either may differ from `localhost`;
+neither is ever fed back into a request route, scan cursor, or scope key.
 
 Only this exact local worker-type allowlist may enter the positive snapshot:
 

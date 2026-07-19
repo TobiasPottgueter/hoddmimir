@@ -892,8 +892,7 @@ final class ExecuteClaimedInventoryCycleTest extends TestCase
         $configuration = new PbsDatastoreConfigurationSnapshot(str_repeat('a', 64), [$id]);
         return new PbsInstallationSnapshot(
             new PbsVersion(3, 4, 4, '3.4.4', '1', 'repo'),
-            'pbs',
-            new PbsNodeStatus('pbs', 1, 100, 20, 100, 20, 80),
+            new PbsNodeStatus('localhost', 1, 100, 20, 100, 20, 80),
             null,
             PbsDatastoreScanScope::installationWide(),
             $configuration,

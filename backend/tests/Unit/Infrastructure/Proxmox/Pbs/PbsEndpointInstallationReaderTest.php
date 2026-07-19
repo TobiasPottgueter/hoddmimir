@@ -28,7 +28,6 @@ use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConfiguration;
 use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConfigurationSource;
 use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConnector;
 use App\Infrastructure\Proxmox\Pbs\PbsInstanceIdentityReader;
-use App\Infrastructure\Proxmox\Pbs\PbsNodesReader;
 use App\Infrastructure\Proxmox\Pbs\PbsNodeStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPermissionReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPingReader;
@@ -142,12 +141,11 @@ final class PbsEndpointInstallationReaderTest extends TestCase
         $expected = [
             '/version',
             '/ping',
-            '/nodes',
             '/access/permissions?path=/system/status',
-            '/nodes/pbs/status',
+            '/nodes/localhost/status',
         ];
         if ($expectsIdentity) {
-            $expected[] = '/nodes/pbs/identity';
+            $expected[] = '/nodes/localhost/identity';
         }
         array_push(
             $expected,
@@ -175,7 +173,6 @@ final class PbsEndpointInstallationReaderTest extends TestCase
             $transport,
             new PbsVersionReader(),
             new PbsPingReader(),
-            new PbsNodesReader(),
             new PbsPermissionReader(),
             new PbsNodeStatusReader(),
             new PbsInstanceIdentityReader(),
@@ -268,6 +265,9 @@ final class RouteRecordingPbsTransport implements PbsApiTransport
 
     public function get(PbsRequest $request): PbsApiEnvelope
     {
+        if (['nodes'] === $request->pathSegments) {
+            throw PbsReadFailure::for(PbsReadFailureCode::PermissionDenied);
+        }
         $path = '/'.implode('/', $request->pathSegments);
         if ([] !== $request->query) {
             $path .= '?'.http_build_query($request->query, '', '&', PHP_QUERY_RFC3986);
@@ -280,14 +280,13 @@ final class RouteRecordingPbsTransport implements PbsApiTransport
                 null,
             ),
             ['ping'] => new PbsApiEnvelope((object) ['pong' => true], null),
-            ['nodes'] => new PbsApiEnvelope([(object) ['node' => 'pbs']], null),
             ['access', 'permissions'] => $this->permission($request),
-            ['nodes', 'pbs', 'status'] => new PbsApiEnvelope((object) [
+            ['nodes', 'localhost', 'status'] => new PbsApiEnvelope((object) [
                 'uptime' => 1,
                 'memory' => (object) ['total' => 2, 'used' => 1],
                 'root' => (object) ['total' => 10, 'used' => 2, 'avail' => 8],
             ], null),
-            ['nodes', 'pbs', 'identity'] => new PbsApiEnvelope(
+            ['nodes', 'localhost', 'identity'] => new PbsApiEnvelope(
                 (object) ['pbs-instance-id' => str_repeat('a', 32)],
                 null,
             ),

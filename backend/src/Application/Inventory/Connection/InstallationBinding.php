@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Inventory\Connection;
 
 use App\Application\Proxmox\Pbs\PbsInstallationSnapshot;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pve\PveClusterMode;
 use App\Application\Proxmox\Pve\PveClusterNode;
 use App\Application\Proxmox\Pve\PveInstallationSnapshot;
@@ -47,6 +48,10 @@ final readonly class InstallationBinding
         if (InstallationBindingKind::PbsLegacyNode === $kind && null === $legacyEndpointId) {
             throw new InvalidArgumentException('A legacy PBS binding requires its exact endpoint.');
         }
+        if (InstallationBindingKind::PbsLegacyNode === $kind
+            && !hash_equals(PbsNodeRoute::Local->value, $identity)) {
+            throw new InvalidArgumentException('A legacy PBS binding requires the canonical local identity.');
+        }
         if (InstallationBindingKind::PbsLegacyNode !== $kind && null !== $legacyEndpointId) {
             throw new InvalidArgumentException('Only a legacy PBS binding may carry an endpoint.');
         }
@@ -72,12 +77,12 @@ final readonly class InstallationBinding
         return new self(ProxmoxProduct::Pbs, InstallationBindingKind::PbsInstance, $instanceIdentity);
     }
 
-    public static function pbsLegacyNode(string $node, EndpointId $endpointId): self
+    public static function pbsLegacyEndpoint(EndpointId $endpointId): self
     {
         return new self(
             ProxmoxProduct::Pbs,
             InstallationBindingKind::PbsLegacyNode,
-            $node,
+            PbsNodeRoute::Local->value,
             legacyEndpointId: $endpointId,
         );
     }
@@ -123,8 +128,8 @@ final readonly class InstallationBinding
             return null;
         }
         if (!$snapshot->version->supportsInstanceIdentity()) {
-            return null !== $endpointId && InstallationIdentityValidator::isValid($snapshot->node)
-                ? self::pbsLegacyNode($snapshot->node, $endpointId)
+            return null !== $endpointId
+                ? self::pbsLegacyEndpoint($endpointId)
                 : null;
         }
         if (null !== $snapshot->instanceIdentity) {
@@ -151,6 +156,10 @@ final readonly class InstallationBinding
             || !hash_equals($this->identity, $observed->identity)
         ) {
             return false;
+        }
+
+        if (InstallationBindingKind::PbsLegacyNode === $this->kind) {
+            return $this->legacyEndpointId?->bytes === $observed->legacyEndpointId?->bytes;
         }
 
         return InstallationBindingKind::PveCluster !== $this->kind

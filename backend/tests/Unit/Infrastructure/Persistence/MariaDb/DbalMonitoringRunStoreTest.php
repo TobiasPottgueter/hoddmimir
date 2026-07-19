@@ -279,7 +279,7 @@ final class DbalMonitoringRunStoreTest extends TestCase
 
     public function testPbsJobsAndTasksCoverCreateUpdateLastRunAndCompleteCursorFamilies(): void
     {
-        $binding = InstallationBinding::pbsLegacyNode('pbs-a', $this->endpoint());
+        $binding = InstallationBinding::pbsLegacyEndpoint($this->endpoint());
         $job = $this->pbsJob();
         $createdJobs = new MonitoringStoreRecording();
         $result = $this->store($this->database([
@@ -747,7 +747,7 @@ final class DbalMonitoringRunStoreTest extends TestCase
         array $tasks = [],
         ?InstallationBinding $binding = null,
     ): MonitoringCommit {
-        $binding ??= InstallationBinding::pbsLegacyNode('pbs-a', $this->endpoint());
+        $binding ??= InstallationBinding::pbsLegacyEndpoint($this->endpoint());
         return new MonitoringCommit(
             $this->id('run'), $this->id('parent'), $this->id('connection'), $this->endpoint(),
             ProxmoxProduct::Pbs, $binding, $kind, 1,

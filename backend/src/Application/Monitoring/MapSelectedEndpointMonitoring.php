@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Monitoring;
 
 use App\Application\Proxmox\Pbs\PbsJobKind;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsJobListSnapshot;
 use App\Application\Proxmox\Pbs\PbsTaskFilterFamily;
 use App\Application\Proxmox\Pbs\PbsTaskPass;
@@ -143,10 +144,10 @@ final readonly class MapSelectedEndpointMonitoring
     public function pbsTasks(
         MonitoringRunStart $run,
         PbsExternalMonitoringSnapshot $snapshot,
-        string $node,
         MonitoringWindowPlan $window,
         DateTimeImmutable $observedAt,
     ): MonitoringCommit {
+        $node = PbsNodeRoute::Local->value;
         $scopes = [];
         if (null === $snapshot->tasks) {
             foreach (PbsTaskFilterFamily::cases() as $family) {

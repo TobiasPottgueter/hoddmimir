@@ -703,12 +703,12 @@ final class DbalMonitoringRunStoreTest extends DatabaseTestCase
             'host' => 'pbs-a.invalid',
             'port' => 8007,
         ], ['id' => $this->endpointId->bytes]);
-        $this->binding = InstallationBinding::pbsLegacyNode('pbs-a', $this->endpointId);
+        $this->binding = InstallationBinding::pbsLegacyEndpoint($this->endpointId);
         $connection->insert('proxmox_installation_bindings', [
             'connection_id' => $this->connectionId->binary(),
             'product' => 'pbs',
             'identity_kind' => 'pbs_legacy_node',
-            'identity_value' => 'pbs-a',
+            'identity_value' => 'localhost',
             'legacy_endpoint_id' => $this->endpointId->bytes,
             'first_bound_run_id' => $this->parentRunId->binary(),
             'last_verified_run_id' => $this->parentRunId->binary(),

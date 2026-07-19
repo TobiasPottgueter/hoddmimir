@@ -240,7 +240,7 @@ final class MonitoringBranchCoverageTest extends TestCase
                 ? MonitoringRunKind::ExternalJobs : MonitoringRunKind::ObservedTasks;
             $binding = ProxmoxProduct::Pve === $product
                 ? InstallationBinding::pveStandalone('pve-a')
-                : InstallationBinding::pbsLegacyNode('pbs-a', $this->endpoint());
+                : InstallationBinding::pbsLegacyEndpoint($this->endpoint());
             try {
                 // @phpstan-ignore-next-line runtime boundary is intentionally exercised
                 $this->rawCommit($product, $binding, $kind, 1, $scopes, $pveJobs, $pveTasks, $pbsJobs, $pbsTasks);
@@ -608,7 +608,7 @@ final class MonitoringBranchCoverageTest extends TestCase
     ): MonitoringCommit {
         $binding = ProxmoxProduct::Pve === $product
             ? InstallationBinding::pveStandalone('pve-a')
-            : InstallationBinding::pbsLegacyNode('pbs-a', $this->endpoint());
+            : InstallationBinding::pbsLegacyEndpoint($this->endpoint());
         return $this->rawCommit(
             $product, $binding, $kind, 1, $scopes, $pveJobs, $pveTasks, $pbsJobs, $pbsTasks,
         );

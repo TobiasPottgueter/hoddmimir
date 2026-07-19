@@ -413,7 +413,7 @@ final class DbalPbsInventoryStoreTest extends TestCase
         bool $status = true,
     ): PbsInventoryCommit {
         $scopeStatus = $authoritative ? InventoryScopeStatus::Complete : InventoryScopeStatus::Partial;
-        $serverStatus = $status ? new PbsNodeStatus('pbs-node', 100, 1000, 300, 2000, 500, 1500) : null;
+        $serverStatus = $status ? new PbsNodeStatus('localhost', 100, 1000, 300, 2000, 500, 1500) : null;
         $stores = [
             new PbsDatastoreObservation(
                 'store_a',
@@ -450,7 +450,7 @@ final class DbalPbsInventoryStoreTest extends TestCase
         ];
         $binding = $instanceBinding
             ? InstallationBinding::pbsInstance(str_repeat('a', 32))
-            : InstallationBinding::pbsLegacyNode('pbs-node', new EndpointId($this->id('e')->binary()));
+            : InstallationBinding::pbsLegacyEndpoint(new EndpointId($this->id('e')->binary()));
 
         return new PbsInventoryCommit(
             $this->id('r'),
@@ -465,7 +465,7 @@ final class DbalPbsInventoryStoreTest extends TestCase
                 new PbsInventoryScopeResult(PbsInventoryScope::DatastoreStatus, 'store_b', $scopeStatus),
             ],
             new PbsServerObservation(
-                'pbs-node',
+                'localhost',
                 new PbsVersion($instanceBinding ? 4 : 3, $instanceBinding ? 2 : 4, 1, 'version', 'release', 'repo'),
                 $serverStatus,
             ),
@@ -481,7 +481,7 @@ final class DbalPbsInventoryStoreTest extends TestCase
         return [
             'product' => 'pbs',
             'identity_kind' => 'pbs_legacy_node',
-            'identity_value' => 'pbs-node',
+            'identity_value' => 'localhost',
             'legacy_endpoint_id' => $this->id('e')->binary(),
         ];
     }

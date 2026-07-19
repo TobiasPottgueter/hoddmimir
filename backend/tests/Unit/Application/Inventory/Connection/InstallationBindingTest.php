@@ -33,7 +33,7 @@ final class InstallationBindingTest extends TestCase
         $cluster = InstallationBinding::pveCluster('forest', ['node-b', 'node-a']);
         $standalone = InstallationBinding::pveStandalone('solo.test');
         $pbs4 = InstallationBinding::pbsInstance(str_repeat('a', 32));
-        $pbs3 = InstallationBinding::pbsLegacyNode('pbs3.test', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)));
+        $pbs3 = InstallationBinding::pbsLegacyEndpoint(new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)));
 
         self::assertSame(ProxmoxProduct::Pve, $cluster->product);
         self::assertSame(InstallationBindingKind::PveCluster, $cluster->kind);
@@ -43,6 +43,7 @@ final class InstallationBindingTest extends TestCase
         self::assertSame(InstallationBindingKind::PbsInstance, $pbs4->kind);
         self::assertSame(InstallationBindingKind::PbsLegacyNode, $pbs3->kind);
         self::assertSame(ProxmoxProduct::Pbs, $pbs3->product);
+        self::assertSame('localhost', $pbs3->identity);
     }
 
     public function testSingleCharacterInstallationNamesRemainValidWhenAlphanumeric(): void
@@ -109,6 +110,8 @@ final class InstallationBindingTest extends TestCase
         foreach ([
             [ProxmoxProduct::Pbs, InstallationBindingKind::PbsLegacyNode, 'pbs3', [], null,
                 'A legacy PBS binding requires its exact endpoint.'],
+            [ProxmoxProduct::Pbs, InstallationBindingKind::PbsLegacyNode, 'pbs3', [], new EndpointId(str_repeat('e', 16)),
+                'A legacy PBS binding requires the canonical local identity.'],
             [ProxmoxProduct::Pve, InstallationBindingKind::PveStandalone, 'node', [], new EndpointId(str_repeat('e', 16)),
                 'Only a legacy PBS binding may carry an endpoint.'],
         ] as [$product, $kind, $identity, $nodes, $endpoint, $message]) {
@@ -128,9 +131,9 @@ final class InstallationBindingTest extends TestCase
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->equals(InstallationBinding::pveCluster('same', ['bb'])));
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->equals(InstallationBinding::pveCluster('other', ['aa'])));
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->equals(InstallationBinding::pveStandalone('same')));
-        self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->equals(InstallationBinding::pbsLegacyNode('same', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)))));
-        self::assertFalse(InstallationBinding::pbsLegacyNode('same', new EndpointId(str_repeat('l', 16)))->equals(
-            InstallationBinding::pbsLegacyNode('same', new EndpointId(str_repeat('x', 16))),
+        self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->equals(InstallationBinding::pbsLegacyEndpoint(new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)))));
+        self::assertFalse(InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('l', 16)))->equals(
+            InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('x', 16))),
         ));
 
         self::assertTrue(InstallationBinding::pveCluster('same', ['aa', 'bb'])->matchesObservation(
@@ -140,7 +143,7 @@ final class InstallationBindingTest extends TestCase
             InstallationBinding::pveCluster('same', ['bb']),
         ));
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->matchesObservation(
-            InstallationBinding::pbsLegacyNode('same', new EndpointId(str_repeat('l', 16))),
+            InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('l', 16))),
         ));
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->matchesObservation(
             InstallationBinding::pveStandalone('same'),
@@ -151,7 +154,9 @@ final class InstallationBindingTest extends TestCase
         self::assertFalse(InstallationBinding::pveCluster('same', ['aa'])->matchesObservation(
             InstallationBinding::pveCluster('other', ['aa']),
         ));
-        self::assertTrue(InstallationBinding::pbsLegacyNode('same', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)))->matchesObservation(InstallationBinding::pbsLegacyNode('same', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16)))));
+        $legacy = InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('l', 16)));
+        self::assertTrue($legacy->matchesObservation(InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('l', 16)))));
+        self::assertFalse($legacy->matchesObservation(InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('x', 16)))));
     }
 
     public function testItExtractsPveClusterAndStrictStandaloneBindings(): void
@@ -281,16 +286,14 @@ final class InstallationBindingTest extends TestCase
 
     public function testItExtractsPbsLegacyNodeAndPbsInstanceBindingsOnly(): void
     {
-        $pbs3 = self::pbsSnapshot(new PbsVersion(3, 4, 1, '3.4.1', '3.4', 'repo'), 'pbs3', null);
+        $pbs3 = self::pbsSnapshot(new PbsVersion(3, 4, 1, '3.4.1', '3.4', 'repo'), null);
         $pbs4 = self::pbsSnapshot(
             new PbsVersion(4, 2, 0, '4.2.0', '4.2', 'repo'),
-            'pbs4',
             new PbsInstanceIdentity(str_repeat('b', 32)),
         );
-        $pbs4WithoutIdentity = self::pbsSnapshot(new PbsVersion(4, 1, 0, '4.1.0', '4.1', 'repo'), 'pbs4', null);
+        $pbs4WithoutIdentity = self::pbsSnapshot(new PbsVersion(4, 1, 0, '4.1.0', '4.1', 'repo'), null);
         $pbs5 = self::pbsSnapshot(
             new PbsVersion(5, 0, 0, '5.0.0', '5.0', 'repo'),
-            'pbs5',
             new PbsInstanceIdentity(str_repeat('c', 32)),
         );
 
@@ -299,23 +302,17 @@ final class InstallationBindingTest extends TestCase
         $pbs4Binding = InstallationBinding::fromSnapshot($pbs4);
         self::assertNotNull($pbs3Binding);
         self::assertNotNull($pbs4Binding);
-        self::assertTrue(InstallationBinding::pbsLegacyNode('pbs3', $legacyEndpoint)->equals($pbs3Binding));
+        self::assertTrue(InstallationBinding::pbsLegacyEndpoint($legacyEndpoint)->equals($pbs3Binding));
         self::assertTrue(InstallationBinding::pbsInstance(str_repeat('b', 32))->equals($pbs4Binding));
         $pbs41Binding = InstallationBinding::fromSnapshot($pbs4WithoutIdentity, $legacyEndpoint);
         self::assertNotNull($pbs41Binding);
-        self::assertTrue(InstallationBinding::pbsLegacyNode('pbs4', $legacyEndpoint)->equals($pbs41Binding));
+        self::assertTrue(InstallationBinding::pbsLegacyEndpoint($legacyEndpoint)->equals($pbs41Binding));
         self::assertNull(InstallationBinding::fromSnapshot($pbs5));
         self::assertNull(InstallationBinding::fromSnapshot($pbs3));
         self::assertNull(InstallationBinding::fromSnapshot(self::pbsSnapshot(
             new PbsVersion(4, 2, 0, '4.2.0', '4.2', 'repo'),
-            'pbs4',
             null,
         )));
-        self::assertNull(InstallationBinding::fromSnapshot(self::pbsSnapshot(
-            new PbsVersion(3, 4, 1, '3.4.1', '3.4', 'repo'),
-            "pbs3\n",
-            null,
-        ), $legacyEndpoint));
     }
 
     private static function pveSnapshot(PveClusterTopology $topology): PveInstallationSnapshot
@@ -330,12 +327,10 @@ final class InstallationBindingTest extends TestCase
 
     private static function pbsSnapshot(
         PbsVersion $version,
-        string $node,
         ?PbsInstanceIdentity $identity,
     ): PbsInstallationSnapshot {
         return new PbsInstallationSnapshot(
             $version,
-            $node,
             null,
             $identity,
             PbsDatastoreScanScope::installationWide(),

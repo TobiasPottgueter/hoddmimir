@@ -6,5 +6,5 @@ namespace App\Application\Proxmox\Pbs;
 
 interface PbsTaskPageSource
 {
-    public function page(string $node, PbsTaskListQuery $query): PbsTaskPage;
+    public function page(PbsTaskListQuery $query): PbsTaskPage;
 }

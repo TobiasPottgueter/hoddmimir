@@ -11,6 +11,7 @@ use App\Application\Proxmox\Pbs\PbsDatastoreDefinition;
 use App\Application\Proxmox\Pbs\PbsDatastoreId;
 use App\Application\Proxmox\Pbs\PbsEffectivePermission;
 use App\Application\Proxmox\Pbs\PbsInstanceIdentity;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsNodeStatus;
 use App\Application\Proxmox\Pbs\PbsReadClient;
 use App\Application\Proxmox\Pbs\PbsVersion;
@@ -19,7 +20,6 @@ final readonly class PbsHttpReadClient implements PbsReadClient
 {
     public function __construct(
         private PbsApiTransport $transport,
-        private PbsNodesReader $nodesReader,
         private PbsPermissionReader $permissionReader,
         private PbsNodeStatusReader $nodeStatusReader,
         private PbsInstanceIdentityReader $identityReader,
@@ -30,18 +30,20 @@ final readonly class PbsHttpReadClient implements PbsReadClient
     ) {}
 
     public function version(): PbsVersion { return $this->connectedVersion; }
-    public function nodeNames(): array { return $this->nodesReader->read($this->transport->get(PbsRequest::nodes())); }
     public function permission(string $path): PbsEffectivePermission
     {
         return $this->permissionReader->read($this->transport->get(PbsRequest::permission($path)), $path);
     }
-    public function nodeStatus(string $node): PbsNodeStatus
+    public function nodeStatus(): PbsNodeStatus
     {
-        return $this->nodeStatusReader->read($this->transport->get(PbsRequest::nodeStatus($node)), $node);
+        return $this->nodeStatusReader->read(
+            $this->transport->get(PbsRequest::localNodeStatus()),
+            PbsNodeRoute::Local->value,
+        );
     }
-    public function instanceIdentity(string $node): PbsInstanceIdentity
+    public function instanceIdentity(): PbsInstanceIdentity
     {
-        return $this->identityReader->read($this->transport->get(PbsRequest::instanceIdentity($node)));
+        return $this->identityReader->read($this->transport->get(PbsRequest::localInstanceIdentity()));
     }
     public function datastoreConfigurations(): PbsDatastoreConfigurationSnapshot
     {

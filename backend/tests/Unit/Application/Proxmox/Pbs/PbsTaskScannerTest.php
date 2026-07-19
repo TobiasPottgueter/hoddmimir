@@ -30,7 +30,7 @@ final class PbsTaskScannerTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         try {
-            $scanner->scan('pbs-four', new PbsTaskWindow(100, 161));
+            $scanner->scan(new PbsTaskWindow(100, 161));
         } finally {
             self::assertSame([], $source->queries);
         }
@@ -53,7 +53,7 @@ final class PbsTaskScannerTest extends TestCase
         $source->fail(PbsTaskFilterFamily::Prune, PbsTaskPass::History, 1);
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(1, 3, 3, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertContains(PbsTaskScanIssueCode::ReadFailed, array_column($snapshot->issues, 'code'));
         $failed = $this->stream($snapshot, PbsTaskFilterFamily::Backup, PbsTaskPass::Running);
@@ -82,7 +82,7 @@ final class PbsTaskScannerTest extends TestCase
         $source->set(PbsTaskFilterFamily::Backup, PbsTaskPass::History, 0, new PbsTaskPage([$ok], 1));
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(10, 2, 20, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertSame(PbsTaskScanIssueCode::ConflictingTaskEvidence, $snapshot->issues[0]->code);
         self::assertCount(1, $snapshot->tasks);
@@ -104,7 +104,7 @@ final class PbsTaskScannerTest extends TestCase
         ], 1));
         $scanner = new PbsTaskScanner($source, new PbsTasksAndJobsLimits(10, 2, 20, 10));
 
-        $snapshot = $scanner->scan('pbs-four', new PbsTaskWindow(100, 200));
+        $snapshot = $scanner->scan(new PbsTaskWindow(100, 200));
 
         self::assertTrue($snapshot->isComplete());
         self::assertCount(2, $snapshot->tasks);
@@ -130,7 +130,7 @@ final class PbsTaskScannerTest extends TestCase
         $source->set(PbsTaskFilterFamily::Backup, PbsTaskPass::History, 0, new PbsTaskPage([$terminal], null));
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(10, 2, 20, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertCount(1, $snapshot->tasks);
         self::assertSame(PbsTaskOutcome::Ok, $snapshot->tasks[0]->outcome);
@@ -153,7 +153,7 @@ final class PbsTaskScannerTest extends TestCase
         $source->set(PbsTaskFilterFamily::Backup, PbsTaskPass::History, 0, new PbsTaskPage([$terminal], 1));
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(10, 2, 20, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertSame([], $snapshot->issues);
         self::assertSame(101, $snapshot->tasks[0]->endTime);
@@ -172,7 +172,7 @@ final class PbsTaskScannerTest extends TestCase
         $source->set(PbsTaskFilterFamily::Prune, PbsTaskPass::History, 0, new PbsTaskPage([], 1));
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(1, 3, 3, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertSame(
             [PbsTaskScanIssueCode::RepeatedPage, PbsTaskScanIssueCode::NoProgress],
@@ -193,7 +193,7 @@ final class PbsTaskScannerTest extends TestCase
             $this->task('backup', 'one', true),
         ], 2));
         $pageSnapshot = (new PbsTaskScanner($pageCap, new PbsTasksAndJobsLimits(1, 1, 1, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         self::assertSame(PbsTaskScanIssueCode::PageCapExceeded, $pageSnapshot->issues[0]->code);
 
         $rowCap = new ConfiguredPbsTaskPageSource();
@@ -204,7 +204,7 @@ final class PbsTaskScannerTest extends TestCase
             $this->task('backup', 'two', true),
         ], 2));
         $rowSnapshot = (new PbsTaskScanner($rowCap, new PbsTasksAndJobsLimits(1, 2, 1, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         self::assertSame(PbsTaskScanIssueCode::RowCapExceeded, $rowSnapshot->issues[0]->code);
 
         $runningCap = new ConfiguredPbsTaskPageSource();
@@ -212,7 +212,7 @@ final class PbsTaskScannerTest extends TestCase
             $this->task('syncjob', 'running-cap', false),
         ], 2));
         $runningSnapshot = (new PbsTaskScanner($runningCap, new PbsTasksAndJobsLimits(1, 1, 1, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         self::assertFalse($this->stream(
             $runningSnapshot, PbsTaskFilterFamily::Sync, PbsTaskPass::Running,
         )->historyGap);
@@ -235,7 +235,7 @@ final class PbsTaskScannerTest extends TestCase
         );
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(256, 16, 300, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         $queries = array_values(array_filter(
             $source->queries,
@@ -267,7 +267,7 @@ final class PbsTaskScannerTest extends TestCase
         );
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(256, 16, 300, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         $stream = $this->stream($snapshot, PbsTaskFilterFamily::Backup, PbsTaskPass::History);
 
         self::assertSame(PbsTaskScanIssueCode::RowCapExceeded, $stream->issueCode);
@@ -282,7 +282,7 @@ final class PbsTaskScannerTest extends TestCase
             $this->task('syncjob', 'sync-a', true),
         ], null));
         $shortSnapshot = (new PbsTaskScanner($short, new PbsTasksAndJobsLimits(2, 2, 4, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         self::assertTrue($shortSnapshot->isComplete());
 
         $full = new ConfiguredPbsTaskPageSource();
@@ -290,7 +290,7 @@ final class PbsTaskScannerTest extends TestCase
             $this->task('prunejob', 'prune-a', false),
         ], 1));
         $fullSnapshot = (new PbsTaskScanner($full, new PbsTasksAndJobsLimits(1, 2, 2, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
         self::assertTrue($fullSnapshot->isComplete());
     }
 
@@ -308,7 +308,7 @@ final class PbsTaskScannerTest extends TestCase
         ], 3));
 
         $snapshot = (new PbsTaskScanner($source, new PbsTasksAndJobsLimits(1, 4, 4, 10)))
-            ->scan('pbs-four', new PbsTaskWindow(100, 200));
+            ->scan(new PbsTaskWindow(100, 200));
 
         self::assertTrue($snapshot->isComplete());
         self::assertCount(1, $snapshot->tasks);
@@ -369,9 +369,8 @@ final class ConfiguredPbsTaskPageSource implements PbsTaskPageSource
         $this->failures[$this->key($family, $pass, $start)] = true;
     }
 
-    public function page(string $node, PbsTaskListQuery $query): PbsTaskPage
+    public function page(PbsTaskListQuery $query): PbsTaskPage
     {
-        TestCase::assertSame('pbs-four', $node);
         $this->queries[] = $query;
         if (isset($this->failures[$this->key($query->family, $query->pass, $query->start)])) {
             throw PbsReadFailure::for(PbsReadFailureCode::Transport);

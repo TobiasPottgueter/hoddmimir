@@ -27,7 +27,6 @@ interface SelectedEndpointMonitoringReader
         ConnectionId $connectionId,
         EndpointId $endpointId,
         int $expectedRevision,
-        string $node,
         PbsTaskWindow $window,
         ConnectionReadCheckpoint $checkpoint,
     ): PbsExternalMonitoringSnapshot;

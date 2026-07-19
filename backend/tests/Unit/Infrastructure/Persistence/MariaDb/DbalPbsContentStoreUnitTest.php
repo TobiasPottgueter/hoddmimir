@@ -311,7 +311,7 @@ final class DbalPbsContentStoreUnitTest extends TestCase
                 if (str_contains($sql, 'FROM proxmox_installation_bindings')) {
                     return [
                         'product' => 'pbs', 'identity_kind' => 'pbs_legacy_node',
-                        'identity_value' => 'pbs-a', 'legacy_endpoint_id' => $endpoint->bytes,
+                        'identity_value' => 'localhost', 'legacy_endpoint_id' => $endpoint->bytes,
                     ];
                 }
                 if (str_contains($sql, 'FROM pbs_content_runs')) {
@@ -415,7 +415,7 @@ final class DbalPbsContentStoreUnitTest extends TestCase
     {
         return new PbsContentRunStart(
             $run, $parent, self::id('connection'), self::endpoint(),
-            InstallationBinding::pbsLegacyNode('pbs-a', self::endpoint()), 1,
+            InstallationBinding::pbsLegacyEndpoint(self::endpoint()), 1,
             new DateTimeImmutable(self::AT.' UTC'),
         );
     }
@@ -427,7 +427,7 @@ final class DbalPbsContentStoreUnitTest extends TestCase
     ): PbsContentCommit {
         return new PbsContentCommit(
             $run, $parent, self::id('connection'), self::endpoint(),
-            InstallationBinding::pbsLegacyNode('pbs-a', self::endpoint()), 1,
+            InstallationBinding::pbsLegacyEndpoint(self::endpoint()), 1,
             $snapshot, new DateTimeImmutable(self::AT.' UTC'),
         );
     }

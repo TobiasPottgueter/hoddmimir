@@ -27,6 +27,11 @@ The namespace/snapshot contract is recorded in
 root and nested namespace/snapshot responses. Groups are deliberately derived
 from snapshot rows, so no synthetic `/groups` fixture is maintained.
 
+The first-read contract deliberately has no `/nodes` fixture. The collector
+must tolerate that route being forbidden and uses only the canonical
+`/nodes/localhost/status`, `/nodes/localhost/tasks`, and, on PBS 4.2 and newer,
+`/nodes/localhost/identity` routes.
+
 The GET-only tasks/jobs contract and its complete source pins are recorded in
 `docs/pbs-tasks-jobs-read-contract.md`. Its fixtures are split into `3`,
 `4.0`, `4.1`, and `4.2` directories and cover the three fixed job lists plus

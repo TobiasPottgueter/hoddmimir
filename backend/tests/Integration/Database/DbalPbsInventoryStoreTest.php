@@ -97,7 +97,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
             $this->connection()->fetchAssociative('SELECT state, last_inventory_run_id FROM proxmox_connection_onboarding_state'),
         );
         self::assertSame(
-            ['identity_kind' => 'pbs_legacy_node', 'identity_value' => 'pbs-a', 'legacy_endpoint_id' => $this->endpointId->binary()],
+            ['identity_kind' => 'pbs_legacy_node', 'identity_value' => 'localhost', 'legacy_endpoint_id' => $this->endpointId->binary()],
             $this->connection()->fetchAssociative(
                 'SELECT identity_kind, identity_value, legacy_endpoint_id FROM proxmox_installation_bindings',
             ),
@@ -301,7 +301,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
         }
 
         self::assertSame(
-            ['identity_kind' => 'pbs_legacy_node', 'identity_value' => 'pbs-a', 'legacy_endpoint_id' => $this->endpointId->binary()],
+            ['identity_kind' => 'pbs_legacy_node', 'identity_value' => 'localhost', 'legacy_endpoint_id' => $this->endpointId->binary()],
             $this->connection()->fetchAssociative(
                 'SELECT identity_kind, identity_value, legacy_endpoint_id FROM proxmox_installation_bindings',
             ),
@@ -492,8 +492,7 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
             $this->connectionId,
             $this->endpointId,
             1,
-            $binding ?? InstallationBinding::pbsLegacyNode(
-                'pbs-a',
+            $binding ?? InstallationBinding::pbsLegacyEndpoint(
                 new EndpointId($this->endpointId->binary()),
             ),
             new PbsInventoryScopeResult(PbsInventoryScope::System, '@installation', $systemStatus),
@@ -507,9 +506,9 @@ final class DbalPbsInventoryStoreTest extends KernelTestCase
                 $stores,
             ),
             new PbsServerObservation(
-                'pbs-a',
+                'localhost',
                 new PbsVersion(null !== $binding ? 4 : 3, null !== $binding ? 2 : 4, 0, null !== $binding ? '4.2.0' : '3.4.0', '1', 'repo'),
-                new PbsNodeStatus('pbs-a', 100, 1000, 200, 1000, 200, 800),
+                new PbsNodeStatus('localhost', 100, 1000, 200, 1000, 200, 800),
             ),
             $stores,
             $capacities,

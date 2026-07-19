@@ -46,8 +46,9 @@ PBS monitoring uses only:
 - `GET /admin/prune`;
 - `GET /admin/sync?sync-direction=all`;
 - `GET /admin/verify`;
-- bounded `GET /nodes/{node}/tasks` running and history list calls for the
-local allowlisted backup/prune/sync/verification families.
+- bounded `GET /nodes/localhost/tasks` running and history list calls for the
+  local allowlisted backup/prune/sync/verification families. No PBS response,
+  UPID, inventory snapshot, or caller can select a different request node.
 
 Job completeness is evaluated per family: prune and verify require propagated
 `Datastore.Audit`; sync additionally requires propagated `Remote.Audit`.
@@ -86,11 +87,13 @@ source, filter family, bounded window, counters, truncation/history-gap state,
 and sanitized error code.
 
 A PVE archive cursor advances only for a complete, untruncated, gap-free node
-archive scope. A PBS cursor advances only when all four history families for
-the same node and identical window are complete, untruncated, gap-free, and
-backed by `Sys.Audit` task-read evidence. Missing cursor keys yield a fresh
-bounded window. Stale cursors are clipped to the configured maximum and record
-a history gap; no catch-up burst is attempted.
+archive scope. PBS task scopes and cursors always use the canonical local key
+`localhost`; an optional response `reportedNode` and the UPID node remain
+persisted evidence only. A PBS cursor advances only when all four history
+families for that canonical key and identical window are complete,
+untruncated, gap-free, and backed by `Sys.Audit` task-read evidence. Missing
+cursor keys yield a fresh bounded window. Stale cursors are clipped to the
+configured maximum and record a history gap; no catch-up burst is attempted.
 
 ## Deployment bounds
 

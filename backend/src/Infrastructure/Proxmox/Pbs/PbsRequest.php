@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Infrastructure\Proxmox\Pbs;
 
 use App\Application\Proxmox\Pbs\PbsDatastoreId;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsTaskListQuery;
 use App\Application\Proxmox\Pbs\PbsTaskPass;
 use App\Infrastructure\Validation\AsciiPatternValidator;
@@ -25,7 +26,6 @@ final readonly class PbsRequest
 
     public static function version(): self { return new self(['version'], [], 65_536); }
     public static function ping(): self { return new self(['ping'], [], 65_536); }
-    public static function nodes(): self { return new self(['nodes'], [], 262_144); }
     public static function datastoreConfigurations(): self { return new self(['config', 'datastore'], [], 8_388_608); }
     public static function datastores(): self { return new self(['admin', 'datastore'], [], 8_388_608); }
     public static function pruneJobs(): self { return new self(['admin', 'prune'], [], 4_194_304); }
@@ -48,16 +48,14 @@ final readonly class PbsRequest
         throw new InvalidArgumentException('The PBS permission probe path is not allowed.');
     }
 
-    public static function nodeStatus(string $node): self
+    public static function localNodeStatus(): self
     {
-        self::requireNode($node);
-        return new self(['nodes', $node, 'status'], [], 262_144);
+        return new self(['nodes', PbsNodeRoute::Local->value, 'status'], [], 262_144);
     }
 
-    public static function instanceIdentity(string $node): self
+    public static function localInstanceIdentity(): self
     {
-        self::requireNode($node);
-        return new self(['nodes', $node, 'identity'], [], 262_144);
+        return new self(['nodes', PbsNodeRoute::Local->value, 'identity'], [], 262_144);
     }
 
     public static function datastoreStatus(PbsDatastoreId $id): self
@@ -86,9 +84,8 @@ final readonly class PbsRequest
         );
     }
 
-    public static function tasks(string $node, PbsTaskListQuery $taskQuery): self
+    public static function localTasks(PbsTaskListQuery $taskQuery): self
     {
-        self::requireNode($node);
         $query = [
             'start' => $taskQuery->start,
             'limit' => $taskQuery->limit,
@@ -102,14 +99,7 @@ final readonly class PbsRequest
             $query['since'] = $window->since;
             $query['until'] = $window->until;
         }
-        return new self(['nodes', $node, 'tasks'], $query, 2_097_152);
-    }
-
-    private static function requireNode(string $node): void
-    {
-        if (!AsciiPatternValidator::matches('/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\z/D', $node)) {
-            throw new InvalidArgumentException('The PBS node name is invalid.');
-        }
+        return new self(['nodes', PbsNodeRoute::Local->value, 'tasks'], $query, 2_097_152);
     }
 
     private static function requireBodyLimit(int $maximumBodyBytes): int

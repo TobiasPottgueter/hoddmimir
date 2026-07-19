@@ -18,6 +18,7 @@ use App\Application\Proxmox\Pbs\PbsInventoryIssue;
 use App\Application\Proxmox\Pbs\PbsInventoryIssueCode;
 use App\Application\Proxmox\Pbs\PbsMaintenanceMode;
 use App\Application\Proxmox\Pbs\PbsMountStatus;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsNodeStatus;
 use App\Application\Proxmox\Pbs\PbsReadFailure;
 use App\Application\Proxmox\Pbs\PbsReadFailureCode;
@@ -101,19 +102,20 @@ final class PbsValueObjectsTest extends TestCase
         $scope = PbsDatastoreScanScope::installationWide();
         $id = new PbsDatastoreId('store_a');
         $config = new PbsDatastoreConfigurationSnapshot(str_repeat('a', 64), [$id]);
-        $node = new PbsNodeStatus('pbs', 1, 2, 1, 10, 2, 8);
+        $node = new PbsNodeStatus(PbsNodeRoute::Local->value, 1, 2, 1, 10, 2, 8);
         $definition = new PbsDatastoreDefinition($id, PbsDatastoreBackendType::Filesystem, PbsMountStatus::Mounted, null);
         $capacity = new PbsDatastoreCapacity($id, PbsDatastoreBackendType::Filesystem, 10, 2, 8);
-        $snapshot = new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, $config, $config, [$definition], [$capacity], []);
+        $snapshot = new PbsInstallationSnapshot($version3, $node, null, $scope, $config, $config, [$definition], [$capacity], []);
+        self::assertSame(PbsNodeRoute::Local->value, $snapshot->node);
         self::assertTrue($snapshot->isComplete());
         self::assertTrue($snapshot->permitsDeletionDecisions());
-        self::assertFalse((new PbsInstallationSnapshot($version4, 'pbs', $node, null, $scope, $config, $config, [$definition], [$capacity], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', null, null, $scope, $config, $config, [$definition], [$capacity], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, null, $config, [$definition], [$capacity], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, $config, null, [$definition], [$capacity], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, $config, new PbsDatastoreConfigurationSnapshot(str_repeat('b', 64), [$id]), [$definition], [$capacity], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, $config, $config, [$definition], [], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version3, 'pbs', $node, null, $scope, $config, $config, [$definition], [$capacity], [new PbsInventoryIssue(PbsInventoryIssueCode::ConfigurationChanged, '/config/datastore')]))->permitsDeletionDecisions());
+        self::assertFalse((new PbsInstallationSnapshot($version4, $node, null, $scope, $config, $config, [$definition], [$capacity], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, null, null, $scope, $config, $config, [$definition], [$capacity], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, $node, null, $scope, null, $config, [$definition], [$capacity], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, $node, null, $scope, $config, null, [$definition], [$capacity], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, $node, null, $scope, $config, new PbsDatastoreConfigurationSnapshot(str_repeat('b', 64), [$id]), [$definition], [$capacity], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, $node, null, $scope, $config, $config, [$definition], [], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version3, $node, null, $scope, $config, $config, [$definition], [$capacity], [new PbsInventoryIssue(PbsInventoryIssueCode::ConfigurationChanged, '/config/datastore')]))->permitsDeletionDecisions());
     }
 
     public function testSnapshotCompletenessRequiresExactAndConsistentEvidenceSets(): void
@@ -123,25 +125,25 @@ final class PbsValueObjectsTest extends TestCase
         $a = new PbsDatastoreId('store_a');
         $b = new PbsDatastoreId('store_b');
         $config = new PbsDatastoreConfigurationSnapshot(str_repeat('a', 64), [$a]);
-        $node = new PbsNodeStatus('pbs', 1, 2, 1, 10, 2, 8);
+        $node = new PbsNodeStatus(PbsNodeRoute::Local->value, 1, 2, 1, 10, 2, 8);
         $wrongNode = new PbsNodeStatus('other', 1, 2, 1, 10, 2, 8);
         $definitionA = new PbsDatastoreDefinition($a, PbsDatastoreBackendType::Filesystem, PbsMountStatus::Mounted, null);
         $definitionB = new PbsDatastoreDefinition($b, PbsDatastoreBackendType::Filesystem, PbsMountStatus::Mounted, null);
         $capacityA = new PbsDatastoreCapacity($a, PbsDatastoreBackendType::Filesystem, 10, 2, 8);
         $capacityB = new PbsDatastoreCapacity($b, PbsDatastoreBackendType::Filesystem, 10, 2, 8);
 
-        self::assertFalse((new PbsInstallationSnapshot($version, 'pbs', $wrongNode, null, $scope, $config, $config, [$definitionA], [$capacityA], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [$definitionB], [$capacityB], []))->isComplete());
-        self::assertFalse((new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [$definitionA], [$capacityB], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version, $wrongNode, null, $scope, $config, $config, [$definitionA], [$capacityA], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [$definitionB], [$capacityB], []))->isComplete());
+        self::assertFalse((new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [$definitionA], [$capacityB], []))->isComplete());
 
         foreach ([
-            static fn () => new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [$definitionA, $definitionA], [$capacityA], []),
-            static fn () => new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [$definitionA], [$capacityA, $capacityA], []),
-            static fn () => new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [$definitionA], [new PbsDatastoreCapacity($a, PbsDatastoreBackendType::S3, 10, 2, 8)], []),
+            static fn () => new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [$definitionA, $definitionA], [$capacityA], []),
+            static fn () => new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [$definitionA], [$capacityA, $capacityA], []),
+            static fn () => new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [$definitionA], [new PbsDatastoreCapacity($a, PbsDatastoreBackendType::S3, 10, 2, 8)], []),
             /** @phpstan-ignore argument.type */
-            static fn () => new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [new \stdClass()], [], []),
+            static fn () => new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [new \stdClass()], [], []),
             /** @phpstan-ignore argument.type */
-            static fn () => new PbsInstallationSnapshot($version, 'pbs', $node, null, $scope, $config, $config, [], [new \stdClass()], []),
+            static fn () => new PbsInstallationSnapshot($version, $node, null, $scope, $config, $config, [], [new \stdClass()], []),
         ] as $invalidSnapshot) {
             try {
                 $invalidSnapshot();

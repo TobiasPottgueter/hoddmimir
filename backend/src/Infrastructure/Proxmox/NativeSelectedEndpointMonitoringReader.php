@@ -64,7 +64,6 @@ final readonly class NativeSelectedEndpointMonitoringReader implements SelectedE
         ConnectionId $connectionId,
         EndpointId $endpointId,
         int $expectedRevision,
-        string $node,
         PbsTaskWindow $window,
         ConnectionReadCheckpoint $checkpoint,
     ): PbsExternalMonitoringSnapshot {
@@ -88,7 +87,7 @@ final readonly class NativeSelectedEndpointMonitoringReader implements SelectedE
         try { $verify = $client->verifyJobs(); } catch (PbsReadFailure $failure) {
             $verify = null; $errors['verify'] = $failure->failureCode->value;
         }
-        $tasks = (new PbsTaskScanner($client, $this->pbsLimits))->scan($node, $window);
+        $tasks = (new PbsTaskScanner($client, $this->pbsLimits))->scan($window);
 
         return new PbsExternalMonitoringSnapshot($acl, $prune, $sync, $verify, $tasks, $errors);
     }

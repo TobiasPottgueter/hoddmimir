@@ -25,6 +25,7 @@ use App\Application\Proxmox\Pbs\PbsInventoryIssue;
 use App\Application\Proxmox\Pbs\PbsInventoryIssueCode;
 use App\Application\Proxmox\Pbs\PbsMaintenanceMode;
 use App\Application\Proxmox\Pbs\PbsMountStatus;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\PbsNodeStatus;
 use App\Application\Proxmox\Pbs\PbsVersion;
 use DateTimeImmutable;
@@ -258,12 +259,10 @@ final class MapPbsInventorySnapshotTest extends TestCase
         );
     }
 
-    #[DataProvider('invalidMappedSnapshotCases')]
-    public function testItWrapsInvalidMappedObservations(string $node, PbsVersion $version): void
+    public function testItWrapsAnUnsupportedVersion(): void
     {
         $snapshot = new PbsInstallationSnapshot(
-            $version,
-            $node,
+            new PbsVersion(5, 0, 0, '5.0.0', '5.0', 'repo'),
             null,
             null,
             PbsDatastoreScanScope::installationWide(),
@@ -282,13 +281,6 @@ final class MapPbsInventorySnapshotTest extends TestCase
         );
     }
 
-    /** @return iterable<string, array{string, PbsVersion}> */
-    public static function invalidMappedSnapshotCases(): iterable
-    {
-        yield 'invalid node' => ['invalid node', self::version()];
-        yield 'unsupported version' => ['pbs-node', new PbsVersion(5, 0, 0, '5.0.0', '5.0', 'repo')];
-    }
-
     /**
      * @param list<PbsDatastoreDefinition> $definitions
      * @param list<PbsDatastoreCapacity>   $capacities
@@ -305,7 +297,6 @@ final class MapPbsInventorySnapshotTest extends TestCase
     ): PbsInstallationSnapshot {
         return new PbsInstallationSnapshot(
             self::version(),
-            'pbs-node',
             false === $status ? self::nodeStatus() : $status,
             null,
             $scope ?? PbsDatastoreScanScope::installationWide(),
@@ -325,7 +316,7 @@ final class MapPbsInventorySnapshotTest extends TestCase
             new ConnectionId(str_repeat('c', 16)),
             7,
             $endpoint,
-            InstallationBinding::pbsLegacyNode('pbs-node', $endpoint),
+            InstallationBinding::pbsLegacyEndpoint($endpoint),
             $snapshot,
         );
     }
@@ -362,7 +353,7 @@ final class MapPbsInventorySnapshotTest extends TestCase
 
     private static function nodeStatus(): PbsNodeStatus
     {
-        return new PbsNodeStatus('pbs-node', 10, 100, 20, 200, 30, 170);
+        return new PbsNodeStatus(PbsNodeRoute::Local->value, 10, 100, 20, 200, 30, 170);
     }
 
     private function inventoryId(string $byte): InventoryIdentifier

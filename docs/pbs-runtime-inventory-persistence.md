@@ -13,8 +13,8 @@ Runtime scanning is installation-wide only. No WebApp endpoint or manual
 credential, one of the three exclusive TLS trust modes and the exact physical
 route order fixed in `pbs-first-read-contract.md`:
 
-- version, ping and the single-node list;
-- system-status permission and node status;
+- version and ping; `/nodes` is never requested;
+- system-status permission and `/nodes/localhost/status`;
 - installation identity only on PBS 4.2 and newer;
 - datastore permission, system configuration start and sorted datastore
   definitions;
@@ -22,7 +22,9 @@ route order fixed in `pbs-first-read-contract.md`:
 - system configuration end.
 
 PBS 3.x and PBS 4.0/4.1 have no stable installation identity in this contract.
-They bind to the exact endpoint plus the observed node name. PBS 4.2 and newer
+They bind to the exact endpoint plus the canonical local route alias
+`localhost`; no `/nodes` discovery or response node participates in that
+binding. PBS 4.2 and newer
 bind to the 32-character lowercase instance identity and may fail over between
 endpoints. A fully authoritative observation may upgrade an exact legacy
 endpoint/node binding to instance identity; a partial observation never may.

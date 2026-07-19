@@ -115,7 +115,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
     public function testItFailsOverWrongIdentityAndProductWithoutMergingSnapshots(): void
     {
         $wrongIdentity = self::pveSnapshot('other');
-        $wrongProduct = self::pbsSnapshot(4, 'pbs', str_repeat('a', 32));
+        $wrongProduct = self::pbsSnapshot(4, str_repeat('a', 32));
         $expected = self::pveSnapshot('forest');
         $reader = new QueuedEndpointInstallationReader([$wrongIdentity, $wrongProduct, $expected]);
         $target = self::target(ProxmoxProduct::Pve, [
@@ -259,7 +259,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
 
     public function testPbs4BindingAllowsFailoverButPbs3BindingDoesNot(): void
     {
-        $pbs4 = self::pbsSnapshot(4, 'pbs4', str_repeat('a', 32));
+        $pbs4 = self::pbsSnapshot(4, str_repeat('a', 32));
         $pbs4Reader = new QueuedEndpointInstallationReader([
             EndpointReadFailure::for(EndpointReadFailureCode::Transport),
             $pbs4,
@@ -277,12 +277,12 @@ final class ReadConnectionWithFailoverTest extends TestCase
 
         $pbs3Reader = new QueuedEndpointInstallationReader([
             EndpointReadFailure::for(EndpointReadFailureCode::Transport),
-            self::pbsSnapshot(3, 'pbs3', null),
+            self::pbsSnapshot(3, null),
         ]);
         try {
             (new ReadConnectionWithFailover($pbs3Reader))->read(
                 self::target(ProxmoxProduct::Pbs, $endpoints),
-                InstallationBinding::pbsLegacyNode('pbs3', new EndpointId(str_repeat(chr(1), 16))),
+                InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat(chr(1), 16))),
                 new CountingConnectionReadCheckpoint(),
             );
             self::fail('PBS 3 failed over to an alias endpoint.');
@@ -296,8 +296,8 @@ final class ReadConnectionWithFailoverTest extends TestCase
     {
         $instanceIdentity = str_repeat('a', 32);
         $reader = new QueuedEndpointInstallationReader([
-            self::pbsSnapshot(3, 'legacy-endpoint', null),
-            self::pbsSnapshot(4, 'pbs4', $instanceIdentity),
+            self::pbsSnapshot(3, null),
+            self::pbsSnapshot(4, $instanceIdentity),
         ]);
         $attempts = new RecordingEndpointReadAttemptSink();
 
@@ -319,12 +319,12 @@ final class ReadConnectionWithFailoverTest extends TestCase
     public function testCompletePbsInstanceObservationUpgradesTheExactLegacyEndpointBinding(): void
     {
         $endpoint = self::endpoint(1, 1);
-        $snapshot = self::completePbsInstanceSnapshot('pbs4', str_repeat('a', 32));
+        $snapshot = self::completePbsInstanceSnapshot(str_repeat('a', 32));
         $reader = new QueuedEndpointInstallationReader([$snapshot]);
 
         $result = (new ReadConnectionWithFailover($reader))->read(
             self::target(ProxmoxProduct::Pbs, [$endpoint]),
-            InstallationBinding::pbsLegacyNode('pbs4', $endpoint->endpointId),
+            InstallationBinding::pbsLegacyEndpoint($endpoint->endpointId),
             new CountingConnectionReadCheckpoint(),
         );
 
@@ -339,10 +339,10 @@ final class ReadConnectionWithFailoverTest extends TestCase
 
         try {
             (new ReadConnectionWithFailover(new QueuedEndpointInstallationReader([
-                self::pbsSnapshot(4, 'pbs4', str_repeat('a', 32)),
+                self::pbsSnapshot(4, str_repeat('a', 32)),
             ])))->read(
                 self::target(ProxmoxProduct::Pbs, [$endpoint]),
-                InstallationBinding::pbsLegacyNode('pbs4', $endpoint->endpointId),
+                InstallationBinding::pbsLegacyEndpoint($endpoint->endpointId),
                 new CountingConnectionReadCheckpoint(),
                 $attempts,
             );
@@ -360,7 +360,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
 
     public function testUnboundCompletePbsInstanceSelectsOnlyTheFirstOfMultipleEndpoints(): void
     {
-        $snapshot = self::completePbsInstanceSnapshot('pbs4', str_repeat('a', 32));
+        $snapshot = self::completePbsInstanceSnapshot(str_repeat('a', 32));
         $reader = new QueuedEndpointInstallationReader([$snapshot]);
 
         $result = (new ReadConnectionWithFailover($reader))->read(
@@ -378,7 +378,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
     {
         $reader = new QueuedEndpointInstallationReader([
             EndpointReadFailure::for(EndpointReadFailureCode::Transport),
-            self::pbsSnapshot(4, 'pbs4', str_repeat('a', 32)),
+            self::pbsSnapshot(4, str_repeat('a', 32)),
         ]);
 
         try {
@@ -398,7 +398,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
 
     public function testUnboundLegacyPbsRejectsAdditionalEnabledEndpoints(): void
     {
-        $snapshot = self::pbsSnapshot(3, 'pbs3', null);
+        $snapshot = self::pbsSnapshot(3, null);
         $reader = new QueuedEndpointInstallationReader([$snapshot]);
         $attempts = new RecordingEndpointReadAttemptSink();
 
@@ -427,7 +427,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
         try {
             (new ReadConnectionWithFailover($reader))->read(
                 self::target(ProxmoxProduct::Pbs, [self::endpoint(2, 1)]),
-                InstallationBinding::pbsLegacyNode('pbs3', self::endpointId(1)),
+                InstallationBinding::pbsLegacyEndpoint(self::endpointId(1)),
                 new CountingConnectionReadCheckpoint(),
             );
             self::fail('A legacy PBS binding read from a different endpoint.');
@@ -446,7 +446,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
         try {
             (new ReadConnectionWithFailover($reader))->read(
                 self::target(ProxmoxProduct::Pbs, [self::endpoint(1, 1)]),
-                InstallationBinding::pbsLegacyNode('pbs3', new EndpointId(str_repeat(chr(1), 16))),
+                InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat(chr(1), 16))),
                 new CountingConnectionReadCheckpoint(),
                 $attempts,
             );
@@ -481,7 +481,7 @@ final class ReadConnectionWithFailoverTest extends TestCase
         try {
             (new ReadConnectionWithFailover($reader))->read(
                 self::target(ProxmoxProduct::Pve, [self::endpoint(1, 1)]),
-                InstallationBinding::pbsLegacyNode('pbs3', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))),
+                InstallationBinding::pbsLegacyEndpoint(new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))),
                 new CountingConnectionReadCheckpoint(),
             );
             self::fail('A binding for the wrong product was accepted.');
@@ -672,11 +672,10 @@ final class ReadConnectionWithFailoverTest extends TestCase
         );
     }
 
-    private static function pbsSnapshot(int $major, string $node, ?string $instanceIdentity): PbsInstallationSnapshot
+    private static function pbsSnapshot(int $major, ?string $instanceIdentity): PbsInstallationSnapshot
     {
         return new PbsInstallationSnapshot(
             new PbsVersion($major, 2, 0, sprintf('%d.2.0', $major), sprintf('%d.2', $major), 'repo'),
-            $node,
             null,
             null === $instanceIdentity ? null : new PbsInstanceIdentity($instanceIdentity),
             PbsDatastoreScanScope::installationWide(),
@@ -688,14 +687,13 @@ final class ReadConnectionWithFailoverTest extends TestCase
         );
     }
 
-    private static function completePbsInstanceSnapshot(string $node, string $instanceIdentity): PbsInstallationSnapshot
+    private static function completePbsInstanceSnapshot(string $instanceIdentity): PbsInstallationSnapshot
     {
         $configuration = new PbsDatastoreConfigurationSnapshot('stable', []);
 
         return new PbsInstallationSnapshot(
             new PbsVersion(4, 2, 0, '4.2.0', '4.2', 'repo'),
-            $node,
-            new PbsNodeStatus($node, 1, 100, 10, 100, 10, 90),
+            new PbsNodeStatus('localhost', 1, 100, 10, 100, 10, 90),
             new PbsInstanceIdentity($instanceIdentity),
             PbsDatastoreScanScope::installationWide(),
             $configuration,

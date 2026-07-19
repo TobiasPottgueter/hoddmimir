@@ -17,7 +17,6 @@ use App\Infrastructure\Proxmox\Pbs\PbsDatastoreListReader;
 use App\Infrastructure\Proxmox\Pbs\PbsDatastoreStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsInstanceIdentityReader;
 use App\Infrastructure\Proxmox\Pbs\PbsJsonEnvelopeDecoder;
-use App\Infrastructure\Proxmox\Pbs\PbsNodesReader;
 use App\Infrastructure\Proxmox\Pbs\PbsNodeStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPermissionReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPingReader;
@@ -32,7 +31,6 @@ final class PbsReadersTest extends TestCase
         $version = (new PbsVersionReader())->read($this->fixture(3, 'version'));
         self::assertSame([3, 4, 4, '1'], [$version->major, $version->minor, $version->patch, $version->release]);
         (new PbsPingReader())->assertPbs($this->fixture(3, 'ping'));
-        self::assertSame(['pbs-three'], (new PbsNodesReader())->read($this->fixture(3, 'nodes')));
         $permission = (new PbsPermissionReader())->read($this->fixture(3, 'permission-system-status'), '/system/status');
         self::assertTrue($permission->grants('Sys.Audit'));
         self::assertFalse($permission->propagates('Sys.Audit'));
@@ -143,9 +141,6 @@ final class PbsReadersTest extends TestCase
         }
         $this->assertFailure(PbsReadFailureCode::InvalidEnvelope, static fn () => $decoder->decode('{"data":123}', 3));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPingReader())->assertPbs(new PbsApiEnvelope((object) ['pong' => false], null)));
-        $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsNodesReader())->read(new PbsApiEnvelope([], null)));
-        $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsNodesReader())->read(new PbsApiEnvelope([(object) []], null)));
-        $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsNodesReader())->read(new PbsApiEnvelope([(object) ['node' => "bad\n"]], null)));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope([], null), '/x'));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope((object) ['/x' => []], null), '/x'));
         $this->assertFailure(PbsReadFailureCode::InvalidResponse, static fn () => (new PbsPermissionReader())->read(new PbsApiEnvelope((object) ['/x' => (object) ['bad key' => true]], null), '/x'));

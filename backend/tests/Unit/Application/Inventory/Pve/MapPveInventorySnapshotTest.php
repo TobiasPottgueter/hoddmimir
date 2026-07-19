@@ -305,7 +305,6 @@ final class MapPveInventorySnapshotTest extends TestCase
     {
         $pbs = new PbsInstallationSnapshot(
             new PbsVersion(3, 4, 0, '3.4.0', '3.4', 'repo'),
-            'pbs-a',
             null,
             null,
             PbsDatastoreScanScope::installationWide(),
@@ -319,7 +318,7 @@ final class MapPveInventorySnapshotTest extends TestCase
             new ConnectionId(str_repeat('c', 16)),
             1,
             new EndpointId(str_repeat('e', 16)),
-            InstallationBinding::pbsLegacyNode('pbs-a', new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))),
+            InstallationBinding::pbsLegacyEndpoint(new \App\Application\Inventory\Connection\EndpointId(str_repeat('l', 16))),
             $pbs,
         );
 

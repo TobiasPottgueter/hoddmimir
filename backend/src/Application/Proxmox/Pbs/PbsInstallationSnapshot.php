@@ -8,6 +8,8 @@ use InvalidArgumentException;
 
 final readonly class PbsInstallationSnapshot
 {
+    public string $node;
+
     /** @var list<PbsDatastoreDefinition> */
     public array $datastores;
 
@@ -24,7 +26,6 @@ final readonly class PbsInstallationSnapshot
      */
     public function __construct(
         public PbsVersion $version,
-        public string $node,
         public ?PbsNodeStatus $nodeStatus,
         public ?PbsInstanceIdentity $instanceIdentity,
         public PbsDatastoreScanScope $scope,
@@ -34,6 +35,7 @@ final readonly class PbsInstallationSnapshot
         array $capacities,
         array $issues,
     ) {
+        $this->node = PbsNodeRoute::Local->value;
         $definitionBackends = [];
         foreach ($datastores as $definition) {
             // @phpstan-ignore instanceof.alwaysTrue (enforce the runtime boundary promised by the PHPDoc)

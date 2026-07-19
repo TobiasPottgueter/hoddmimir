@@ -369,7 +369,7 @@ final class PbsInventoryModelTest extends TestCase
         $datastores = [$store];
         $capacities = [$this->capacityObservation('store_a')];
         $revision = 1;
-        $binding = InstallationBinding::pbsLegacyNode('pbs-node', new EndpointId(str_repeat('e', 16)));
+        $binding = InstallationBinding::pbsLegacyEndpoint(new EndpointId(str_repeat('e', 16)));
         $systemScope = new PbsInventoryScopeResult(PbsInventoryScope::System, '@installation', InventoryScopeStatus::Complete);
         $datastoreScope = new PbsInventoryScopeResult(PbsInventoryScope::Datastores, '@installation', InventoryScopeStatus::Complete);
 
@@ -432,7 +432,7 @@ final class PbsInventoryModelTest extends TestCase
 
         return $this->newCommit(
             1,
-            InstallationBinding::pbsLegacyNode('pbs-node', $endpoint),
+            InstallationBinding::pbsLegacyEndpoint($endpoint),
             new PbsInventoryScopeResult(PbsInventoryScope::System, '@installation', $systemStatus),
             new PbsInventoryScopeResult(PbsInventoryScope::Datastores, '@installation', $datastoreStatus),
             $statusScopes,

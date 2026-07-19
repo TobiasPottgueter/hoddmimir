@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Contract\Proxmox\Pbs;
 
 use App\Application\Proxmox\Pbs\PbsDatastoreScanScope;
+use App\Application\Proxmox\Pbs\PbsReadFailure;
+use App\Application\Proxmox\Pbs\PbsReadFailureCode;
+use App\Application\Proxmox\Pbs\PbsNodeRoute;
 use App\Application\Proxmox\Pbs\ReadPbsInstallation;
 use App\Infrastructure\Proxmox\Pbs\PbsApiEnvelope;
 use App\Infrastructure\Proxmox\Pbs\PbsApiTransport;
@@ -14,7 +17,6 @@ use App\Infrastructure\Proxmox\Pbs\PbsDatastoreStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsEndpointReadConnector;
 use App\Infrastructure\Proxmox\Pbs\PbsInstanceIdentityReader;
 use App\Infrastructure\Proxmox\Pbs\PbsJsonEnvelopeDecoder;
-use App\Infrastructure\Proxmox\Pbs\PbsNodesReader;
 use App\Infrastructure\Proxmox\Pbs\PbsNodeStatusReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPermissionReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPingReader;
@@ -32,7 +34,7 @@ final class PbsFixtureContractTest extends TestCase
         $transport = new FixturePbsTransport($major);
         $connector = new PbsEndpointReadConnector(
             $transport,
-            new PbsVersionReader(), new PbsPingReader(), new PbsNodesReader(), new PbsPermissionReader(),
+            new PbsVersionReader(), new PbsPingReader(), new PbsPermissionReader(),
             new PbsNodeStatusReader(), new PbsInstanceIdentityReader(), new PbsDatastoreConfigurationReader(),
             new PbsDatastoreListReader(), new PbsDatastoreStatusReader(),
         );
@@ -44,13 +46,17 @@ final class PbsFixtureContractTest extends TestCase
         self::assertSame(['version'], $transport->requests[0]->pathSegments);
         self::assertSame(['ping'], $transport->requests[1]->pathSegments);
         self::assertSame(['config', 'datastore'], $transport->requests[$expectedCalls - 1]->pathSegments);
+        $paths = array_map(static fn (PbsRequest $request): array => $request->pathSegments, $transport->requests);
+        self::assertNotContains(['nodes'], $paths, 'The PBS /nodes list requires broader ACLs and is forbidden.');
+        self::assertContains(['nodes', PbsNodeRoute::Local->value, 'status'], $paths);
+        self::assertSame(4 === $major, in_array(['nodes', PbsNodeRoute::Local->value, 'identity'], $paths, true));
     }
 
     /** @return iterable<string,array{int,int}> */
     public static function majorProvider(): iterable
     {
-        yield 'PBS 3' => [3, 11];
-        yield 'PBS 4.2' => [4, 12];
+        yield 'PBS 3' => [3, 10];
+        yield 'PBS 4.2' => [4, 11];
     }
 }
 
@@ -64,9 +70,12 @@ final class FixturePbsTransport implements PbsApiTransport
 
     public function get(PbsRequest $request): PbsApiEnvelope
     {
+        if (['nodes'] === $request->pathSegments) {
+            throw PbsReadFailure::for(PbsReadFailureCode::PermissionDenied);
+        }
         $this->requests[] = $request;
         $name = match ($request->pathSegments) {
-            ['version'] => 'version', ['ping'] => 'ping', ['nodes'] => 'nodes',
+            ['version'] => 'version', ['ping'] => 'ping',
             ['access', 'permissions'] => '/system/status' === $request->query['path'] ? 'permission-system-status' : 'permission-datastore',
             ['nodes', $request->pathSegments[1], 'status'] => 'node-status',
             ['nodes', $request->pathSegments[1], 'identity'] => 'identity',

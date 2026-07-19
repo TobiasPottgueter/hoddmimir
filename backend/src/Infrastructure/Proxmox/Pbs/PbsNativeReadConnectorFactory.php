@@ -32,7 +32,6 @@ final readonly class PbsNativeReadConnectorFactory implements PbsReadConnectorFa
             $transport,
             new PbsVersionReader(),
             new PbsPingReader(),
-            new PbsNodesReader(),
             new PbsPermissionReader(),
             new PbsNodeStatusReader(),
             new PbsInstanceIdentityReader(),

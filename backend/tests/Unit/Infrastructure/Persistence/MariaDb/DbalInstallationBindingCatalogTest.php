@@ -29,7 +29,7 @@ final class DbalInstallationBindingCatalogTest extends TestCase
         foreach ([
             [['product' => 'pve', 'identity_kind' => 'pve_standalone', 'identity_value' => 'node-a', 'legacy_endpoint_id' => null], InstallationBindingKind::PveStandalone],
             [['product' => 'pbs', 'identity_kind' => 'pbs_instance', 'identity_value' => str_repeat('a', 32), 'legacy_endpoint_id' => null], InstallationBindingKind::PbsInstance],
-            [['product' => 'pbs', 'identity_kind' => 'pbs_legacy_node', 'identity_value' => 'pbs-a', 'legacy_endpoint_id' => str_repeat('e', 16)], InstallationBindingKind::PbsLegacyNode],
+            [['product' => 'pbs', 'identity_kind' => 'pbs_legacy_node', 'identity_value' => 'localhost', 'legacy_endpoint_id' => str_repeat('e', 16)], InstallationBindingKind::PbsLegacyNode],
         ] as [$row, $kind]) {
             $binding = (new DbalInstallationBindingCatalog($this->database($row)))->bindingFor($this->connectionId());
             self::assertSame($kind, $binding?->kind);

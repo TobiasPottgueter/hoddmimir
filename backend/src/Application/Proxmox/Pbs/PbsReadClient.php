@@ -8,14 +8,11 @@ interface PbsReadClient
 {
     public function version(): PbsVersion;
 
-    /** @return list<string> */
-    public function nodeNames(): array;
-
     public function permission(string $path): PbsEffectivePermission;
 
-    public function nodeStatus(string $node): PbsNodeStatus;
+    public function nodeStatus(): PbsNodeStatus;
 
-    public function instanceIdentity(string $node): PbsInstanceIdentity;
+    public function instanceIdentity(): PbsInstanceIdentity;
 
     public function datastoreConfigurations(): PbsDatastoreConfigurationSnapshot;
 

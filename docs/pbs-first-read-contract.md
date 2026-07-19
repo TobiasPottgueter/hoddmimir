@@ -1,6 +1,6 @@
 # PBS-3/4-Vertrag für den ersten lesenden Slice
 
-Stand: 11. Juli 2026
+Stand: 19. Juli 2026
 
 ## Grenze
 
@@ -15,9 +15,12 @@ dem Collector verdrahtet.
 
 Die Reihenfolge ist fest: `/version` ist immer der erste Call, gefolgt von
 `/ping`. Erst nach beiden erfolgreichen Produktprüfungen darf der Client
-weitere PBS-Daten lesen. Danach folgen `/nodes`, die effektive Berechtigung für
-`/system/status`, der Node-Status und ab PBS 4.2 die Instanzidentität. Die
-Datastore-Rechte werden relativ zu einem expliziten Scan-Scope geprüft.
+weitere PBS-Daten lesen. Der Collector ruft niemals `/nodes` auf, sondern
+verwendet für die lokalen Status-, Task- und Identitätsrouten ausschließlich
+den kanonischen Node-Namen `localhost`. Danach folgen die effektive
+Berechtigung für `/system/status`, `/nodes/localhost/status` und ab PBS 4.2
+`/nodes/localhost/identity`. Die Datastore-Rechte werden relativ zu einem
+expliziten Scan-Scope geprüft.
 
 Für einen konsistenten Datastore-Snapshot werden anschließend
 `/config/datastore`, `/admin/datastore`, je Scope-Datastore
@@ -63,8 +66,9 @@ partial und verbieten negative Diffs.
 ## Versionsunterschiede
 
 - Die PBS-Produktversion steht in `version`; `release` ist das Paket-Release.
-- `/nodes` ist im Viewer unzutreffend als `null` beschrieben; die gepinnte
-  Serverimplementierung liefert genau eine Zeile mit `node`.
+- `/nodes` gehört nicht zum Collector-Vertrag und darf selbst dann nicht
+  aufgerufen werden, wenn der Token dort `403` erhält. Lokale Node-Routen
+  verwenden immer das von PBS akzeptierte Alias `localhost`.
 - PBS 3 besitzt nur Filesystem-Datastores in diesem Vertrag.
 - PBS 4.2 beschreibt ein S3-Backend in `/config/datastore` als kodierten
   `backend`-Property-String (unter anderem `bucket`, `client` und `type=s3`),
@@ -74,8 +78,9 @@ partial und verbieten negative Diffs.
   erfüllen.
 - Status-Requests dieses Slices verwenden `verbose=0`; die Fixtures enthalten
   deshalb weder Content-`counts` noch unvollständige `s3-statistics`.
-- Ab PBS 4.2 liefert `/nodes/{node}/identity` eine aus `machine-id` abgeleitete
-  32-stellige `pbs-instance-id`. Vor 4.2 wird der Endpoint nicht aufgerufen.
+- Ab PBS 4.2 liefert `/nodes/localhost/identity` eine aus `machine-id`
+  abgeleitete 32-stellige `pbs-instance-id`. Vor 4.2 wird der Endpoint nicht
+  aufgerufen.
 
 ## Gepinnte Primärquellen
 

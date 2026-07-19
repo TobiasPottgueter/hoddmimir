@@ -79,7 +79,7 @@ final class CapabilityProfileTest extends TestCase
         $snapshot = self::pbsSnapshot($major, $minor, $identitySupported);
         $binding = $identitySupported
             ? InstallationBinding::pbsInstance(str_repeat('a', 32))
-            : InstallationBinding::pbsLegacyNode('pbs-a', $endpoint);
+            : InstallationBinding::pbsLegacyEndpoint($endpoint);
 
         $profile = (new BuildVerifiedCapabilityProfile())->build(new ConnectionInstallationRead(
             new ConnectionId(self::bytes('connection')),
@@ -327,7 +327,6 @@ final class CapabilityProfileTest extends TestCase
         $configuration = new PbsDatastoreConfigurationSnapshot(str_repeat('a', 64), []);
         return new PbsInstallationSnapshot(
             new PbsVersion($major, $minor, 0, $major.'.'.$minor.'.0', '1', 'repo'),
-            'pbs-a',
             null,
             $identitySupported ? new PbsInstanceIdentity(str_repeat('a', 32)) : null,
             PbsDatastoreScanScope::installationWide(),

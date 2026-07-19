@@ -57,9 +57,9 @@ final readonly class PbsHttpTasksAndJobsClient implements PbsMonitoringClient
         );
     }
 
-    public function page(string $node, PbsTaskListQuery $query): PbsTaskPage
+    public function page(PbsTaskListQuery $query): PbsTaskPage
     {
-        return $this->taskReader->read($this->transport->get(PbsRequest::tasks($node, $query)), $query->pass);
+        return $this->taskReader->read($this->transport->get(PbsRequest::localTasks($query)), $query->pass);
     }
 
     private function permission(string $path): \App\Application\Proxmox\Pbs\PbsEffectivePermission
