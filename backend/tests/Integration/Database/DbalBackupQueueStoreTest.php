@@ -160,6 +160,53 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         }
     }
 
+    public function testBackupWorkerRoleCanClaimAndPrepareThroughTheCompleteRevalidationReadPath(): void
+    {
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":2}},"approvedDeletionRetention":null,"failureNotificationRecipients":[]}';
+        $request = $this->store()->promote(new ShadowPromotion(
+            self::id('request-runtime-revalidation'),
+            self::id('decision-a'),
+            $this->now,
+            '{"mode":"snapshot"}',
+            hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $this->connection()->update('backup_requests', [
+            'resolved_policy_json' => $policy,
+            'resolved_policy_hash' => hash('sha256', $policy, true),
+        ], ['id' => $request]);
+        $this->connection()->commit();
+
+        $worker = $this->runtimeBackupWorker();
+        try {
+            $queue = new DbalBackupQueueStore(
+                $worker,
+                new FixedQueueTokens(),
+                new ExpectedBackupSize(),
+                new EvidenceFreshnessPolicy(),
+            );
+            $claim = $queue->claim(new ClaimNextBackupCommand(self::id('runtime-worker'), $this->now));
+            self::assertNotNull($claim);
+            self::assertSame($request, $claim->id);
+
+            $preparation = (new DbalBackupSubmissionStore(
+                $worker,
+                new DbalBackupProblemRecorder(),
+            ))->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
+                $claim->id,
+                self::id('runtime-run'),
+                $claim->claimToken,
+                $claim->claimFence,
+                $this->now,
+            ));
+
+            self::assertSame(SubmissionPreparationStatus::PreparedNow, $preparation->status);
+            self::assertNotNull($preparation->submission);
+        } finally {
+            $worker->close();
+            $this->cleanupCommittedFixture();
+        }
+    }
+
     public function testExecutorEvidenceSubjectsCombineActivePolicySelectionAndNonTerminalRequests(): void
     {
         $now = self::format($this->now);

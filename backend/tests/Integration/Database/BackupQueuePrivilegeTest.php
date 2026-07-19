@@ -10,6 +10,23 @@ use Doctrine\DBAL\Exception;
 
 final class BackupQueuePrivilegeTest extends DatabaseTestCase
 {
+    /** @var array<string, list<string>> */
+    private const array REVALIDATION_READ_COLUMNS = [
+        'proxmox_connections' => ['id', 'product', 'enabled'],
+        'proxmox_connection_endpoints' => ['connection_id', 'host', 'port', 'enabled'],
+        'proxmox_capability_snapshots' => ['id', 'connection_id', 'product', 'version_major', 'last_observed_at'],
+        'pve_clusters' => ['id', 'connection_id', 'inventory_state', 'last_seen_at'],
+        'pve_nodes' => ['id', 'connection_id', 'cluster_id', 'node_name', 'api_status', 'inventory_state', 'last_seen_at'],
+        'guests' => ['id', 'connection_id', 'cluster_id', 'name', 'guest_type', 'vmid', 'is_template', 'provisioned_size_bytes', 'inventory_state', 'last_seen_at'],
+        'guest_placements' => ['guest_id', 'connection_id', 'cluster_id', 'node_id', 'placement_revision', 'observed_at'],
+        'pve_storages' => ['id', 'connection_id', 'cluster_id', 'storage_name', 'storage_type', 'supports_backup', 'disabled', 'inventory_state', 'last_seen_at'],
+        'pve_node_storage_state' => ['node_id', 'storage_id', 'enabled', 'active', 'available_bytes', 'observed_at'],
+        'pve_storage_pbs_mappings' => ['storage_id', 'server', 'port', 'datastore', 'namespace', 'observed_at'],
+        'pbs_datastores' => ['id', 'connection_id', 'datastore_name', 'allows_backup_writes', 'inventory_state', 'last_seen_at'],
+        'pbs_datastore_capacity_state' => ['datastore_id', 'semantics', 'available_bytes', 'observed_at'],
+        'pbs_namespaces' => ['id', 'datastore_id', 'namespace_path', 'inventory_state'],
+    ];
+
     private const array TABLES = [
         'backup_requests',
         'backup_request_events',
@@ -85,6 +102,32 @@ final class BackupQueuePrivilegeTest extends DatabaseTestCase
                     $table,
                     self::identityColumn($table),
                     self::identityColumn($table),
+                )));
+            }
+        } finally {
+            $worker->close();
+        }
+    }
+
+    public function testBackupWorkerHasOnlyTheInventoryReadsRequiredByClaimAndSubmissionRevalidation(): void
+    {
+        $worker = $this->runtimeConnection('backup_worker');
+        try {
+            foreach (self::REVALIDATION_READ_COLUMNS as $table => $columns) {
+                self::assertSame([], $worker->fetchAllAssociative(sprintf(
+                    'SELECT %s FROM %s LIMIT 0',
+                    implode(', ', $columns),
+                    $table,
+                )));
+                $this->assertDenied(static fn () => $worker->executeStatement(sprintf(
+                    'UPDATE %s SET %s = %s WHERE 1 = 0',
+                    $table,
+                    $columns[0],
+                    $columns[0],
+                )));
+                $this->assertDenied(static fn () => $worker->executeStatement(sprintf(
+                    'DELETE FROM %s WHERE 1 = 0',
+                    $table,
                 )));
             }
         } finally {
