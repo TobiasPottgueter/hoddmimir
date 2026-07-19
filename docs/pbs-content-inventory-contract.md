@@ -20,6 +20,13 @@ namespace and is not recursive. The collector therefore issues one snapshot
 read for every visible namespace. It deliberately does not call the redundant
 `groups` endpoint; group projections are derived from snapshot identities.
 
+Each snapshot row's required `files` value is a JSON list of file objects, not
+a list of strings. Every file object must contain a non-empty, bounded
+`filename` string. Hoddmímir extracts only those filenames, rejects malformed
+or duplicate filenames and rejects the legacy string-list shape. Additive
+per-file metadata such as `size`, `crypt-mode`, or future properties is ignored
+and cannot change the normalized filename list.
+
 PBS exposes no pagination for either list. Response body, datastore,
 namespace, per-namespace snapshot, and total snapshot limits are explicit
 deployment settings. Reaching a limit is visible as a partial scope and never
@@ -66,7 +73,8 @@ and completes an empty content child as a successful no-op.
   when ACL filtering hides that parent.
 - `pbs_backup_groups` is derived from namespace, backup type, and backup ID.
 - `pbs_snapshots` is identified by group plus UTC backup time and stores the
-  optional manifest evidence without interpreting a missing size as zero.
+  normalized filename list plus optional manifest evidence without
+  interpreting a missing size as zero.
 
 Namespace scopes never archive unseen namespaces. Complete exact
 per-namespace snapshot scopes archive unseen snapshots and then empty groups
@@ -77,11 +85,12 @@ when observed again.
 ## Version contract
 
 The official PBS 3.4 and PBS 4.2 API viewer schemas are identical for the
-three content list endpoints. The v3.0.1 and v4.0.11 source tags retain the
-same GET signatures. Sanitized fixtures cover PBS 3 and PBS 4 with root,
-nested, minimal, optional, verification, protected, and additive-future-field
-forms. Release acceptance still requires live checks against the supported
-major matrix.
+three content list endpoints. The v3.4.0 and v4.2.0 source tags retain the same
+GET signatures and typed snapshot-list return contract. Sanitized fixtures
+cover PBS 3 and PBS 4 with root, nested, minimal, optional, verification,
+protected, full and minimal file objects, and additive-future-field forms.
+They intentionally contain no legacy string-list `files` response. Release
+acceptance still requires live checks against the supported major matrix.
 
 Official sources:
 
@@ -89,5 +98,7 @@ Official sources:
 - <https://pbs.proxmox.com/docs-3/api-viewer/index.html#/admin/datastore/{store}/namespace>
 - <https://pbs.proxmox.com/docs/storage.html#backup-namespaces>
 - <https://pbs.proxmox.com/docs/user-management.html>
-- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/namespace.rs;hb=v3.0.1>
-- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/datastore.rs;hb=v4.0.11>
+- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/namespace.rs;hb=v3.4.0>
+- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/datastore.rs;hb=v3.4.0>
+- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/namespace.rs;hb=v4.2.0>
+- <https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/admin/datastore.rs;hb=v4.2.0>

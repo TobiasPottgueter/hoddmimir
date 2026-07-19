@@ -37,6 +37,14 @@ final class PbsContentFixtureContractTest extends TestCase
         self::assertSame(PbsContentRunStatus::Succeeded, $snapshot->status());
         self::assertCount(3, $snapshot->namespaces);
         self::assertCount(3, $snapshot->snapshots);
+        self::assertSame(
+            [
+                ['index.json.blob', 'root.pxar.didx'],
+                ['drive-scsi0.img.fidx', 'index.json.blob'],
+                ['host.pxar.didx', 'index.json.blob'],
+            ],
+            array_map(static fn ($observation): array => $observation->files, $snapshot->snapshots),
+        );
         self::assertCount(12, $transport->requests);
         self::assertSame(['max-depth' => 7], $transport->requests[1]->query);
         self::assertSame([], $transport->requests[4]->query);

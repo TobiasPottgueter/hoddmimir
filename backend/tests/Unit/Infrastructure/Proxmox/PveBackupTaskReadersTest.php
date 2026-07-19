@@ -254,6 +254,78 @@ final class PveBackupTaskReadersTest extends TestCase
         self::assertContains(PveBackupInventoryIssueCode::InvalidField, $this->pageCodes($partial));
     }
 
+    public function testTaskPageReaderReconstructsTokenAuthenticatedUpidPrincipal(): void
+    {
+        $upid = $this->tokenUpid();
+        $row = $this->taskRow();
+        $row['upid'] = $upid->raw;
+        $row['user'] = 'user@pve';
+        $row['tokenid'] = 'hoddmimir';
+
+        $page = (new PveTaskPageReader())->read('pve', PveTaskQuery::active(), [$row]);
+
+        self::assertTrue($page->isComplete());
+        self::assertCount(1, $page->tasks);
+        self::assertSame($upid->raw, $page->tasks[0]->upid->raw);
+        self::assertSame([], $page->issues);
+    }
+
+    public function testActiveTaskPageReaderAcceptsACompleteTokenPrincipalWithoutTokenId(): void
+    {
+        $upid = $this->tokenUpid();
+        $row = $this->taskRow();
+        $row['upid'] = $upid->raw;
+        $row['user'] = $upid->user;
+
+        $page = (new PveTaskPageReader())->read('pve', PveTaskQuery::active(), [$row]);
+
+        self::assertTrue($page->isComplete());
+        self::assertCount(1, $page->tasks);
+        self::assertSame($upid->user, $page->tasks[0]->upid->user);
+        self::assertSame([], $page->issues);
+    }
+
+    #[DataProvider('taskPageTokenIdentityFailureProvider')]
+    public function testTaskPageReaderFailsClosedForInvalidTokenIdentity(
+        bool $tokenUpid,
+        string $user,
+        mixed $tokenId,
+        bool $includeTokenId,
+        bool $expectedInvalidField,
+    ): void {
+        $upid = $tokenUpid ? $this->tokenUpid() : $this->upid();
+        $row = $this->taskRow();
+        $row['upid'] = $upid->raw;
+        $row['user'] = $user;
+        if ($includeTokenId) {
+            $row['tokenid'] = $tokenId;
+        }
+
+        $page = (new PveTaskPageReader())->read('pve', PveTaskQuery::active(), [$row]);
+
+        self::assertFalse($page->isComplete());
+        self::assertSame([], $page->tasks);
+        self::assertContains(PveBackupInventoryIssueCode::IdentityMismatch, $this->pageCodes($page));
+        self::assertSame($expectedInvalidField, in_array(
+            PveBackupInventoryIssueCode::InvalidField,
+            $this->pageCodes($page),
+            true,
+        ));
+    }
+
+    /** @return iterable<string, array{bool, string, mixed, bool, bool}> */
+    public static function taskPageTokenIdentityFailureProvider(): iterable
+    {
+        yield 'split principal without token id' => [true, 'user@pve', null, false, false];
+        yield 'mismatched token id' => [true, 'user@pve', 'other-token', true, false];
+        yield 'empty token id' => [true, 'user@pve', '', true, true];
+        yield 'invalid token id characters' => [true, 'user@pve', 'bad token', true, true];
+        yield 'overlong token id' => [true, 'user@pve', 't'.str_repeat('o', 64), true, true];
+        yield 'non-string token id' => [true, 'user@pve', 1, true, true];
+        yield 'invalid token owner' => [true, 'not-a-principal', 'hoddmimir', true, true];
+        yield 'token id on non-token task' => [false, 'user@pve', 'hoddmimir', true, false];
+    }
+
     #[DataProvider('identityMismatchProvider')]
     public function testTaskPageReaderRejectsEveryIdentityMismatch(string $field, mixed $value): void
     {

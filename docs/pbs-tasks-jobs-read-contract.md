@@ -14,11 +14,15 @@ upstream sources are:
 - PBS 3 API viewer 3.4.4, SHA-256
   `2ba388ace5bb8580da297a2e78d1ef636fe20cec80ed5e577b5e1efe9905f267`;
 - PBS 3 source baseline 3.4.0,
-  `36ef1b01f76a452abb3aebea9f9c9e0fdc339c33`;
+  [`36ef1b01f76a452abb3aebea9f9c9e0fdc339c33`](https://git.proxmox.com/?p=proxmox-backup.git;a=commit;h=36ef1b01f76a452abb3aebea9f9c9e0fdc339c33),
+  including the [backup worker construction](https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/backup/mod.rs;hb=v3.4.0)
+  and [task-list projection](https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/node/tasks.rs;hb=v3.4.0);
 - PBS 4 API viewer 4.2.2, SHA-256
   `c62063edd60fbc288c376ec1a71efd1b16239cdf9ff88cb8f873ae1a7410f64a`;
 - PBS 4 source baseline 4.2.0,
-  `035c449897fafc228c8bbf3a5b5ba38564478ac7`;
+  [`035c449897fafc228c8bbf3a5b5ba38564478ac7`](https://git.proxmox.com/?p=proxmox-backup.git;a=commit;h=035c449897fafc228c8bbf3a5b5ba38564478ac7),
+  including the [backup worker construction](https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/backup/mod.rs;hb=v4.2.0)
+  and [task-list projection](https://git.proxmox.com/?p=proxmox-backup.git;a=blob;f=src/api2/node/tasks.rs;hb=v4.2.0);
 - task-status `endtime` addition,
   `2683bca432f934d032aa709ed9c690302ab564d5` (2026-05-04).
 
@@ -89,13 +93,34 @@ family the scanner performs:
 - a history pass with the same fixed `since`/`until` window.
 
 The task row must agree with its UPID for PID, process start, start time,
-worker type, worker ID, and auth ID. Running rows omit `status`; terminal list
-evidence supplies `status`, while `endtime` remains independently optional.
-An `endtime` without terminal status is rejected. Remote status is normalized
-to `ok`, `warning`, `error`, or `unknown` and is limited to 255 printable
-ASCII bytes. Every observation explicitly records whether it was seen in the
-running pass, history pass, or both. Running/terminal overlap is merged
-monotonically by raw UPID and ORs both provenance flags.
+worker type, worker ID, and auth ID. `TaskListItem.worker_id` is the generally
+decoded worker identity, while the raw UPID carries its canonical
+`escape_id` representation. Hoddmímir therefore re-encodes every non-null
+task-row `worker_id` with the complete official algorithm before comparing it
+byte-for-byte with the UPID field; this is not a backup-only transformation.
+ASCII letters, digits, `_`, and non-leading `.` remain literal, `/` becomes
+`-`, and every other byte becomes a lowercase `\\xhh` escape. Consequently a
+literal `-` becomes `\\x2d`, `:` becomes `\\x3a`, and a leading `.` becomes
+`\\x2e`. Both the decoded and encoded values are bounded to 1,024 bytes.
+Missing/null identities must match on both sides; malformed, non-canonical,
+over-limit, or different identities fail closed.
+
+For example, a backup task row can expose the readable worker identity
+`store-a:vm/guest-101`, while its UPID contains
+`store\\x2da\\x3avm-guest\\x2d101`.
+
+The official 3.4 and 4.2 backup-worker construction deliberately omits the
+namespace from this identity. A backup task therefore cannot prove either the
+root namespace or a particular nested namespace; Hoddmímir never derives a
+namespace scope from `worker_id` or its UPID counterpart.
+
+Running rows omit `status`; terminal list evidence supplies `status`, while
+`endtime` remains independently optional. An `endtime` without terminal status
+is rejected. Remote status is normalized to `ok`, `warning`, `error`, or
+`unknown` and is limited to 255 printable ASCII bytes. Every observation
+explicitly records whether it was seen in the running pass, history pass, or
+both. Running/terminal overlap is merged monotonically by raw UPID and ORs both
+provenance flags.
 
 ## Bounds, pagination, and stream evidence
 
@@ -165,5 +190,6 @@ Sanitized, synthetic fixtures live under
 `backend/tests/Fixtures/Proxmox/Pbs/{3,4.0,4.1,4.2}`. They cover pull and push
 sync jobs, root and nested namespaces, disabled and optional last-run fields,
 running and terminal tasks, differing reported/UPID nodes, nine-digit process
-start hex, a foreign `tape-backup` row, optional totals, and additive future
-fields. Unit and contract tests perform no network access.
+start hex, decoded versus UPID-canonical worker IDs, a foreign `tape-backup`
+row, optional totals, and additive future fields. Unit and contract tests
+perform no network access.

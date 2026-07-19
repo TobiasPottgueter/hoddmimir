@@ -36,6 +36,34 @@ final class PveBackupTaskFixtureContractTest extends TestCase
         self::assertSame([], $status->issues);
     }
 
+    #[DataProvider('tokenStatusMajorProvider')]
+    public function testTokenAuthenticatedTaskListFixturesReconstructTheExactUpidPrincipal(int $major): void
+    {
+        $data = (new PveJsonEnvelopeDecoder())->decode($this->fixture($major, 'node-tasks-token-active'));
+        $node = sprintf('pve%d-a', $major);
+
+        $page = (new PveTaskPageReader())->read($node, PveTaskQuery::active(), $data);
+
+        self::assertTrue($page->isComplete());
+        self::assertCount(1, $page->tasks);
+        self::assertSame('backup-observer@pve!inventory-token', $page->tasks[0]->upid->user);
+        self::assertSame([], $page->issues);
+    }
+
+    #[DataProvider('tokenStatusMajorProvider')]
+    public function testActiveTaskListFixturesAcceptTheCompleteTokenPrincipalWithoutTokenId(int $major): void
+    {
+        $data = (new PveJsonEnvelopeDecoder())->decode($this->fixture($major, 'node-tasks-token-principal-active'));
+        $node = sprintf('pve%d-a', $major);
+
+        $page = (new PveTaskPageReader())->read($node, PveTaskQuery::active(), $data);
+
+        self::assertTrue($page->isComplete());
+        self::assertCount(1, $page->tasks);
+        self::assertSame('backup-observer@pve!inventory-token', $page->tasks[0]->upid->user);
+        self::assertSame([], $page->issues);
+    }
+
     #[DataProvider('majorProvider')]
     public function testAllConstructedFixturesSatisfyTheVersionedReadContract(
         int $major,

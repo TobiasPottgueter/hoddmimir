@@ -30,6 +30,10 @@ final class PbsTasksAndJobsFixtureContractTest extends TestCase
         $verify = $jobs->read($this->fixture($version, 'admin-verify'), PbsJobKind::Verify, 4096);
         $history = (new PbsTaskPageReader())->read($this->fixture($version, 'tasks-history'), PbsTaskPass::History);
         $running = (new PbsTaskPageReader())->read($this->fixture($version, 'tasks-running'), PbsTaskPass::Running);
+        $encodedBackupWorker = (new PbsTaskPageReader())->read(
+            $this->fixture($version, 'tasks-backup-worker-encoded'),
+            PbsTaskPass::History,
+        );
 
         self::assertSame(PbsJobKind::Prune, $prune->jobs[0]->kind);
         self::assertSame($direction, $sync->jobs[0]->syncDirection);
@@ -43,6 +47,10 @@ final class PbsTasksAndJobsFixtureContractTest extends TestCase
         self::assertContains($running->tasks[0]->reportedNode, ['localhost', 'pbs-four']);
         self::assertSame($expectedTotal, $history->total);
         self::assertGreaterThanOrEqual(count($history->tasks), $history->rawRowCount);
+        self::assertCount(1, $encodedBackupWorker->tasks);
+        self::assertStringContainsString('\\x3a', $encodedBackupWorker->tasks[0]->upid->workerId ?? '');
+        self::assertStringContainsString('\\x2d', $encodedBackupWorker->tasks[0]->upid->workerId ?? '');
+        self::assertSame(PbsTaskOutcome::Ok, $encodedBackupWorker->tasks[0]->outcome);
         if ('3' === $version) {
             self::assertSame(2, $history->rawRowCount);
             self::assertCount(1, $history->tasks);

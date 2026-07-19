@@ -50,10 +50,12 @@ final readonly class PbsSnapshotListReader
                 if (!is_bool($protected)) {
                     throw new \InvalidArgumentException();
                 }
+                $filenames = [];
                 foreach ($files as $file) {
-                    if (!is_string($file)) {
+                    if (!$file instanceof \stdClass) {
                         throw new \InvalidArgumentException();
                     }
+                    $filenames[] = $this->requiredString($file, 'filename');
                 }
                 $verification = null;
                 $verificationValue = $row->verification ?? null;
@@ -72,7 +74,7 @@ final readonly class PbsSnapshotListReader
                     PbsBackupType::from($type),
                     $this->requiredString($row, 'backup-id'),
                     new DateTimeImmutable('@'.$time),
-                    $files,
+                    $filenames,
                     $protected,
                     $this->optionalString($row, 'comment'),
                     $this->optionalString($row, 'fingerprint'),

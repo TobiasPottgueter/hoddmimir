@@ -42,7 +42,7 @@ final class PbsContentReadersTest extends TestCase
         self::assertSame(PbsBackupType::Ct, $snapshots[0]->backupType);
         self::assertSame(PbsBackupType::Vm, $snapshots[1]->backupType);
         self::assertSame($rootTime, (int) $snapshots[1]->backupTime->format('U'));
-        self::assertSame(['drive-scsi0.img.fidx', 'qemu-server.conf.blob'], $snapshots[1]->files);
+        self::assertSame(['drive-scsi0.img.fidx', 'index.json.blob'], $snapshots[1]->files);
         self::assertSame('ok', $snapshots[1]->verification?->state);
         self::assertNull($snapshots[0]->size);
     }
@@ -91,6 +91,25 @@ final class PbsContentReadersTest extends TestCase
         self::assertSame([262_144, 65_536, 1_048_576], $transport->bodyLimits);
     }
 
+    public function testSnapshotFileObjectsMapFullMinimalAndAdditiveFormsToFilenames(): void
+    {
+        $snapshots = (new PbsSnapshotListReader())->read(
+            new PbsApiEnvelope([self::snapshotRow(files: [
+                (object) [
+                    'filename' => 'drive-scsi0.img.fidx',
+                    'size' => 1024,
+                    'crypt-mode' => 'encrypt',
+                    'future-file-property' => (object) ['ignored' => true],
+                ],
+                (object) ['filename' => 'index.json.blob'],
+            ])], null),
+            new PbsDatastoreId('store_a'),
+            PbsNamespace::root(),
+        );
+
+        self::assertSame(['drive-scsi0.img.fidx', 'index.json.blob'], $snapshots[0]->files);
+    }
+
     #[DataProvider('invalidEnvelopeProvider')]
     public function testReadersRejectInvalidOrDuplicateRows(mixed $data, bool $namespace): void
     {
@@ -123,7 +142,15 @@ final class PbsContentReadersTest extends TestCase
         yield 'snapshot non-integer time' => [[self::snapshotRow(time: 'bad')], false];
         yield 'snapshot unknown type' => [[self::snapshotRow(type: 'future')], false];
         yield 'snapshot invalid time' => [[self::snapshotRow(time: 0)], false];
-        yield 'snapshot invalid files' => [[self::snapshotRow(files: ['ok', 1])], false];
+        yield 'snapshot legacy string files' => [[self::snapshotRow(files: ['archive.blob'])], false];
+        yield 'snapshot file row not object' => [[self::snapshotRow(files: [(object) ['filename' => 'ok'], 1])], false];
+        yield 'snapshot file missing filename' => [[self::snapshotRow(files: [(object) ['size' => 1]])], false];
+        yield 'snapshot file filename wrong type' => [[self::snapshotRow(files: [(object) ['filename' => 1]])], false];
+        yield 'snapshot file filename empty' => [[self::snapshotRow(files: [(object) ['filename' => '']])], false];
+        yield 'snapshot duplicate filename' => [[self::snapshotRow(files: [
+            (object) ['filename' => 'archive.blob'],
+            (object) ['filename' => 'archive.blob'],
+        ])], false];
         yield 'snapshot files not array' => [[self::snapshotRow(files: 'bad')], false];
         yield 'snapshot files not list' => [[self::snapshotRow(files: ['archive' => 'bad'])], false];
         yield 'snapshot invalid protected' => [[self::snapshotRow(protected: 1)], false];
@@ -139,12 +166,13 @@ final class PbsContentReadersTest extends TestCase
     private static function snapshotRow(
         string $type = 'vm',
         mixed $time = 1,
-        mixed $files = ['archive.blob'],
+        mixed $files = null,
         mixed $protected = false,
         mixed $verification = null,
         mixed $comment = null,
         mixed $size = null,
     ): \stdClass {
+        $files ??= [(object) ['filename' => 'archive.blob']];
         $row = (object) [
             'backup-type' => $type,
             'backup-id' => '100',

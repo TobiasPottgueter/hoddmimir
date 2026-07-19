@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "upid": "UPID:pve7-a:0000002A:000F4240:66800000:vzdump:101:backup-observer@pve!inventory-token:",
+      "node": "pve7-a",
+      "pid": 42,
+      "pstart": 1000000,
+      "starttime": 1719664640,
+      "type": "vzdump",
+      "id": "101",
+      "user": "backup-observer@pve",
+      "tokenid": "inventory-token",
+      "status": "RUNNING"
+    }
+  ]
+}

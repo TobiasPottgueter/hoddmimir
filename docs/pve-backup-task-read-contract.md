@@ -115,10 +115,22 @@ a status path.
 
 Task-list rows require `upid`, `node`, `pid`, `pstart`, `starttime`, `type`,
 `id`, and `user`. `endtime` and `status` are optional. Empty and numeric-string
-task IDs are both valid. PVE 7 status responses publish `starttime` as a JSON
-number and do not declare `pstart`; the reader accepts only a finite,
-integral-valued number and treats `pstart` as optional. PVE 8 and PVE 9 status
-responses require integral `starttime` and `pstart` values.
+task IDs are both valid. For a non-token task, `user` must equal the complete
+UPID principal and `tokenid` must be absent. Token-authenticated active rows can
+likewise expose the complete `{user}@{realm}!{tokenid}` principal directly in
+`user` without a separate `tokenid`; that form is accepted only by an exact
+comparison with the UPID principal. Archived token-authenticated rows can
+instead expose the token owner in `user` and the token name separately in
+`tokenid`. The reader reconstructs the same canonical principal before
+comparing it with the UPID. An owner-only `user` without `tokenid`, or a
+malformed, overlong, unexpected, or mismatched `tokenid`, makes the row partial.
+The split task-list representation is covered for PVE 7, 8, and 9 by sanitized
+compatibility fixtures.
+
+PVE 7 status responses publish `starttime` as a JSON number and do not declare
+`pstart`; the reader accepts only a finite, integral-valued number and treats
+`pstart` as optional. PVE 8 and PVE 9 status responses require integral
+`starttime` and `pstart` values.
 
 A task is successful only when `status` is exactly `stopped` and `exitstatus`
 is exactly `OK`. Running, missing, 404, malformed, unknown, stopped without an
@@ -205,13 +217,15 @@ record.
 
 ## Constructed fixture matrix
 
-Each PVE major has these seven complete API2 JSON envelopes directly below
+Each PVE major has these nine complete API2 JSON envelopes directly below
 `backend/tests/Fixtures/Proxmox/Pve/{major}/`:
 
 | File | Probe |
 |---|---|
 | `backup-jobs.json` | Minimal job, versioned typed fields, unknown fields, legacy/PVE 9 capability boundaries |
 | `node-tasks-active.json` | Active `vzdump` row and unknown-field tolerance |
+| `node-tasks-token-active.json` | API-token task row with split `user`/`tokenid` identity and canonical token principal in the UPID |
+| `node-tasks-token-principal-active.json` | API-token task row with the complete token principal in `user` and no separate `tokenid` |
 | `node-tasks-archive-page-0.json` | First archived page, numeric and empty IDs |
 | `node-tasks-archive-page-next.json` | Next archived page and repeated UPID |
 | `task-status-running.json` | Running is not success; PVE 7 integral JSON number and optional `pstart` |

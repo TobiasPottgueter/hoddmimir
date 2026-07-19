@@ -12,6 +12,7 @@ use App\Application\Proxmox\Pbs\PbsTaskOutcome;
 use App\Application\Proxmox\Pbs\PbsTaskPage;
 use App\Application\Proxmox\Pbs\PbsTaskPass;
 use App\Application\Proxmox\Pbs\PbsUpid;
+use App\Infrastructure\Validation\AsciiPatternValidator;
 use App\Infrastructure\Validation\ObjectPropertyInspector;
 use InvalidArgumentException;
 
@@ -38,7 +39,7 @@ final readonly class PbsTaskPageReader
                     || $this->requiredInt($row, 'pstart') !== $upid->processStart
                     || $this->requiredInt($row, 'starttime') !== $upid->startTime
                     || $this->requiredString($row, 'worker_type') !== $upid->workerType
-                    || $workerId !== $upid->workerId
+                    || !$this->workerIdMatches($upid, $workerId)
                     || $this->requiredString($row, 'user') !== $upid->authId) {
                     throw new InvalidArgumentException('The PBS task row contradicts its UPID.');
                 }
@@ -78,6 +79,44 @@ final readonly class PbsTaskPageReader
         } catch (InvalidArgumentException) {
             throw PbsReadFailure::for(PbsReadFailureCode::InvalidResponse);
         }
+    }
+
+    private function workerIdMatches(PbsUpid $upid, ?string $reportedWorkerId): bool
+    {
+        if (null === $reportedWorkerId || null === $upid->workerId) {
+            return $reportedWorkerId === $upid->workerId;
+        }
+
+        $canonicalWorkerId = $this->canonicalWorkerId($reportedWorkerId);
+
+        return null !== $canonicalWorkerId && hash_equals($upid->workerId, $canonicalWorkerId);
+    }
+
+    private function canonicalWorkerId(string $workerId): ?string
+    {
+        $length = strlen($workerId);
+        if ($length < 1 || $length > 1024) {
+            return null;
+        }
+
+        $canonical = '';
+        for ($index = 0; $index < $length; ++$index) {
+            $character = $workerId[$index];
+            if ('/' === $character) {
+                $canonical .= '-';
+            } elseif ((0 !== $index || '.' !== $character)
+                && AsciiPatternValidator::matches('/\A[_.0-9A-Za-z]\z/D', $character)) {
+                $canonical .= $character;
+            } else {
+                $canonical .= sprintf('\\x%02x', ord($character));
+            }
+
+            if (strlen($canonical) > 1024) {
+                return null;
+            }
+        }
+
+        return $canonical;
     }
 
     private function requiredString(\stdClass $row, string $key): string

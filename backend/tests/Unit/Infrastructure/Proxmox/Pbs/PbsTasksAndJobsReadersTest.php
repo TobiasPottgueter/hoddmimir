@@ -20,6 +20,7 @@ use App\Infrastructure\Proxmox\Pbs\PbsJobListReader;
 use App\Infrastructure\Proxmox\Pbs\PbsPermissionReader;
 use App\Infrastructure\Proxmox\Pbs\PbsRequest;
 use App\Infrastructure\Proxmox\Pbs\PbsTaskPageReader;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PbsTasksAndJobsReadersTest extends TestCase
@@ -106,6 +107,79 @@ final class PbsTasksAndJobsReadersTest extends TestCase
         )->tasks[0]->upid->workerId);
     }
 
+    #[DataProvider('canonicalWorkerIdentityProvider')]
+    public function testTaskReaderCanonicalizesEveryAllowedReadableWorkerIdentity(
+        string $workerType,
+        string $reportedWorkerId,
+        string $upidWorkerId,
+    ): void
+    {
+        $row = $this->taskRow($workerType, $upidWorkerId, true);
+        $row->worker_id = $reportedWorkerId;
+
+        $page = (new PbsTaskPageReader())->read(
+            new PbsApiEnvelope([$row], null, 1),
+            PbsTaskPass::History,
+        );
+
+        self::assertCount(1, $page->tasks);
+        self::assertSame($upidWorkerId, $page->tasks[0]->upid->workerId);
+        self::assertTrue($page->tasks[0]->seenHistory);
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function canonicalWorkerIdentityProvider(): iterable
+    {
+        yield 'backup colon slash and literal hyphens' => [
+            'backup',
+            'store-a:vm/guest-101',
+            'store\\x2da\\x3avm-guest\\x2d101',
+        ];
+        yield 'prune colon and hyphen' => ['prune', 'store-a:tenant', 'store\\x2da\\x3atenant'];
+        yield 'prune job leading dot' => ['prunejob', '.scheduled', '\\x2escheduled'];
+        yield 'sync slash and hyphen' => ['syncjob', 'remote/local-job', 'remote-local\\x2djob'];
+        yield 'verification job hyphen' => ['verificationjob', 'verify-job', 'verify\\x2djob'];
+        yield 'verify safe dot' => ['verify', 'job.id', 'job.id'];
+        yield 'verify leading hyphen' => ['verify', '-leading', '\\x2dleading'];
+        yield 'verify group colon and slash' => ['verify_group', 'store_a:vm/101', 'store_a\\x3avm-101'];
+        yield 'verify snapshot safe underscore' => ['verify_snapshot', '_safe', '_safe'];
+    }
+
+    public function testTaskReaderRejectsMismatchedNullAndNonCanonicalWorkerIdentities(): void
+    {
+        $cases = [];
+        foreach ([
+            ['job\\xzz', 'job'],
+            ['job\\x2D', 'job-'],
+            ['\\x61', 'a'],
+            ['job-thing', 'job-thing'],
+            ['store_a\\x3avm-101', 'store_a:vm/102'],
+        ] as [$upidWorkerId, $reportedWorkerId]) {
+            $row = $this->taskRow('backup', $upidWorkerId, true);
+            $row->worker_id = $reportedWorkerId;
+            $cases[] = $row;
+        }
+        $missing = $this->taskRow('backup', 'store_a\\x3avm-101', true);
+        $missing->worker_id = null;
+        $cases[] = $missing;
+        $withoutUpidWorker = $this->taskRow('backup', '', true);
+        $withoutUpidWorker->worker_id = 'store_a:vm/101';
+        $cases[] = $withoutUpidWorker;
+        $overlong = $this->taskRow('backup', 'safe', true);
+        $overlong->worker_id = str_repeat('a', 1025);
+        $cases[] = $overlong;
+        $expandedOverLimit = $this->taskRow('backup', 'safe', true);
+        $expandedOverLimit->worker_id = str_repeat('-', 257);
+        $cases[] = $expandedOverLimit;
+
+        foreach ($cases as $row) {
+            $this->assertReadFailure(static fn () => (new PbsTaskPageReader())->read(
+                new PbsApiEnvelope([$row], null, 1),
+                PbsTaskPass::History,
+            ));
+        }
+    }
+
     public function testTaskReaderRejectsContradictoryRowsAndDuplicateUpids(): void
     {
         $valid = $this->taskRow('backup', 'store_a', false);
@@ -144,12 +218,16 @@ final class PbsTasksAndJobsReadersTest extends TestCase
     public function testTaskReaderPreservesDistinctRawFingerprintsWhenEveryRowIsDisallowed(): void
     {
         $reader = new PbsTaskPageReader();
+        $firstRow = $this->taskRow('tape-backup', 'tape\\x2da', true);
+        $firstRow->worker_id = 'tape-a';
+        $secondRow = $this->taskRow('tape-backup', 'tape\\x2db', true);
+        $secondRow->worker_id = 'tape-b';
         $first = $reader->read(
-            new PbsApiEnvelope([$this->taskRow('tape-backup', 'tape-a', true)], null, 2),
+            new PbsApiEnvelope([$firstRow], null, 2),
             PbsTaskPass::History,
         );
         $second = $reader->read(
-            new PbsApiEnvelope([$this->taskRow('tape-backup', 'tape-b', true)], null, 2),
+            new PbsApiEnvelope([$secondRow], null, 2),
             PbsTaskPass::History,
         );
 
