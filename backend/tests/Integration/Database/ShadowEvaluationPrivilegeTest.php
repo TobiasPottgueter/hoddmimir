@@ -16,6 +16,11 @@ final class ShadowEvaluationPrivilegeTest extends DatabaseTestCase
         'scheduler_evaluation_runs',
     ];
 
+    private const array CONCURRENCY_TABLES = [
+        'backup_node_slots',
+        'backup_target_slots',
+    ];
+
     public function testShadowTablesHaveExactRuntimeGrants(): void
     {
         $collector = $this->runtimeConnection('collector');
@@ -76,6 +81,50 @@ final class ShadowEvaluationPrivilegeTest extends DatabaseTestCase
             $collector->close();
             $web->close();
             $backup->close();
+        }
+    }
+
+    public function testCollectorHasExactReadOnlyConcurrencyGrantsRequiredByAutomaticShadowEvaluation(): void
+    {
+        $collector = $this->runtimeConnection('collector');
+        try {
+            $grants = $collector->fetchFirstColumn('SHOW GRANTS FOR CURRENT_USER()');
+            foreach (self::CONCURRENCY_TABLES as $table) {
+                $tableGrants = array_values(array_filter(
+                    $grants,
+                    static fn (mixed $grant): bool => is_string($grant)
+                        && str_contains($grant, sprintf('.`%s`', $table)),
+                ));
+                self::assertCount(1, $tableGrants);
+                self::assertStringContainsString('GRANT SELECT ON', $tableGrants[0]);
+                self::assertStringNotContainsString('INSERT', $tableGrants[0]);
+                self::assertStringNotContainsString('UPDATE', $tableGrants[0]);
+                self::assertStringNotContainsString('DELETE', $tableGrants[0]);
+
+                $identityColumn = 'backup_node_slots' === $table ? 'node_id' : 'target_id';
+                self::assertSame([], $collector->fetchAllAssociative(sprintf(
+                    'SELECT connection_id, cluster_id, %s, slot_limit, slots_used FROM %s LIMIT 0',
+                    $identityColumn,
+                    $table,
+                )));
+                $this->assertDenied(static fn () => $collector->executeStatement(sprintf(
+                    'INSERT INTO %s (%s) SELECT :id WHERE 1 = 0',
+                    $table,
+                    $identityColumn,
+                ), ['id' => random_bytes(16)]));
+                $this->assertDenied(static fn () => $collector->executeStatement(sprintf(
+                    'UPDATE %s SET %s = %s WHERE 1 = 0',
+                    $table,
+                    $identityColumn,
+                    $identityColumn,
+                )));
+                $this->assertDenied(static fn () => $collector->executeStatement(sprintf(
+                    'DELETE FROM %s WHERE 1 = 0',
+                    $table,
+                )));
+            }
+        } finally {
+            $collector->close();
         }
     }
 

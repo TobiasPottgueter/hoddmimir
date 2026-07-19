@@ -375,10 +375,18 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         self::assertFalse($targetBlocked->targetConcurrencyAvailable);
     }
 
-    public function testAutomaticShadowSourceRequiresEnabledPbsConnectionAndExactEnabledEndpoint(): void
+    public function testAutomaticShadowSourceAcceptsCanonicalRootNamespaceAndRequiresExactEnabledEndpoint(): void
     {
         $this->seedPbsShadowEvidence();
         $source = new DbalAutomaticShadowEvaluationSource($this->connection());
+        self::assertNull($this->connection()->fetchOne(
+            'SELECT namespace FROM pve_storage_pbs_mappings WHERE storage_id = :storage',
+            ['storage' => self::id('storage')],
+        ));
+        self::assertSame('', $this->connection()->fetchOne(
+            'SELECT namespace_path FROM pbs_namespaces WHERE id = :namespace',
+            ['namespace' => self::id('pbs-root-namespace')],
+        ));
         self::assertTrue($this->shadowCandidate($source)->pbsMappingValid);
 
         $this->connection()->update('proxmox_connections', ['enabled' => 0], ['id' => self::id('pbs-connection')]);
@@ -803,7 +811,7 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         );
     }
 
-    public function testPreparedSubmissionSuppressesApprovedDeletionRetentionForValidPbsMapping(): void
+    public function testQueueAndSubmissionAcceptCanonicalPbsRootNamespaceMapping(): void
     {
         $this->seedPbsShadowEvidence();
         $prepared = $this->prepareSubmissionForPolicy(
@@ -1375,7 +1383,9 @@ SQL, ['guest' => self::id('guest')]);
         $connection = self::id('pbs-connection');
         $server = self::id('pbs-server');
         $datastore = self::id('pbs-datastore');
+        $namespace = self::id('pbs-root-namespace');
         $run = self::id('pbs-inventory-run');
+        $contentRun = self::id('pbs-content-run');
 
         $this->connection()->insert('proxmox_connections', [
             'id' => $connection, 'display_name' => 'PBS shadow', 'product' => 'pbs', 'enabled' => 1,
@@ -1406,6 +1416,22 @@ SQL, ['guest' => self::id('guest')]);
             'first_seen_run_id' => $run, 'last_seen_run_id' => $run,
             'first_seen_at' => $now, 'last_seen_at' => $now,
         ]);
+        $this->connection()->insert('pbs_content_runs', [
+            'id' => $contentRun, 'parent_run_id' => $run, 'cycle_token' => self::id('cycle'),
+            'collector_fencing_token' => 1, 'connection_id' => $connection,
+            'endpoint_id' => self::id('pbs-endpoint'), 'expected_connection_revision' => 1,
+            'status' => 'succeeded', 'namespaces_seen' => 1, 'snapshots_seen' => 0,
+            'objects_created' => 1, 'objects_updated' => 0, 'objects_archived' => 0,
+            'started_at' => $now, 'heartbeat_at' => $now, 'finished_at' => $now,
+            'applied_at' => $now,
+        ]);
+        $this->connection()->insert('pbs_namespaces', [
+            'id' => $namespace, 'connection_id' => $connection, 'server_id' => $server,
+            'datastore_id' => $datastore, 'namespace_path' => '', 'namespace_depth' => 0,
+            'parent_namespace_id' => null, 'inventory_state' => 'active',
+            'first_seen_run_id' => $contentRun, 'last_seen_run_id' => $contentRun,
+            'first_seen_at' => $now, 'last_seen_at' => $now,
+        ]);
         $this->connection()->insert('pbs_datastore_capacity_state', [
             'datastore_id' => $datastore, 'connection_id' => $connection, 'server_id' => $server,
             'backend_type' => 'filesystem', 'semantics' => 'datastore_filesystem',
@@ -1420,6 +1446,7 @@ SQL, ['guest' => self::id('guest')]);
         ]);
         $this->connection()->update('backup_targets', [
             'pbs_connection_id' => $connection, 'pbs_datastore_id' => $datastore,
+            'pbs_namespace_id' => $namespace,
         ], ['id' => self::id('target')]);
         $this->connection()->update('pve_storages', [
             'storage_type' => 'pbs',

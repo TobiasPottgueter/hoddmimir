@@ -55,7 +55,7 @@ final class BackupQueuePrivilegeTest extends DatabaseTestCase
                     )));
                 }
 
-                if (in_array($table, ['backup_requests', 'backup_request_events'], true)) {
+                if (in_array($table, ['backup_requests', 'backup_request_events', 'backup_node_slots', 'backup_target_slots'], true)) {
                     self::assertSame([], $collector->fetchAllAssociative(sprintf('SELECT * FROM %s LIMIT 0', $table)));
                     $this->assertDenied(static fn () => $collector->executeStatement(sprintf(
                         'UPDATE %s SET %s = %s WHERE 1 = 0',

@@ -371,7 +371,8 @@ SELECT connection.enabled AS connection_enabled,
                AND pbs_endpoint.enabled = 1 AND pbs_endpoint.host = mapping.server AND pbs_endpoint.port = mapping.port)
          AND ((target.pbs_namespace_id IS NULL AND mapping.namespace IS NULL)
            OR (target.pbs_namespace_id IS NOT NULL AND pbs_namespace.id = target.pbs_namespace_id
-             AND pbs_namespace.inventory_state = 'active' AND mapping.namespace = pbs_namespace.namespace_path))) AS pbs_mapping_valid,
+             AND pbs_namespace.inventory_state = 'active'
+             AND COALESCE(mapping.namespace, '') = pbs_namespace.namespace_path))) AS pbs_mapping_valid,
        EXISTS(SELECT 1 FROM backup_policy_assignments assignment
          WHERE assignment.policy_id = request.policy_id AND assignment.status = 'active'
            AND assignment.selection_value = 'include'

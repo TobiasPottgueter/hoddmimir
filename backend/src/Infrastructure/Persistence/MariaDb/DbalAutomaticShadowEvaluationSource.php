@@ -96,7 +96,8 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
          AND pbs_datastore.inventory_state = 'active' AND pbs_datastore.allows_backup_writes = 1
          AND pbs_capacity.semantics = 'datastore_filesystem' AND mapping.datastore = pbs_datastore.datastore_name
          AND ((target.pbs_namespace_id IS NULL AND mapping.namespace IS NULL)
-           OR (target.pbs_namespace_id IS NOT NULL AND mapping.namespace = pbs_namespace.namespace_path))
+           OR (target.pbs_namespace_id IS NOT NULL
+             AND COALESCE(mapping.namespace, '') = pbs_namespace.namespace_path))
          AND (target.pbs_namespace_id IS NULL OR pbs_namespace.inventory_state = 'active'))) AS pbs_mapping_valid,
        mapping.observed_at AS pbs_observed_at,
        executor.observed_at AS executor_observed_at,
