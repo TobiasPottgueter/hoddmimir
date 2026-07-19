@@ -33,4 +33,9 @@ final readonly class PveApiTokenIdentity
     {
         return 'PVEAPIToken='.$this->value.'=';
     }
+
+    public function matchesPrincipal(string $principal): bool
+    {
+        return hash_equals($this->value, $principal);
+    }
 }

@@ -431,6 +431,104 @@ final class PveBackupTaskReadersTest extends TestCase
         yield 'pstart' => ['pstart', 9, 'pve'];
     }
 
+    #[DataProvider('majorVersionProvider')]
+    public function testStatusReaderReconstructsTokenAuthenticatedUpidPrincipal(int $major): void
+    {
+        $upid = $this->tokenUpid();
+        $row = $this->statusRowFor($upid, 'stopped', 'OK');
+        $row['user'] = 'user@pve';
+        $row['tokenid'] = 'hoddmimir';
+        if (7 === $major) {
+            $row['starttime'] = (float) $upid->startTime;
+            unset($row['pstart']);
+        }
+
+        $status = (new PveTaskStatusReader($this->version($major)))->read('pve', $upid, $row);
+
+        self::assertTrue($status->isComplete());
+        self::assertTrue($status->isSuccessful());
+        self::assertSame([], $status->issues);
+    }
+
+    public function testStatusReaderKeepsNonTokenUserIdentityBehavior(): void
+    {
+        $status = (new PveTaskStatusReader($this->version(9)))
+            ->read('pve', $this->upid(), $this->statusRow('stopped', 'OK'));
+
+        self::assertTrue($status->isComplete());
+        self::assertTrue($status->isSuccessful());
+    }
+
+    public function testStatusReaderRejectsTokenIdForANonTokenUpid(): void
+    {
+        $row = $this->statusRow('stopped', 'OK');
+        $row['tokenid'] = 'hoddmimir';
+
+        $status = (new PveTaskStatusReader($this->version(9)))
+            ->read('pve', $this->upid(), $row);
+
+        self::assertFalse($status->isComplete());
+        self::assertFalse($status->isSuccessful());
+        self::assertContains(PveBackupInventoryIssueCode::IdentityMismatch, $this->statusCodes($status));
+    }
+
+    public function testStatusReaderRequiresTokenIdEvenWhenUserReportsTheFullTokenPrincipal(): void
+    {
+        $upid = $this->tokenUpid();
+        $row = $this->statusRowFor($upid, 'stopped', 'OK');
+
+        $status = (new PveTaskStatusReader($this->version(9)))->read('pve', $upid, $row);
+
+        self::assertFalse($status->isComplete());
+        self::assertFalse($status->isSuccessful());
+        self::assertContains(PveBackupInventoryIssueCode::IdentityMismatch, $this->statusCodes($status));
+    }
+
+    #[DataProvider('tokenIdentityFailureProvider')]
+    public function testStatusReaderFailsClosedForMissingMismatchedOrInvalidTokenId(
+        string $case,
+        string $user,
+        mixed $tokenId,
+        bool $expectedInvalidField,
+    ): void {
+        $upid = $this->tokenUpid();
+        $row = $this->statusRowFor($upid, 'stopped', 'OK');
+        $row['user'] = $user;
+        if ('missing' !== $case) {
+            $row['tokenid'] = $tokenId;
+        }
+
+        $status = (new PveTaskStatusReader($this->version(9)))->read('pve', $upid, $row);
+
+        self::assertFalse($status->isComplete());
+        self::assertFalse($status->isSuccessful());
+        self::assertContains(PveBackupInventoryIssueCode::IdentityMismatch, $this->statusCodes($status));
+        self::assertSame($expectedInvalidField, in_array(
+            PveBackupInventoryIssueCode::InvalidField,
+            $this->statusCodes($status),
+            true,
+        ));
+    }
+
+    /** @return iterable<string, array{string, string, mixed, bool}> */
+    public static function tokenIdentityFailureProvider(): iterable
+    {
+        yield 'missing tokenid' => ['missing', 'user@pve', null, false];
+        yield 'mismatched tokenid' => ['present', 'user@pve', 'other-token', false];
+        yield 'empty tokenid' => ['present', 'user@pve', '', true];
+        yield 'invalid tokenid characters' => ['present', 'user@pve', 'bad token', true];
+        yield 'non-string tokenid' => ['present', 'user@pve', 1, true];
+        yield 'invalid token owner' => ['present', 'not-a-principal', 'hoddmimir', true];
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function majorVersionProvider(): iterable
+    {
+        yield 'PVE 7' => [7];
+        yield 'PVE 8' => [8];
+        yield 'PVE 9' => [9];
+    }
+
     /** @return array<string, mixed> */
     private function taskRow(int $pid = 1, string $id = '1'): array
     {
@@ -463,7 +561,12 @@ final class PveBackupTaskReadersTest extends TestCase
     /** @return array<string, mixed> */
     private function statusRow(string $status, ?string $exitStatus = null): array
     {
-        $upid = $this->upid();
+        return $this->statusRowFor($this->upid(), $status, $exitStatus);
+    }
+
+    /** @return array<string, mixed> */
+    private function statusRowFor(PveUpid $upid, string $status, ?string $exitStatus = null): array
+    {
         $row = [
             'upid' => $upid->raw,
             'node' => $upid->node,
@@ -480,6 +583,11 @@ final class PveBackupTaskReadersTest extends TestCase
         }
 
         return $row;
+    }
+
+    private function tokenUpid(): PveUpid
+    {
+        return PveUpid::parse('UPID:pve:00000001:00000002:00000003:vzdump:1:user@pve!hoddmimir:');
     }
 
     private function version(int $major): PveVersion

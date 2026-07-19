@@ -12,6 +12,7 @@ use App\Application\Proxmox\Pve\PveTaskLifecycle;
 use App\Application\Proxmox\Pve\PveTaskStatus;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Application\Proxmox\Pve\PveVersion;
+use InvalidArgumentException;
 
 final readonly class PveTaskStatusReader
 {
@@ -33,6 +34,7 @@ final readonly class PveTaskStatusReader
         $type = $this->string($row, 'type', $endpoint, $routeNode, $issues, false);
         $id = $this->identifier($row, $endpoint, $routeNode, $issues);
         $user = $this->string($row, 'user', $endpoint, $routeNode, $issues, false);
+        $userMatches = $this->userMatches($row, $user, $routeUpid->user, $endpoint, $routeNode, $issues);
         $pid = $this->integer($row, 'pid', $endpoint, $routeNode, $issues, false);
         $startTime = $this->startTime($row, $endpoint, $routeNode, $issues);
 
@@ -51,7 +53,7 @@ final readonly class PveTaskStatusReader
 
         if ($routeNode !== $routeUpid->node || $reportedUpid !== $routeUpid->raw
             || $node !== $routeNode || $type !== $routeUpid->type || $id !== $routeUpid->id
-            || $user !== $routeUpid->user || $pid !== $routeUpid->pid
+            || !$userMatches || $pid !== $routeUpid->pid
             || $startTime !== $routeUpid->startTime
             || (null !== $pstart && $pstart !== $routeUpid->processStart)) {
             $issues[] = $this->issue(
@@ -105,6 +107,64 @@ final readonly class PveTaskStatusReader
         }
 
         return new PveTaskStatus($routeUpid, $lifecycle, $exitStatus, $pstart, $issues);
+    }
+
+    /**
+     * @param array<array-key, mixed>        $row
+     * @param list<PveBackupInventoryIssue> $issues
+     */
+    private function userMatches(
+        array $row,
+        ?string $user,
+        string $routePrincipal,
+        string $endpoint,
+        string $node,
+        array &$issues,
+    ): bool {
+        $realmSeparator = strrpos($routePrincipal, '@');
+        $tokenSeparator = strrpos($routePrincipal, '!');
+        $routeUsesToken = false !== $realmSeparator
+            && false !== $tokenSeparator
+            && $tokenSeparator > $realmSeparator;
+
+        if (!array_key_exists('tokenid', $row)) {
+            return !$routeUsesToken && null !== $user && hash_equals($routePrincipal, $user);
+        }
+
+        $tokenId = $this->tokenId($row['tokenid'], $endpoint, $node, $issues);
+        if (!$routeUsesToken || null === $user || null === $tokenId) {
+            return false;
+        }
+
+        try {
+            return PveApiTokenIdentity::fromUserAndTokenId($user, $tokenId)->matchesPrincipal($routePrincipal);
+        } catch (InvalidArgumentException) {
+            $issues[] = $this->issue(
+                PveBackupInventoryIssueCode::InvalidField,
+                $endpoint,
+                '/data/user',
+                $node,
+            );
+
+            return false;
+        }
+    }
+
+    /** @param list<PveBackupInventoryIssue> $issues */
+    private function tokenId(mixed $value, string $endpoint, string $node, array &$issues): ?string
+    {
+        if (!is_string($value) || 1 !== preg_match('/\A[A-Za-z][A-Za-z0-9._-]{1,63}\z/D', $value)) {
+            $issues[] = $this->issue(
+                PveBackupInventoryIssueCode::InvalidField,
+                $endpoint,
+                '/data/tokenid',
+                $node,
+            );
+
+            return null;
+        }
+
+        return $value;
     }
 
     /** @return null|array<array-key, mixed> */

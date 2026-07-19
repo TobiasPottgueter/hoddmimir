@@ -19,6 +19,23 @@ use RuntimeException;
 
 final class PveBackupTaskFixtureContractTest extends TestCase
 {
+    #[DataProvider('tokenStatusMajorProvider')]
+    public function testTokenAuthenticatedTaskStatusFixturesReconstructTheExactUpidPrincipal(int $major): void
+    {
+        $decoder = new PveJsonEnvelopeDecoder();
+        $data = $decoder->decode($this->fixture($major, 'task-status-token-stopped-ok'));
+        self::assertInstanceOf(\stdClass::class, $data);
+        self::assertIsString($data->upid ?? null);
+        $upid = PveUpid::parse($data->upid);
+
+        $status = (new PveTaskStatusReader($this->fixtureVersion($major)))
+            ->read($upid->node, $upid, $data);
+
+        self::assertTrue($status->isComplete());
+        self::assertTrue($status->isSuccessful());
+        self::assertSame([], $status->issues);
+    }
+
     #[DataProvider('majorProvider')]
     public function testAllConstructedFixturesSatisfyTheVersionedReadContract(
         int $major,
@@ -126,6 +143,26 @@ final class PveBackupTaskFixtureContractTest extends TestCase
         yield 'PVE 7' => [7, 'pve7-a', 4];
         yield 'PVE 8' => [8, 'pve8-a', 4];
         yield 'PVE 9' => [9, 'pve9-a', 1];
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function tokenStatusMajorProvider(): iterable
+    {
+        yield 'PVE 7 token status' => [7];
+        yield 'PVE 8 token status' => [8];
+        yield 'PVE 9 token status' => [9];
+    }
+
+    private function fixtureVersion(int $major): \App\Application\Proxmox\Pve\PveVersion
+    {
+        return new \App\Application\Proxmox\Pve\PveVersion(
+            $major,
+            0,
+            null,
+            $major.'.0',
+            $major.'.0',
+            'abcdef12',
+        );
     }
 
     private function fixture(int $major, string $name): string
