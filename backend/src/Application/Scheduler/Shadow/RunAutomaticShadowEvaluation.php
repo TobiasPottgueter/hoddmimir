@@ -220,7 +220,20 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             $this->flag(GateCode::TargetStorageEnabled, GateScope::Target, $target, $candidate->storageEnabled, GateDetailCode::Disabled),
             $this->flag(GateCode::TargetStorageActive, GateScope::Target, $target, $candidate->storageActive, GateDetailCode::Inactive),
             $this->freshness->evaluate(GateCode::CapacityFresh, GateScope::Capacity, $target, $now, $candidate->capacityObservedAt),
-            $this->flag(GateCode::MinimumFreeSpace, GateScope::Capacity, $target, null !== $candidate->availableBytes && null !== $candidate->minimumFreeBytes && $candidate->minimumFreeBytes->lessThanOrEqual($candidate->availableBytes), null === $candidate->availableBytes ? GateDetailCode::Missing : GateDetailCode::InsufficientFreeSpace),
+            $this->flag(
+                GateCode::MinimumFreeSpace,
+                GateScope::Capacity,
+                $target,
+                null !== $candidate->availableBytes
+                    && null !== $candidate->minimumFreeBytes
+                    && $candidate->expectedBackupSizePresent
+                    && $candidate->minimumFreeBytes->lessThanOrEqual($candidate->availableBytes),
+                null === $candidate->availableBytes
+                    || null === $candidate->minimumFreeBytes
+                    || !$candidate->expectedBackupSizePresent
+                    ? GateDetailCode::Missing
+                    : GateDetailCode::InsufficientFreeSpace,
+            ),
             $this->flag(GateCode::NodeConcurrency, GateScope::Concurrency, $node, $candidate->nodeConcurrencyAvailable, GateDetailCode::ConcurrencyLimitReached),
             $this->flag(GateCode::TargetConcurrency, GateScope::Concurrency, $target, $candidate->targetConcurrencyAvailable, GateDetailCode::ConcurrencyLimitReached),
             $this->flag(GateCode::PbsMappingValid, GateScope::PbsMapping, $target, $candidate->pbsMappingValid, GateDetailCode::InvalidMapping),

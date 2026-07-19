@@ -47,8 +47,8 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
                 new PveNodeResource('node-a', 'offline'),
             ],
             [
-                new PveGuestResource(PveGuestType::Qemu, 100, 'node-a', 'vm-a', true, 'running', 123),
-                new PveGuestResource(PveGuestType::Lxc, 200, 'node-b', null, null, 'stopped'),
+                new PveGuestResource(PveGuestType::Qemu, 100, 'node-a', 'vm-a', true, 'running', 123, 456),
+                new PveGuestResource(PveGuestType::Lxc, 200, 'node-b', null, null, 'stopped', null, 0),
             ],
         );
         $read = self::pveRead(
@@ -78,9 +78,11 @@ final class MapPveCoreInventorySnapshotTest extends TestCase
         self::assertSame([0, 1], array_keys($commit->guests));
         self::assertNull($commit->guests[0]->name);
         self::assertNull($commit->guests[0]->isTemplate);
+        self::assertSame(0, $commit->guests[0]->provisionedSizeBytes);
         self::assertSame('vm-a', $commit->guests[1]->name);
         self::assertTrue($commit->guests[1]->isTemplate);
         self::assertSame(123, $commit->guests[1]->diskWriteBytes);
+        self::assertSame(456, $commit->guests[1]->provisionedSizeBytes);
         self::assertSame('2026-07-11T13:00:00+00:00', $commit->observedAt->format('c'));
     }
 

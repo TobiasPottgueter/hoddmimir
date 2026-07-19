@@ -151,6 +151,7 @@ final class PveCoreInventoryModelTest extends TestCase
         yield 'guest empty name' => [static fn () => new PveGuestObservation(PveGuestType::Qemu, 1, 'node', '', null)];
         yield 'guest long name' => [static fn () => new PveGuestObservation(PveGuestType::Qemu, 1, 'node', str_repeat('x', 256), null)];
         yield 'guest negative disk write' => [static fn () => new PveGuestObservation(PveGuestType::Qemu, 1, 'node', null, null, -1)];
+        yield 'guest negative provisioned size' => [static fn () => new PveGuestObservation(PveGuestType::Qemu, 1, 'node', null, null, null, -1)];
         yield 'start revision' => [static fn () => new PveSyncRunStart(
             new InventoryIdentifier(str_repeat('a', 16)), new InventoryIdentifier(str_repeat('b', 16)), 0, new DateTimeImmutable(self::NOW),
         )];

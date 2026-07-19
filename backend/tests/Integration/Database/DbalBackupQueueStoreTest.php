@@ -324,6 +324,34 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         self::assertNull($missing->executorObservedAt);
     }
 
+    public function testAutomaticShadowSourceProjectsExpectedBackupSizeEvidenceFailClosed(): void
+    {
+        $source = new DbalAutomaticShadowEvaluationSource($this->connection());
+        self::assertTrue($this->shadowCandidate($source)->expectedBackupSizePresent);
+
+        $this->connection()->update('guests', [
+            'provisioned_size_bytes' => null,
+        ], ['id' => self::id('guest')]);
+
+        self::assertFalse($this->shadowCandidate($source)->expectedBackupSizePresent);
+
+        $now = self::format($this->now);
+        $this->connection()->insert('guest_backup_state', [
+            'guest_id' => self::id('guest'),
+            'policy_id' => self::id('policy'),
+            'target_id' => self::id('target'),
+            'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'),
+            'last_success_at' => $now,
+            'last_success_size_bytes' => '900',
+            'baseline_bytes' => '0',
+            'baseline_observed_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        self::assertTrue($this->shadowCandidate($source)->expectedBackupSizePresent);
+    }
+
     public function testAutomaticShadowSourceClosesDuplicatesForNonTerminalRequestsOnly(): void
     {
         $source = new DbalAutomaticShadowEvaluationSource($this->connection());

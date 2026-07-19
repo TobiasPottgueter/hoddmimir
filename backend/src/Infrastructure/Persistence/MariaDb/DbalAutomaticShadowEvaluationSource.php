@@ -108,6 +108,7 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
            AND active_request.guest_id = guest.id
            AND active_request.state IN ('pending', 'retry_wait', 'leased', 'starting', 'running', 'reconcile_required')) AS active_request_absent,
        backup_state.last_success_at, backup_state.baseline_bytes,
+       (guest.provisioned_size_bytes IS NOT NULL OR backup_state.last_success_size_bytes IS NOT NULL) AS expected_backup_size_present,
        policy.maximum_age_seconds, policy.bytes_written_threshold, policy.cooldown_seconds,
        write_state.diskwrite_bytes AS current_bytes, write_state.observed_at AS write_state_observed_at
 FROM backup_policies policy
@@ -215,6 +216,7 @@ SQL, [
                 && $this->bool($row, 'storage_enabled'),
             $this->bool($row, 'storage_active'), $this->date($row['capacity_observed_at'] ?? null),
             $this->effectiveCapacity($row), $this->decimal($row['minimum_free_bytes'] ?? null),
+            $this->bool($row, 'expected_backup_size_present'),
             $this->bool($row, 'node_concurrency_available'), $this->bool($row, 'target_concurrency_available'),
             $this->bool($row, 'pbs_mapping_valid'),
             'pbs' !== ($row['target_storage_type'] ?? null)

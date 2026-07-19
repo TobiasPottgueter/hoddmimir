@@ -259,6 +259,45 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         ));
     }
 
+    public function testProvisionedGuestSizeCreatesAndUpdatesWithoutInventingMissingOrZeroValues(): void
+    {
+        [$firstLease, $firstRun] = $this->startSelectedRun('guest-size-first');
+        $this->store->apply($firstLease, $this->commit(
+            $firstRun,
+            ['node-a'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest', null, 4096)],
+            observedAt: self::at(1),
+        ));
+        self::assertSame('4096', $this->connection()->fetchOne(
+            'SELECT CAST(provisioned_size_bytes AS CHAR) FROM guests WHERE connection_id = :connection_id AND vmid = 100',
+            ['connection_id' => $this->connectionId->binary()],
+        ));
+
+        [$zeroLease, $zeroRun] = $this->startSelectedRun('guest-size-zero');
+        $this->store->apply($zeroLease, $this->commit(
+            $zeroRun,
+            ['node-a'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest', null, 0)],
+            observedAt: self::at(2),
+        ));
+        self::assertSame('0', $this->connection()->fetchOne(
+            'SELECT CAST(provisioned_size_bytes AS CHAR) FROM guests WHERE connection_id = :connection_id AND vmid = 100',
+            ['connection_id' => $this->connectionId->binary()],
+        ));
+
+        [$missingLease, $missingRun] = $this->startSelectedRun('guest-size-missing');
+        $this->store->apply($missingLease, $this->commit(
+            $missingRun,
+            ['node-a'],
+            [$this->guest(PveGuestType::Qemu, 100, 'node-a', 'guest')],
+            observedAt: self::at(3),
+        ));
+        self::assertNull($this->connection()->fetchOne(
+            'SELECT provisioned_size_bytes FROM guests WHERE connection_id = :connection_id AND vmid = 100',
+            ['connection_id' => $this->connectionId->binary()],
+        ));
+    }
+
     public function testCompositeApplyPersistsStorageMappingsDisabledDefinitionsAndCapacityAtomically(): void
     {
         [$lease, $run] = $this->startSelectedRun('storage-first');
@@ -1394,9 +1433,18 @@ final class DbalPveCoreInventoryStoreTest extends KernelTestCase
         string $node,
         string $name,
         ?int $diskWriteBytes = null,
+        ?int $provisionedSizeBytes = null,
     ): PveGuestObservation
     {
-        return new PveGuestObservation($type, $vmid, $node, $name, false, $diskWriteBytes);
+        return new PveGuestObservation(
+            $type,
+            $vmid,
+            $node,
+            $name,
+            false,
+            $diskWriteBytes,
+            $provisionedSizeBytes,
+        );
     }
 
     /** Directly seeds an owned lease for writer-only tests; takeover tests must call the production scheduler store. */

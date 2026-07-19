@@ -117,6 +117,7 @@ final readonly class PveClusterResourcesReader
             $this->optionalBool($row['template'] ?? null),
             $this->optionalString($row['status'] ?? null),
             $this->optionalNonNegativeInt($row['diskwrite'] ?? null),
+            $this->optionalNonNegativeInt($row['maxdisk'] ?? null),
         );
     }
 

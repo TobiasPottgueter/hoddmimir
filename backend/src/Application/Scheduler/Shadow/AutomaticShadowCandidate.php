@@ -38,6 +38,7 @@ final readonly class AutomaticShadowCandidate
         public ?DateTimeImmutable $capacityObservedAt,
         public ?UInt64Decimal $availableBytes,
         public ?UInt64Decimal $minimumFreeBytes,
+        public bool $expectedBackupSizePresent,
         public bool $nodeConcurrencyAvailable,
         public bool $targetConcurrencyAvailable,
         public bool $pbsMappingValid,

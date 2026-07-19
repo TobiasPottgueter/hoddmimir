@@ -349,6 +349,7 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                     'vmid' => $guest->vmid,
                     'name' => $guest->name,
                     'is_template' => null === $guest->isTemplate ? null : (int) $guest->isTemplate,
+                    'provisioned_size_bytes' => $guest->provisionedSizeBytes,
                     'inventory_state' => 'active',
                     'first_seen_run_id' => $commit->runId->binary(),
                     'last_seen_run_id' => $commit->runId->binary(),
@@ -361,6 +362,7 @@ final readonly class DbalPveCoreInventoryStore implements PveCoreInventoryStore
                 $connection->update('guests', [
                     'name' => $guest->name,
                     'is_template' => null === $guest->isTemplate ? null : (int) $guest->isTemplate,
+                    'provisioned_size_bytes' => $guest->provisionedSizeBytes,
                     'inventory_state' => 'active',
                     'last_seen_run_id' => $commit->runId->binary(),
                     'last_seen_at' => $this->format($commit->observedAt),

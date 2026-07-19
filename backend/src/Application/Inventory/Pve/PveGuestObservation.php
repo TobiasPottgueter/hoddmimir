@@ -16,6 +16,7 @@ final readonly class PveGuestObservation
         public ?string $name,
         public ?bool $isTemplate,
         public ?int $diskWriteBytes = null,
+        public ?int $provisionedSizeBytes = null,
     ) {
         if ($this->vmid < 1) {
             throw new InvalidArgumentException('The PVE guest VMID must be positive.');
@@ -28,6 +29,9 @@ final readonly class PveGuestObservation
         }
         if (null !== $this->diskWriteBytes && $this->diskWriteBytes < 0) {
             throw new InvalidArgumentException('The PVE guest disk-write counter must be non-negative.');
+        }
+        if (null !== $this->provisionedSizeBytes && $this->provisionedSizeBytes < 0) {
+            throw new InvalidArgumentException('The PVE guest provisioned size must be non-negative.');
         }
     }
 

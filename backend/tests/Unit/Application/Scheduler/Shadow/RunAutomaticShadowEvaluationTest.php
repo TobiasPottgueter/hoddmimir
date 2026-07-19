@@ -82,6 +82,22 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         self::assertSame($decision->id->binary(), $store->batches[0]->promotions[0]->decisionId);
     }
 
+    public function testMissingExpectedBackupSizeEvidenceBlocksWithoutPromotion(): void
+    {
+        $store = new CapturingShadowStore();
+        $this->service(
+            new RecordingAutomaticShadowSource([$this->candidate(expectedBackupSizePresent: false)]),
+            $store,
+            new DateTimeImmutable('2026-07-12T10:05:00Z'),
+        )->execute($this->lease());
+
+        $decision = $store->batches[0]->decisions[0];
+        self::assertSame(DecisionOutcome::Blocked, $decision->outcome);
+        self::assertSame('minimum_free_space', $decision->gates[15]->result->code->value);
+        self::assertSame('missing', $decision->gates[15]->result->detailCode->value);
+        self::assertSame([], $store->batches[0]->promotions);
+    }
+
     public function testPerGuestWinnerUsesReasonBeforePolicyPriorityAndExplainsTheLoser(): void
     {
         $store = new CapturingShadowStore();
@@ -369,6 +385,7 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
         ?bool $guestTemplate = false,
         ?int $availableBytes = 1_000,
         ?int $minimumFreeBytes = 100,
+        bool $expectedBackupSizePresent = true,
         bool $activeRequestAbsent = true,
         bool $nodeConcurrencyAvailable = true,
         bool $targetConcurrencyAvailable = true,
@@ -386,6 +403,7 @@ final class RunAutomaticShadowEvaluationTest extends TestCase
             true, false, $id('target'), 4, true, true, true, true, $at,
             null === $availableBytes ? null : new UInt64Decimal((string) $availableBytes),
             null === $minimumFreeBytes ? null : new UInt64Decimal((string) $minimumFreeBytes),
+            $expectedBackupSizePresent,
             $nodeConcurrencyAvailable, $targetConcurrencyAvailable,
             true, $at, $executorObservedAt, $executorAuthorized, $activeRequestAbsent, $lastSuccessAt, $maximumAgeSeconds,
             null === $currentBytes ? null : new UInt64Decimal((string) $currentBytes), $at,

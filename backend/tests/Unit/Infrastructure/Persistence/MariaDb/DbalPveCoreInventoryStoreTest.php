@@ -126,6 +126,39 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
         );
     }
 
+    public function testProvisionedGuestSizeIsWrittenExactlyOnCreateAndUpdate(): void
+    {
+        $created = new PveStoreRecording();
+        $this->store($this->database(recording: $created))->apply(
+            $this->lease(),
+            $this->commit(authoritative: true, provisionedSizeBytes: 4096),
+        );
+        $guestInsert = array_values(array_filter(
+            $created->inserts,
+            static fn (array $insert): bool => 'guests' === $insert[0],
+        ));
+        self::assertCount(1, $guestInsert);
+        self::assertSame(4096, $guestInsert[0][1]['provisioned_size_bytes']);
+
+        $updated = new PveStoreRecording();
+        $this->store($this->database([
+            'binding' => $this->clusterBindingRow(),
+            'cluster' => ['id' => $this->id('k')->binary()],
+            'node' => ['id' => $this->id('n')->binary()],
+            'guest' => ['id' => $this->id('g')->binary()],
+            'known_nodes' => [1, 'node-a'],
+        ], $updated))->apply(
+            $this->lease(),
+            $this->commit(authoritative: true, provisionedSizeBytes: 0),
+        );
+        $guestUpdates = array_values(array_filter(
+            $updated->updates,
+            static fn (array $update): bool => 'guests' === $update[0],
+        ));
+        self::assertCount(1, $guestUpdates);
+        self::assertSame(0, $guestUpdates[0][1]['provisioned_size_bytes']);
+    }
+
     public function testExistingInventoryUpdatesAllAggregatesAndArchivesAuthoritativeAbsence(): void
     {
         $recording = new PveStoreRecording();
@@ -421,6 +454,7 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
         bool $failed = false,
         ?bool $template = false,
         ?int $diskWriteBytes = null,
+        ?int $provisionedSizeBytes = null,
     ): PveInventoryCommit {
         $status = $failed
             ? InventoryScopeStatus::Failed
@@ -434,6 +468,7 @@ final class DbalPveCoreInventoryStoreTest extends TestCase
             'guest',
             $template,
             $diskWriteBytes,
+            $provisionedSizeBytes,
         )];
         $binding = new PveCoreInstallationBinding(
             $standalone ? PveCoreBindingKind::Standalone : PveCoreBindingKind::Cluster,
