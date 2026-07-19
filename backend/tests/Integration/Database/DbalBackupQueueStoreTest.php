@@ -27,7 +27,10 @@ use App\Application\Backup\Monitoring\ReconcileAmbiguousSubmission;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionEvidence;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionIdentity;
 use App\Application\Backup\Monitoring\AmbiguousSubmissionTaskSource;
+use App\Application\Backup\Monitoring\MonitorClaimedBackup;
 use App\Application\Backup\Monitoring\MonitorClaimedBackupCommand;
+use App\Application\Backup\Monitoring\MonitoringTickStatus;
+use App\Application\Backup\Monitoring\PveTaskStatusClassifier;
 use App\Application\Backup\Monitoring\StopAttemptDisposition;
 use App\Application\Proxmox\Pve\PveTaskLogEntry;
 use App\Application\Proxmox\Pve\PveTaskLogPage;
@@ -201,6 +204,93 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
 
             self::assertSame(SubmissionPreparationStatus::PreparedNow, $preparation->status);
             self::assertNotNull($preparation->submission);
+        } finally {
+            $worker->close();
+            $this->cleanupCommittedFixture();
+        }
+    }
+
+    public function testBackupWorkerRolePersistsStoppedOkAsSuccessThroughTheMonitoringPath(): void
+    {
+        $request = $this->store()->promote(new ShadowPromotion(
+            self::id('request-runtime-monitor-success'),
+            self::id('decision-a'),
+            $this->now,
+            '{"mode":"snapshot"}',
+            hash('sha256', '{"mode":"snapshot"}', true),
+        ));
+        $claim = $this->store()->claim(new ClaimNextBackupCommand(self::id('runtime-monitor-worker'), $this->now));
+        self::assertNotNull($claim);
+        $run = self::id('runtime-monitor-success-run');
+        $upid = $this->seedAcceptedRun($request, $run, $claim->claimToken, $claim->claimFence, $this->now);
+        $writeStateObservedAt = $this->now->modify('-17 seconds');
+        $this->connection()->insert('guest_write_states', [
+            'guest_id' => self::id('guest'),
+            'connection_id' => self::id('connection'),
+            'cluster_id' => self::id('cluster'),
+            'diskwrite_bytes' => '4242',
+            'observed_at' => self::format($writeStateObservedAt),
+            'authoritative_sync_run_id' => self::id('inventory-run'),
+        ]);
+        $this->connection()->commit();
+
+        $worker = $this->runtimeBackupWorker();
+        try {
+            $monitor = new MonitorClaimedBackup(
+                new DbalBackupMonitoringStore(
+                    $worker,
+                    new ControlledRetryPolicy(),
+                    new DbalBackupProblemRecorder(),
+                ),
+                new IntegratedStoppedOkBackupClient(),
+                new PveTaskStatusClassifier(),
+                new FrozenClock($this->now),
+                new IntegratedExecutionGate(),
+            );
+            $result = $monitor->execute(new MonitorClaimedBackupCommand(
+                $request,
+                $run,
+                $claim->claimToken,
+                $claim->claimFence,
+                $this->now,
+            ));
+
+            self::assertSame(MonitoringTickStatus::Succeeded, $result->status);
+            self::assertSame('succeeded', $worker->fetchOne(
+                'SELECT state FROM backup_requests WHERE id = :id',
+                ['id' => $request],
+            ));
+            self::assertSame('succeeded', $worker->fetchOne(
+                'SELECT state FROM backup_runs WHERE id = :id',
+                ['id' => $run],
+            ));
+            $baseline = $worker->fetchAssociative(<<<'SQL'
+SELECT last_success_at, last_success_size_bytes, baseline_bytes, baseline_observed_at
+FROM guest_backup_state
+WHERE guest_id = :guest AND policy_id = :policy AND target_id = :target
+SQL, [
+                'guest' => self::id('guest'),
+                'policy' => self::id('policy'),
+                'target' => self::id('target'),
+            ]);
+            self::assertIsArray($baseline);
+            self::assertSame('1000', $this->numeric($baseline['last_success_size_bytes'] ?? null));
+            self::assertSame('4242', $this->numeric($baseline['baseline_bytes'] ?? null));
+            self::assertSame(self::format($this->now), $baseline['last_success_at'] ?? null);
+            self::assertSame(self::format($writeStateObservedAt), $baseline['baseline_observed_at'] ?? null);
+            self::assertSame($upid->raw, $worker->fetchOne('SELECT upid FROM backup_runs WHERE id = :id', ['id' => $run]));
+            self::assertSame('0', $this->numeric($worker->fetchOne(
+                'SELECT slots_used FROM backup_node_slots WHERE node_id = :node',
+                ['node' => self::id('node')],
+            )));
+            self::assertSame('0', $this->numeric($worker->fetchOne(
+                'SELECT slots_used FROM backup_target_slots WHERE target_id = :target',
+                ['target' => self::id('target')],
+            )));
+            self::assertIsString($worker->fetchOne(
+                'SELECT released_at FROM backup_capacity_reservations WHERE request_id = :request',
+                ['request' => $request],
+            ));
         } finally {
             $worker->close();
             $this->cleanupCommittedFixture();
@@ -1892,6 +1982,7 @@ SQL, ['id' => $requestId]);
                 'backup_problem_states', 'backup_operation_commands', 'backup_runs',
                 'backup_capacity_reservations', 'backup_request_events', 'backup_requests',
                 'backup_target_slots', 'backup_node_slots',
+                'guest_backup_state', 'guest_write_states',
                 'executor_evidence_refresh_projection_stage', 'executor_evidence_refresh_subject_stage',
                 'executor_permission_evidence', 'executor_evidence_refresh_state',
                 'scheduler_decision_gates', 'scheduler_decisions', 'scheduler_evaluation_runs',
@@ -2068,6 +2159,39 @@ final class IntegratedJournalBackupClient implements PveBackupClient, PveBackupC
     public function taskPage(string $node, PveTaskQuery $query): PveTaskPage
     {
         throw new \LogicException('The integrated reconciliation source supplies bounded evidence directly.');
+    }
+}
+
+final class IntegratedStoppedOkBackupClient implements PveBackupClient, PveBackupClientProvider
+{
+    public function forRequest(string $requestId): PveBackupClient
+    {
+        return $this;
+    }
+
+    public function submit(PveBackupSubmission $submission): PveBackupSubmissionResult
+    {
+        throw new \LogicException('Not used by monitoring.');
+    }
+
+    public function taskStatus(PveUpid $upid): PveTaskStatus
+    {
+        return new PveTaskStatus($upid, PveTaskLifecycle::Stopped, 'OK', null, []);
+    }
+
+    public function taskLog(PveUpid $upid, PveTaskLogQuery $query): PveTaskLogPage
+    {
+        return new PveTaskLogPage($query, []);
+    }
+
+    public function stopTask(PveUpid $upid): PveTaskStopResult
+    {
+        throw new \LogicException('A successful monitoring path must not stop the task.');
+    }
+
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage
+    {
+        throw new \LogicException('Not used by monitoring.');
     }
 }
 

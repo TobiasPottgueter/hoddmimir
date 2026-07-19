@@ -10,7 +10,7 @@ use Doctrine\DBAL\Exception;
 
 final class BackupWorkerGuestStatePrivilegeTest extends DatabaseTestCase
 {
-    public function testBackupWorkerCanReadOnlyThePlacementColumnsNeededForRevalidation(): void
+    public function testBackupWorkerCanReadOnlyGuestStateColumnsNeededForRevalidationAndSuccessBaseline(): void
     {
         $backupWorker = $this->backupWorkerConnection();
         try {
@@ -19,11 +19,18 @@ final class BackupWorkerGuestStatePrivilegeTest extends DatabaseTestCase
                 FROM guest_placements
                 LIMIT 0
                 SQL));
+            self::assertSame([], $backupWorker->fetchAllAssociative(<<<'SQL'
+                SELECT guest_id, diskwrite_bytes, observed_at
+                FROM guest_write_states
+                LIMIT 0
+                SQL));
 
             foreach ([
                 'SELECT sync_run_id FROM guest_placements LIMIT 0',
                 'SELECT * FROM guest_placements LIMIT 0',
-                'SELECT diskwrite_bytes, observed_at, authoritative_sync_run_id FROM guest_write_states LIMIT 0',
+                'SELECT authoritative_sync_run_id FROM guest_write_states LIMIT 0',
+                'SELECT connection_id, cluster_id FROM guest_write_states LIMIT 0',
+                'SELECT * FROM guest_write_states LIMIT 0',
             ] as $sql) {
                 $this->assertDenied(static fn () => $backupWorker->fetchAllAssociative($sql));
             }
