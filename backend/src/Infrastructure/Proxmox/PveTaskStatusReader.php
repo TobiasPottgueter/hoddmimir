@@ -12,6 +12,7 @@ use App\Application\Proxmox\Pve\PveTaskLifecycle;
 use App\Application\Proxmox\Pve\PveTaskStatus;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Application\Proxmox\Pve\PveVersion;
+use App\Infrastructure\Validation\AsciiPatternValidator;
 use InvalidArgumentException;
 
 final readonly class PveTaskStatusReader
@@ -153,7 +154,8 @@ final readonly class PveTaskStatusReader
     /** @param list<PveBackupInventoryIssue> $issues */
     private function tokenId(mixed $value, string $endpoint, string $node, array &$issues): ?string
     {
-        if (!is_string($value) || 1 !== preg_match('/\A[A-Za-z][A-Za-z0-9._-]{1,63}\z/D', $value)) {
+        if (!is_string($value)
+            || !AsciiPatternValidator::matches('/\A[A-Za-z][A-Za-z0-9._-]{1,63}\z/D', $value)) {
             $issues[] = $this->issue(
                 PveBackupInventoryIssueCode::InvalidField,
                 $endpoint,

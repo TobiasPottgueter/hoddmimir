@@ -517,6 +517,7 @@ final class PveBackupTaskReadersTest extends TestCase
         yield 'mismatched tokenid' => ['present', 'user@pve', 'other-token', false];
         yield 'empty tokenid' => ['present', 'user@pve', '', true];
         yield 'invalid tokenid characters' => ['present', 'user@pve', 'bad token', true];
+        yield 'overlong tokenid' => ['present', 'user@pve', 't'.str_repeat('o', 64), true];
         yield 'non-string tokenid' => ['present', 'user@pve', 1, true];
         yield 'invalid token owner' => ['present', 'not-a-principal', 'hoddmimir', true];
     }
