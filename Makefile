@@ -11,6 +11,7 @@ ANSIBLE_LAB_INVENTORY := inventories/lab/hosts.yml
 ANSIBLE_VAULT_PASSWORD_FILE ?= $(CURDIR)/.secrets/production/ansible_vault_password
 ANSIBLE_LAB_VAULT_PASSWORD_FILE ?= $(CURDIR)/.secrets/lab/ansible_vault_password
 ANSIBLE_LOCAL_VAULT_ARGS = $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),)
+ANSIBLE_LAB_LOCAL_VAULT_ARGS = $(if $(wildcard $(ANSIBLE_LAB_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_LAB_VAULT_PASSWORD_FILE),)
 ANSIBLE_VAULT_ARGS ?= $(if $(wildcard $(ANSIBLE_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_VAULT_PASSWORD_FILE),--ask-vault-pass)
 ANSIBLE_LAB_VAULT_ARGS ?= $(if $(wildcard $(ANSIBLE_LAB_VAULT_PASSWORD_FILE)),--vault-password-file $(ANSIBLE_LAB_VAULT_PASSWORD_FILE),--ask-vault-pass)
 LAB_BACKUP_WORKER_REPLICAS ?= 2
@@ -159,11 +160,11 @@ syntax: ## Check all Ansible playbooks without remote access
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/bootstrap.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/deploy.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_EXAMPLE_INVENTORY) playbooks/verify.yml --syntax-check $(ANSIBLE_LOCAL_VAULT_ARGS)
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) --list >/dev/null
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-deploy.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-verify.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-down.yml --syntax-check
-	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-scale.yml --syntax-check
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-inventory --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) --list $(ANSIBLE_LAB_LOCAL_VAULT_ARGS) >/dev/null
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-deploy.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-verify.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-down.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-scale.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
 
 deployment-test: production-secrets-test lab-secrets-test ## Run isolated deployment contract and rollback tests
 	cd $(ANSIBLE_DIRECTORY) && python3 -m unittest discover -s tests -p 'test_*.py' -v

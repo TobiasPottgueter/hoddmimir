@@ -46,6 +46,20 @@ class LabDeploymentContractTest(unittest.TestCase):
         self.assertIn("ANSIBLE_LAB_VAULT_ARGS", makefile)
         self.assertIn("LAB_BACKUP_WORKER_REPLICAS ?= 2", makefile)
 
+    def test_example_lab_syntax_uses_the_optional_local_lab_vault(self) -> None:
+        makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+        syntax_target = makefile.split("syntax:", 1)[1].split("deployment-test:", 1)[0]
+
+        self.assertIn("ANSIBLE_LAB_LOCAL_VAULT_ARGS =", makefile)
+        example_commands = [
+            line
+            for line in syntax_target.splitlines()
+            if "$(ANSIBLE_LAB_EXAMPLE_INVENTORY)" in line
+        ]
+        self.assertEqual(5, len(example_commands))
+        for command in example_commands:
+            self.assertIn("$(ANSIBLE_LAB_LOCAL_VAULT_ARGS)", command)
+
 
 if __name__ == "__main__":
     unittest.main()
