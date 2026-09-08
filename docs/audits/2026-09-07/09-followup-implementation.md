@@ -1,8 +1,8 @@
 # Anschlussarbeiten nach der Maintenance-Abnahme
 
 Arbeitsstand: 8. September 2026. Dieser Bericht ergänzt die historischen
-Auditbefunde. Die reale DEV-Abnahme ist abgeschlossen; die abschließenden
-Veröffentlichungsgates und Registry-Pins stehen noch aus.
+Auditbefunde. Reale DEV-Abnahme, vollständige CI, Kandidatenveröffentlichung
+und Deployment der Registry-Digests sind abgeschlossen.
 
 ## Queue-Historie (F10)
 
@@ -129,13 +129,16 @@ vor dem POST blockiert, ohne Lauf und ohne Startrequest.
 
 299 Frontend-Tests und 19 Browser-Szenarien bestanden für den unveränderten
 Frontendstand. Der aktuelle Scan aller drei amd64-Images enthält keine
-HIGH-/CRITICAL-Befunde. Die abschließenden Veröffentlichungsgates müssen die
-zusätzliche SQL-Korrektur der Submission-Tokenidentität enthalten.
+HIGH-/CRITICAL-Befunde. Die vollständige Veröffentlichungs-CI enthält die
+zusätzlichen SQL-Korrekturen der Submission-Tokenidentität und Task-Eigentümerschaft
+und ist bestanden; die abschließenden Werte stehen in Bericht 10.
 
-Auch die kombinierte Recovery-Prüfung ohne Tasktreffer mit fremdem Backup,
-Workerneustart und zwei parallelen Workern ist bestanden. Der unbekannte
+Auch die Recovery-Prüfung ohne Tasktreffer mit fremdem Backup und zwei
+parallelen Workern ist bestanden. Ein separater Test belegt den tatsächlichen
+Workerneustart anhand geänderter Prozessstartzeiten und fortgeschrittener
+Fencing-Werte bei weiterhin unerreichbarer Tasksicht. Der unbekannte
 Vorgänger bleibt erhalten; genau ein verknüpfter Folgeversuch wurde erfolgreich.
 Die direkten Sperren und die bereinigten Nachweise stehen in Bericht 10.
-Noch offen sind die abschließenden Veröffentlichungsgates und das Deployment
-der endgültigen Registry-Digests. Der einmalige Übergang älterer
+Die vollständigen Veröffentlichungsgates und das Deployment der endgültigen
+Registry-Digests sind abgeschlossen. Der einmalige Übergang älterer
 V2-Installationen bleibt ausschließlich manuell.

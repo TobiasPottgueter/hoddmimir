@@ -1,7 +1,7 @@
 # ADR 0005: Automatische Wiederfreigabe nach ungeklärtem Backupstart
 
 Datum: 7. September 2026
-Status: vom Benutzer beschlossen und implementiert; reale DEV-Abnahme am 8. September 2026 bestanden. Abschließende Veröffentlichungsgates offen.
+Status: vom Benutzer beschlossen und implementiert; reale DEV-Abnahme am 8. September 2026 bestanden. Abschließende Veröffentlichungsgates bestanden; Kandidat auf bestehender DEV installiert.
 
 ## Entscheidung und Änderung des bisherigen Vertrags
 
@@ -94,9 +94,9 @@ Slot gibt er den Claim samt Reservierung frei; ein späterer Claim kann dieselbe
 Reservierung wieder aktivieren. Die Wiederfreigabe erzeugt genau einen
 verknüpften Folgeauftrag und erhält den unbekannten ursprünglichen Lauf.
 Die reale DEV-Abnahme ist im [Bericht 10](../audits/2026-09-07/10-existing-dev-upgrade-and-backup-acceptance.md)
-mit ihren Grenzen dokumentiert; die abschließenden Veröffentlichungsgates stehen
-noch aus. Die Taskzuordnung prüft zusätzlich unter der Gastsperre, ob ein
-Task bereits einem anderen Lauf gehört. Ein solcher Task darf nicht erneut
+mit ihren Grenzen dokumentiert; die abschließenden Veröffentlichungsgates
+sind bestanden und der Kandidat ist auf derselben DEV installiert. Die
+Taskzuordnung prüft zusätzlich unter der Gastsperre, ob ein Task bereits einem anderen Lauf gehört. Ein solcher Task darf nicht erneut
 übernommen werden.
 
 Erforderliche Tests:

@@ -2,7 +2,7 @@
 
 ## Vertragsnachtrag vom 7. September 2026
 
-Neue verbindliche Zielverträge: [automatische Wiederfreigabe](adr/0005-automatic-backup-recovery.md) und [Wartungsupgrade mit DB-Restore](adr/0006-maintenance-upgrade-database-restore.md). Beide sind implementiert. Die Wartungs-/Upgrade-/Restore-Fälle wurden am 8. September gegen echte Dev-Systeme [erneut abgenommen](audits/2026-09-07/08-dev-maintenance-acceptance.md); die automatische Wiederfreigabe samt Backupmatrix, Fehler/Retry/Abbruch und fremder Taskbelegung wurde auf der bestehenden DEV [ebenfalls abgenommen](audits/2026-09-07/10-existing-dev-upgrade-and-backup-acceptance.md). Abschließende Veröffentlichungsgates und Registry-Pins stehen noch aus. Die nachstehenden historischen Kandidatennachweise bleiben unverändert; sie belegen die neuen Verträge nicht.
+Neue verbindliche Zielverträge: [automatische Wiederfreigabe](adr/0005-automatic-backup-recovery.md) und [Wartungsupgrade mit DB-Restore](adr/0006-maintenance-upgrade-database-restore.md). Beide sind implementiert. Die Wartungs-/Upgrade-/Restore-Fälle wurden am 8. September gegen echte Dev-Systeme [erneut abgenommen](audits/2026-09-07/08-dev-maintenance-acceptance.md); die automatische Wiederfreigabe samt Backupmatrix, Fehler/Retry/Abbruch und fremder Taskbelegung wurde auf der bestehenden DEV [ebenfalls abgenommen](audits/2026-09-07/10-existing-dev-upgrade-and-backup-acceptance.md). Die vollständige CI, Kandidatenveröffentlichung und das Deployment der Registry-Digests auf die bestehende DEV sind abgeschlossen. Die nachstehenden historischen Kandidatennachweise bleiben unverändert; sie belegen die neuen Verträge nicht.
 
 
 Stand: 19. Juli 2026

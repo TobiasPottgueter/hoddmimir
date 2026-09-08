@@ -1,7 +1,9 @@
 # Bestehende DEV-Installation: Übergang und Backup-Abnahme
 
 Stand: 8. September 2026. Der einmalige Übergang der bestehenden DEV-Installation
-ist abgeschlossen; die Backup-/Recovery-Abnahme dieses Kandidaten läuft noch.
+und die reale Backup-/Recovery-Abnahme sind abgeschlossen. Kandidat
+`2.0.0-rc.20260908.1` ist nach vollständiger CI veröffentlicht und auf derselben
+Installation mit geprüften Registry-Digests ausgerollt.
 
 ## Verbindliches Ziel
 
@@ -9,8 +11,10 @@ Ziel ist die vorhandene Installation `/opt/hoddmimir`, Compose-Projekt
 `hoddmimir`, hinter `https://hoddmimir.netzkultur.cloud`. Es gibt keinen
 produktiven Nutzbetrieb. Der technische Ansible-Profilname ändert daran nichts.
 Die zwischenzeitlich zusätzlich aufgebaute Instanz `hoddmimir-dev-v2` war eine
-unnötige Abweichung vom Auftrag; ihre Anwendungscontainer sind gestoppt.
-Sie wird nicht zum neuen Deployment-Ziel erklärt.
+unnötige Abweichung vom Auftrag. Nach Prüfung auf fehlende Aufträge, Runs und
+aktive Policies wurden Datenbank und Installation geschützt auf zwei Hosts
+gesichert und ausschließlich ihre vier Container, ihr Netzwerk und ihr Volume
+entfernt. Die vorhandene separate Lab-Installation blieb unberührt.
 
 Die vorhandene Datenbank enthält vor dem Übergang einen Benutzer, aber keine
 Verbindungen, Ziele, Policies, Gäste, Requests, Runs oder Benachrichtigungen.
@@ -107,9 +111,10 @@ Zeilen und 7.505/7.505 Branches, Proxmox-Infrastruktur 3.157/3.157 Zeilen und
 Die Deployment-Suite besteht mit 125 Tests und zwei optionalen Übersprüngen;
 deren reale Container-/Datenbanknachweise sind separat dokumentiert.
 
-Noch offen sind die abschließenden Veröffentlichungsgates für die unten
-beschriebenen Recovery-Korrekturen, Kandidatenveröffentlichung und endgültige
-Registry-Pins. Die reale DEV-Abnahme ist einschließlich fremder Tasks bestanden.
+Die nachfolgenden Recovery-Korrekturen wurden anschließend in einer frischen
+vollständigen Veröffentlichungs-CI geprüft. Die finale Veröffentlichung und das
+Deployment sind am Ende dieses Berichts dokumentiert. Die reale DEV-Abnahme ist
+einschließlich fremder Tasks bestanden.
 
 ## Reguläre Backups und zusätzliche Betriebsbefunde
 
@@ -204,10 +209,12 @@ verwendet wieder das reguläre Wartungsprotokoll.
 Der Test-Proxy verwarf genau einen Startrequest vor jeder Upstream-Verbindung.
 Anschließend wurde ausschließlich der Proxyzugang der Anwendung vorübergehend
 unterbrochen. Der Auftrag blieb in Klärung; zwei neue manuelle Request-IDs
-wurden mit `active_request_exists` abgelehnt. Nach Neustart und Skalierung auf
-zwei Worker wurde weitere 130 Sekunden gewartet, über das Ende der alten Lease
-hinaus. Es entstand weder ein zusätzlicher Proxy-POST noch ein Folgeauftrag
-auf Grundlage der nicht erreichbaren Tasksicht.
+wurden mit `active_request_exists` abgelehnt. Nach Skalierung auf zwei Worker
+wurde weitere 130 Sekunden gewartet. Es entstand weder ein zusätzlicher
+Proxy-POST noch ein Folgeauftrag auf Grundlage der nicht erreichbaren Tasksicht.
+Die zusätzliche Fencing-Prüfung zeigte, dass Docker bei dieser Skalierung den
+bisherigen Prozess weiterlaufen ließ; der tatsächliche Neustart wurde deshalb
+anschließend gesondert abgenommen, wie unten beschrieben.
 
 Ein anschließend durch den Administrator gestartetes QEMU-Backup belegte auf
 demselben Node den Slot. Nach Wiederherstellung des Zugangs konnte die vollständige
@@ -261,5 +268,110 @@ die [korrigierte 4.x-Version](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)
 Der OpenAPI-Generator selbst bleibt unverändert. Der aktualisierte Lockfile
 meldet keine npm-Auditbefunde; die 299 Frontendtests einschließlich Coverage,
 API-Client-Abgleich, Lint und Formatprüfung bestehen erneut.
-Die Veröffentlichung erfolgt erst nach einem neuen vollständigen CI-Lauf des
-korrigierten Commits. Es wurden keine Images aus dem blockierten Lauf freigegeben.
+Die Veröffentlichung erfolgte nach einem neuen erfolgreichen vollständigen
+CI-Lauf des korrigierten Commits. Es wurden keine Images aus dem blockierten Lauf freigegeben.
+
+## Gesonderter Nachweis eines tatsächlichen Worker-Neustarts
+
+Ein weiterer begrenzter Drop vor der Upstream-Verbindung erzeugte einen
+ungeklärten Start. Während der Proxyzugang gesperrt blieb, wurden beide
+Backup-Worker ausdrücklich neu gestartet. Unabhängig abgefragte Container-
+Startzeitpunkte änderten sich bei beiden Prozessen. Nach Ablauf der alten Lease
+stieg die Claim-Fence von 1 auf 2; Request und Lauf trugen nachweislich dieselbe
+neue Fence. Bis dahin blieb der Auftrag ungeklärt und der POST-Zähler unverändert.
+Ein zusätzlicher manueller Request wurde weiterhin mit `active_request_exists`
+abgelehnt. Nach Wiederherstellung des Zugangs entstand genau ein erfolgreicher
+Folgeversuch; der erste Lauf bleibt unbekannt. Der gesonderte Nachweis steht in
+`actual-restart-fenced.json` und ergänzt die bereits bestandene Parallel- und
+Fremdbelegungsprüfung. Anschließend wurden erneut alle ursprünglichen Endpunkte,
+ein Worker, das Fünf-Sekunden-Intervall und deaktivierte Backupstarts hergestellt.
+
+## Abschließende CI und Kandidatenveröffentlichung
+
+Der vollständige [Veröffentlichungslauf 34249005285](https://github.com/TobiasPottgueter/hoddmimir/actions/runs/34249005285)
+für `a5b8ad94e88a36e4aa32fcbfc1a3cbd98457ff26` ist erfolgreich. Er veröffentlicht
+`2.0.0-rc.20260908.1` für Worker, Web und MariaDB ausschließlich als
+`linux/amd64`. Die drei Image-Nachweise wurden anschließend ohne Registry-
+Zugangsdaten erneut abgerufen und exakt gegen `published-images.json` geprüft.
+
+Die frischen Gates enthalten alle beschriebenen Recovery-Korrekturen:
+
+- Backend-Container: 2.793 Tests / 12.919 Assertions; MariaDB-Coverage-Suite:
+  500 Tests / 8.307 Assertions.
+- Domain/Application: 8.177/8.177 Zeilen und 7.505/7.505 Branches;
+  Proxmox-Infrastruktur: 3.157/3.157 Zeilen und 2.501/2.501 Branches.
+  Global: 95,44 % Zeilen und 91,86 % Branches.
+- Kritischer Mutation Score: 90,61 % (4.253/4.694); global: 80,87 %
+  (16.095/19.902).
+- 299 Frontendtests, 19 Playwright-Szenarien, Ansible- und Restoreprüfungen,
+  Secret- und Supply-Chain-Gates sowie der vollständige Containerstart bestanden.
+
+Zwei Artefaktübertragungen scheiterten zunächst mit HTTP 403 vom Intermediär:
+der Upload eines bestandenen Mutationsshards und der Download der Container-
+SBOMs. Die betroffenen Jobs und abhängigen Gates wurden gezielt wiederholt;
+Anwendungscode und Anforderungen wurden dafür nicht geändert. Die erfolgreichen
+Ergebnisse sind unter `existing-dev/ci-final/` und `existing-dev/publication/`
+archiviert. Die vier im Coverage-Kernlauf aufgrund fehlender `/run/secrets`
+übersprungenen CLI-Tests wurden im vollständigen Backend-Containerlauf ausgeführt.
+
+## Separater Wechsel des Datenbank-Images
+
+Der reguläre Wartungspfad lehnte den Wechsel vom bisherigen offiziellen
+MariaDB-Image zum veröffentlichten Hoddmímir-MariaDB-Image vor Änderungen ab.
+Seine Grenze für Datenbank-Imagewechsel wurde beibehalten. Ein separates
+Operatorverfahren führte den Wechsel mit eigener Deploymentsperre durch:
+
+1. Beide Images verwenden MariaDB 11.4.12; die Serverdatei wurde zusätzlich
+   anhand ihres SHA-256 als bytegleich bestätigt.
+2. Nach frischer Remote-Ruheprüfung wurden die schreibenden Anwendungen
+   angehalten und die Wartung gesperrt. Der neue Datenbank-/Grantdump sowie
+   Konfiguration und Schlüssel wurden geschützt auf zwei Hosts gesichert.
+3. Der Dump wurde mit dem alten und dem neuen Image in getrennten temporären
+   MariaDB-Instanzen wiederhergestellt. Beide erneuten Dumps waren bytegleich;
+   vier Datenbankrollen und beide Worker bestanden die funktionale Prüfung.
+4. Ausschließlich die MariaDB-Image-Referenz wurde geändert. Compose-Projekt,
+   Datenvolume, Konfiguration und Secrets blieben erhalten. Auch der Dump der
+   installierten Datenbank nach dem Wechsel stimmte exakt mit der Sicherung
+   überein. Funktionsprüfungen und HTTP-Wartungsgate bestanden vor Freigabe.
+
+Die bereinigten Nachweise stehen unter
+`existing-dev/publication/database-image-maintenance/`. Private Sicherungen
+bleiben außerhalb von Git. Die lokale Ansible-Umgebung wurde für den vorhandenen
+Alpine-Host um `community.general` 13.4.0 ergänzt; fehlende Voraussetzungen hatten
+die Vorprüfungen zuvor ohne Anwendungsänderung beendet.
+
+## Endgültiges Deployment und unabhängige Nachprüfung
+
+Das reguläre Protokoll-1-Upgrade installierte anschließend die veröffentlichten
+Worker- und Webimages auf `/opt/hoddmimir`. Die Transaktion
+`659ac4066b78460184c4326160993a35` ist abgeschlossen; ihr geprüfter Rückkehrstand
+liegt zusätzlich geschützt auf dem zweiten Host. Alle drei laufenden Images
+tragen die OCI-Revision `a5b8ad94e88a36e4aa32fcbfc1a3cbd98457ff26`.
+
+| Image | Installierter AMD64-Manifest-Digest |
+| --- | --- |
+| Worker | `sha256:0d0e6e66c2c66758456153fb5ec0e9f30f1017ee13857fcbf49294327f8f46d9` |
+| Web | `sha256:c5046c59396931b6ac050ef4754431d113a90704cf85ad48ecb9ab3dfffd05a2` |
+| MariaDB | `sha256:d6bb5c1c0755899fd77cc04b232e4d49ea58b46a48e5e9eb8998dff24f1699df` |
+
+Die separate Laufzeitprüfung bestätigt die Digests, Architektur und Git-Revision,
+vier gesunde Container, HTTPS über IPv4, offene Wartung ohne aktive Transaktion
+und den laufenden NTP-Dienst. Anschließend wurden alle vier Container tatsächlich
+neu gestartet; ihre geänderten Startzeiten sind aufgezeichnet. Auch danach
+bestanden Image-/Healthprüfung und Datenerhaltungsprüfung: fünf Verbindungen,
+sechs Ziele, sechs Policies, 43 Aufträge, 23 Läufe, 24 Benachrichtigungen und der
+vorhandene Benutzer sind erhalten. Die IDs des Ausgangsbestands sowie alle
+Secret- und Keyringbytes stimmen mit der geschützten Vergleichsbasis überein.
+
+Der zweite reguläre Ansible-Deploymentlauf blieb vollständig unverändert:
+`ok=42 changed=0 failed=0`. Nach Abschluss wurden die eigene temporäre Registry
+und die lokalen Test-/Buildcontainer entfernt. Die frühere zusätzliche DEV
+ist bereits gesichert entfernt; die vorhandene ältere Lab-Installation wurde
+nicht verändert.
+
+Endzustand: gleiche HTTPS-Adresse, ein Backupworker mit fünf Sekunden
+Pollintervall, **Backupausführung deaktiviert**, Matrix aktiviert. Die drei
+ursprünglichen PVE-7-Endpunkte sind wiederhergestellt; Fault-Proxy und zugehörige
+Firewallregel sind entfernt beziehungsweise gestoppt. Die Veröffentlichungs-
+und Deploymentnachweise schließen die beauftragten Anschlussarbeiten ab; sie
+ersetzen keine weitergehende Produktionsfreigabe oder einen Legacy-Importer.

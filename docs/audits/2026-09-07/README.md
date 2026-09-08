@@ -12,8 +12,8 @@ Maintenance-Protokolls ist im [Bericht 08](08-dev-maintenance-acceptance.md)
 abgeschlossen. Die anschließenden Funktionskorrekturen und Erweiterungen,
 einschließlich F03 und F07–F11, sind im [Bericht 09](09-followup-implementation.md)
 dokumentiert. Die Backup-Recovery-Abnahme einschließlich fremder Taskbelegung
-ist auf der bestehenden DEV bestanden. Abschließende Veröffentlichungsgates
-und Registry-Pins stehen noch aus. Die gesamte vorhandene Estate ist
+ist auf der bestehenden DEV bestanden. Die vollständige CI, Veröffentlichung
+und das Deployment des Kandidaten `2.0.0-rc.20260908.1` sind abgeschlossen. Die gesamte vorhandene Estate ist
 DEV; die einmalige Umstellung älterer V2-Installationen bleibt manuell.
 Der Übergang der bestehenden Installation hinter `hoddmimir.netzkultur.cloud`
 und die anschließende Backup-Abnahme werden in
