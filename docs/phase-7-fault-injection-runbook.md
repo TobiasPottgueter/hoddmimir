@@ -1,5 +1,29 @@
 # Phase-7: deterministische PVE-Fehlerinjektion
 
+## Vertragsnachtrag vom 7. September 2026
+
+Die bisherigen Ein-POST-Fälle bleiben gültig, solange ein Task gefunden wird oder Wiederfreigabebedingungen fehlen. Zusätzlich ist [ADR 0005](adr/0005-automatic-backup-recovery.md) mit vollständiger frischer Taskklärung, allgemeinem Remote-Task-Gate einschließlich manueller/externer Backups und genau einem verknüpften neuen Versuch ohne Sonderwartefrist abzunehmen. Diese Erweiterung ist implementiert; ihre erneute Live-Abnahme steht aus.
+
+### Ergänzung vom 8. September 2026: Start ohne Remote-Task
+
+Für diesen zusätzlichen Fall unterstützt der Harness `--fault-timing before-upstream`
+mit dem gesonderten ACK `DROP_VZDUMP_BEFORE_UPSTREAM`. Ausschließlich die exakte
+`post-vzdump`-Route ist zulässig; Response-Holds sind dabei gesperrt. Nach Empfang
+des vollständigen Requestbodys wird die Clientverbindung vor jeder Upstream-
+Verbindung beendet. Keine Credentials oder Bodies werden persistiert.
+Mit `--fault-count 1` ist genau der erste passende POST betroffen; Reads und
+spätere Requests werden regulär mit TLS-Verifikation weitergeleitet.
+
+Erwarteter erster Messpunkt: `received=1`, `faultsInjected=1`,
+`upstreamResponses=0`, `responsesForwarded=0`. Hoddmímir muss den unbekannten
+Versuch persistieren und vor einem verknüpften Folgeversuch vollständige frische
+Taskklärung und das allgemeine Start-Gate durchlaufen. Nach erfolgreicher
+Wiederfreigabe sind zwei empfangene POSTs, aber nur eine Upstream-Antwort
+erwartet. Dies ist ein Test zweier Anwendungsversuche, kein HTTP-Retry.
+Die folgenden historischen Abschnitte beschreiben weiterhin den unveränderten
+Standardmodus `after-upstream`.
+
+
 Stand: 15. Juli 2026
 
 Status: **Harness und lokaler Contract sind vorbereitet; noch kein Live-Fall

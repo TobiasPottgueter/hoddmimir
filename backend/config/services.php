@@ -387,6 +387,12 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(ExecutorEvidenceRefresh::class, RefreshExecutorPermissionEvidence::class);
     $services->set(ControlledRetryPolicy::class);
     $services->set(PolicyResolver::class);
+    $container->parameters()->set('maintenance_directory', '');
+    $services->alias(\App\Application\Maintenance\MaintenanceQuiescenceCatalog::class, \App\Infrastructure\Maintenance\DbalMaintenanceQuiescenceCatalog::class);
+    $services->alias(\App\Application\Maintenance\MaintenanceRemoteTasks::class, \App\Infrastructure\Maintenance\NativeMaintenanceRemoteTasks::class);
+    $services->set(\App\Infrastructure\Maintenance\FileMaintenanceAccess::class)
+        ->arg('$directory', '%env(string:default:maintenance_directory:HODDMIMIR_MAINTENANCE_DIRECTORY)%');
+    $services->alias(\App\Application\Maintenance\MaintenanceAccess::class, \App\Infrastructure\Maintenance\FileMaintenanceAccess::class);
     $services->set(EnvironmentBackupExecutionGate::class)->arg('$executionEnabled', '%env(bool:BACKUP_EXECUTION_ENABLED)%');
     $services->alias(BackupExecutionGate::class, EnvironmentBackupExecutionGate::class);
     $services->set(SystemBackupRunIdentifierSource::class);
@@ -403,6 +409,7 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(PveBackupClientFactory::class, PveNativeBackupClientFactory::class);
     $services->set(DbalPveBackupClientProvider::class);
     $services->alias(PveBackupClientProvider::class, DbalPveBackupClientProvider::class);
+    $services->set(\App\Application\Backup\Execution\CheckBackupNodeTasks::class);
     $services->set(DbalBackupSubmissionStore::class)->arg('$freshnessSeconds', '%env(int:EVIDENCE_FRESHNESS_SECONDS)%');
     $services->alias(BackupSubmissionTransaction::class, DbalBackupSubmissionStore::class);
     $services->set(DbalBackupMonitoringStore::class)
@@ -543,7 +550,14 @@ return static function (ContainerConfigurator $container): void {
         ]);
     $services->alias(SelectedEndpointMonitoring::class, RunSelectedEndpointMonitoring::class);
     $services->set(ExecuteClaimedInventoryCycle::class);
-    $services->alias(RunCollectorCycle::class, ExecuteClaimedInventoryCycle::class);
+    $services->set(\App\Infrastructure\Persistence\MariaDb\DbalPbsTaskReadModel::class);
+    $services->alias(\App\Application\Monitoring\PbsTaskReadModel::class, \App\Infrastructure\Persistence\MariaDb\DbalPbsTaskReadModel::class);
+    $services->set(\App\Infrastructure\Persistence\MariaDb\DbalQueueMetricStore::class);
+    $services->alias(\App\Application\Backup\Metrics\QueueMetricStore::class, \App\Infrastructure\Persistence\MariaDb\DbalQueueMetricStore::class);
+    $services->set(\App\Application\Backup\Metrics\SampleQueueMetrics::class);
+    $services->set(\App\Application\Backup\Metrics\QueueMetricsCollectorCycle::class)
+        ->arg('$inner', service(ExecuteClaimedInventoryCycle::class));
+    $services->alias(RunCollectorCycle::class, \App\Application\Backup\Metrics\QueueMetricsCollectorCycle::class);
     $services
         ->set(CollectorRuntimeLoop::class)
         ->arg('$gridWidthSeconds', '%env(int:COLLECTOR_GRID_WIDTH_SECONDS)%');

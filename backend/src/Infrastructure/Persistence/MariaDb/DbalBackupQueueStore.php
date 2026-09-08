@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Persistence\MariaDb;
 
+use App\Domain\Scheduler\BackupStartRules;
 use App\Application\Backup\Queue\BackupQueueStore;
 use App\Application\Backup\Queue\ClaimedBackupRequest;
 use App\Application\Backup\Queue\ClaimNextBackupCommand;
@@ -66,6 +67,9 @@ SQL, ['id' => $promotion->shadowDecisionId], ['id' => ParameterType::BINARY]);
                 || !hash_equals($promotion->resolvedPolicyHash, $row['policy_snapshot_hash'])
             ) {
                 throw new RuntimeException('Only a matching eligible shadow winner can be promoted.');
+            }
+            if (!$this->hasFailureNotificationRecipients($promotion->resolvedPolicyJson)) {
+                throw new RuntimeException('An automatic backup request requires PVE failure notification recipients.');
             }
 
             $existing = $this->existingRequestId($db, $row, $promotion->scheduledAt);
@@ -209,7 +213,7 @@ SQL, ['now' => $this->format($command->now), 'owner' => $command->workerId, 'all
             if (1 !== (int) $nodeAffected || 1 !== (int) $targetAffected) {
                 throw new RuntimeException('The locked backup slot reservation changed unexpectedly.');
             }
-            $db->insert('backup_capacity_reservations', [
+            $reservation = [
                 'request_id' => $row['id'],
                 'connection_id' => $row['connection_id'],
                 'cluster_id' => $row['cluster_id'],
@@ -218,7 +222,19 @@ SQL, ['now' => $this->format($command->now), 'owner' => $command->workerId, 'all
                 'reserved_bytes' => $expected->value,
                 'capacity_observed_at' => $row['capacity_observed_at'],
                 'created_at' => $now,
-            ]);
+                'released_at' => null,
+            ];
+            $existingReservation = $db->fetchAssociative(
+                'SELECT released_at FROM backup_capacity_reservations WHERE request_id=:id FOR UPDATE',
+                ['id' => $row['id']],
+            );
+            if (false === $existingReservation) {
+                $db->insert('backup_capacity_reservations', $reservation);
+            } elseif (null !== $existingReservation['released_at']) {
+                $db->update('backup_capacity_reservations', $reservation, ['request_id' => $row['id']]);
+            } else {
+                throw new RuntimeException('A new claim cannot replace an active capacity reservation.');
+            }
 
             return $this->persistClaim($db, $row, $command, 'leased', 'claimed');
         });
@@ -340,6 +356,7 @@ SELECT connection.enabled AS connection_enabled,
        node.inventory_state AS node_state,
        policy.revision AS current_policy_revision,
        policy.status AS policy_status,
+       policy.failure_notification_recipients_json AS current_failure_notification_recipients_json,
        target.revision AS current_target_revision,
        target.status AS target_status,
        target.minimum_free_bytes,
@@ -435,34 +452,40 @@ SQL, ['id' => $row['id']]);
         if (false === $evidence) {
             return 'revalidation_evidence_missing';
         }
-        if (1 !== $this->nullableInteger($evidence['connection_enabled'] ?? null)
-            || 'active' !== ($evidence['cluster_state'] ?? null)
-            || 'active' !== ($evidence['guest_state'] ?? null)
-            || 0 !== $this->nullableInteger($evidence['is_template'] ?? null)
-            || 'online' !== ($evidence['node_api_status'] ?? null)
-            || 'active' !== ($evidence['node_state'] ?? null)
-            || 'enabled' !== ($evidence['policy_status'] ?? null)
-            || 'enabled' !== ($evidence['target_status'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['supports_backup'] ?? null)
-            || 0 !== $this->nullableInteger($evidence['storage_disabled'] ?? null)
-            || 'active' !== ($evidence['storage_state'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['node_storage_enabled'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['node_storage_active'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['executor_authorized'] ?? null)
-            || !is_string($evidence['allowed_node_id'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['selection_included'] ?? null)
-            || 0 !== $this->nullableInteger($evidence['selection_excluded'] ?? null)
-            || 1 !== $this->nullableInteger($evidence['active_request_absent'] ?? null)
-            || null === $this->decimal($evidence['minimum_free_bytes'] ?? null)
-            || null === $this->decimal($evidence['available_bytes'] ?? null)
+        if (!$this->hasFailureNotificationRecipients($request['resolved_policy_json'] ?? null)
+            || !$this->hasFailureNotificationRecipientListJson($evidence['current_failure_notification_recipients_json'] ?? null)
         ) {
+            return 'failure_notification_recipients_unconfigured';
+        }
+        if (!BackupStartRules::resourcesEligible(new \App\Domain\Scheduler\BackupResourceEvidence(
+            1 === $this->nullableInteger($evidence['connection_enabled'] ?? null),
+            'active' === ($evidence['cluster_state'] ?? null),
+            'active' === ($evidence['guest_state'] ?? null),
+            null === ($evidence['is_template'] ?? null) ? null : 0 !== $this->nullableInteger($evidence['is_template']),
+            'active' === ($evidence['node_state'] ?? null),
+            'online' === ($evidence['node_api_status'] ?? null),
+            'enabled' === ($evidence['policy_status'] ?? null),
+            'enabled' === ($evidence['target_status'] ?? null),
+            1 === $this->nullableInteger($evidence['supports_backup'] ?? null),
+            null === ($evidence['storage_disabled'] ?? null) ? null : 0 !== $this->nullableInteger($evidence['storage_disabled']),
+            'active' === ($evidence['storage_state'] ?? null),
+            1 === $this->nullableInteger($evidence['node_storage_enabled'] ?? null),
+            1 === $this->nullableInteger($evidence['node_storage_active'] ?? null),
+            1 === $this->nullableInteger($evidence['executor_authorized'] ?? null),
+            is_string($evidence['allowed_node_id'] ?? null),
+            1 === $this->nullableInteger($evidence['selection_included'] ?? null),
+            0 !== $this->nullableInteger($evidence['selection_excluded'] ?? null),
+            1 === $this->nullableInteger($evidence['active_request_absent'] ?? null),
+            null !== $this->decimal($evidence['minimum_free_bytes'] ?? null) && null !== $this->decimal($evidence['available_bytes'] ?? null),
+        ))) {
             return 'eligibility_changed';
         }
-        if (!hash_equals($this->binary($request['node_id'] ?? null), $this->binary($evidence['current_node_id'] ?? null))
-            || $this->integer($request['placement_revision'] ?? null) !== $this->integer($evidence['current_placement_revision'] ?? null)
-            || $this->integer($request['policy_revision'] ?? null) !== $this->integer($evidence['current_policy_revision'] ?? null)
-            || $this->integer($request['target_revision'] ?? null) !== $this->integer($evidence['current_target_revision'] ?? null)
-        ) {
+        if (!BackupStartRules::snapshotMatches(
+            $this->binary($request['node_id'] ?? null), $this->integer($request['placement_revision'] ?? null),
+            $this->integer($request['policy_revision'] ?? null), $this->integer($request['target_revision'] ?? null),
+            $this->binary($evidence['current_node_id'] ?? null), $this->integer($evidence['current_placement_revision'] ?? null),
+            $this->integer($evidence['current_policy_revision'] ?? null), $this->integer($evidence['current_target_revision'] ?? null),
+        )) {
             return 'snapshot_revision_changed';
         }
         foreach ([
@@ -474,12 +497,14 @@ SQL, ['id' => $row['id']]);
             }
         }
         if ('pbs' === ($evidence['target_storage_type'] ?? null)) {
-            if (1 !== $this->nullableInteger($evidence['pbs_connection_enabled'] ?? null)
-                || 1 !== $this->nullableInteger($evidence['pbs_writes'] ?? null)
-                || 'active' !== ($evidence['pbs_state'] ?? null)
-                || 'datastore_filesystem' !== ($evidence['pbs_capacity_semantics'] ?? null)
-                || 1 !== $this->nullableInteger($evidence['pbs_mapping_valid'] ?? null)
-                || null === $this->decimal($evidence['pbs_available_bytes'] ?? null)
+            if (!BackupStartRules::pbsTargetEligible(
+                1 === $this->nullableInteger($evidence['pbs_connection_enabled'] ?? null),
+                1 === $this->nullableInteger($evidence['pbs_writes'] ?? null),
+                'active' === ($evidence['pbs_state'] ?? null),
+                'datastore_filesystem' === ($evidence['pbs_capacity_semantics'] ?? null),
+                1 === $this->nullableInteger($evidence['pbs_mapping_valid'] ?? null),
+                null !== $this->decimal($evidence['pbs_available_bytes'] ?? null),
+            )
                 || !$this->freshAt($evidence['pbs_capacity_observed_at'] ?? null, $now)
                 || !$this->freshAt($evidence['pbs_mapping_observed_at'] ?? null, $now)
                 || !$this->freshAt($evidence['pbs_inventory_observed_at'] ?? null, $now)
@@ -491,28 +516,53 @@ SQL, ['id' => $row['id']]);
         return null;
     }
 
-    private function freshAt(mixed $value, DateTimeImmutable $now): bool
+    private function hasFailureNotificationRecipients(mixed $policyJson): bool
     {
-        $observedAt = $this->date($value);
-        if (null === $observedAt || $observedAt > $now) {
+        if (!is_string($policyJson)) {
+            return false;
+        }
+        try {
+            $policy = json_decode($policyJson, true, 32, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return false;
+        }
+        $recipients = is_array($policy) ? ($policy['failureNotificationRecipients'] ?? null) : null;
+        return $this->isFailureNotificationRecipientList($recipients);
+    }
+
+    private function hasFailureNotificationRecipientListJson(mixed $recipientsJson): bool
+    {
+        if (!is_string($recipientsJson)) {
+            return false;
+        }
+        try {
+            $recipients = json_decode($recipientsJson, true, 8, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
             return false;
         }
 
-        return $now <= $observedAt->add(new DateInterval('PT'.$this->freshness->maximumAgeSeconds.'S'));
+        return $this->isFailureNotificationRecipientList($recipients);
+    }
+
+    private function isFailureNotificationRecipientList(mixed $recipients): bool
+    {
+        return BackupStartRules::notificationRecipientsConfigured($recipients);
+    }
+
+    private function freshAt(mixed $value, DateTimeImmutable $now): bool
+    {
+        return $this->freshness->isFresh($now, $this->date($value));
     }
 
     /** @param array<string, mixed> $evidence */
     private function effectiveAvailableBytes(array $evidence): string
     {
-        $pve = $this->decimal($evidence['available_bytes'] ?? null)
-            ?? throw new RuntimeException('PVE capacity evidence is missing.');
-        if ('pbs' !== ($evidence['target_storage_type'] ?? null)) {
-            return $pve;
-        }
-        $pbs = $this->decimal($evidence['pbs_available_bytes'] ?? null)
-            ?? throw new RuntimeException('PBS capacity evidence is missing.');
-
-        return $this->decimalLessThan($pve, $pbs) ? $pve : $pbs;
+        $pve = $this->decimal($evidence['available_bytes'] ?? null);
+        $pbs = $this->decimal($evidence['pbs_available_bytes'] ?? null);
+        return BackupStartRules::effectiveCapacity(
+            null === $pve ? null : new UInt64Decimal($pve), 'pbs' === ($evidence['target_storage_type'] ?? null),
+            null === $pbs ? null : new UInt64Decimal($pbs),
+        )->value ?? throw new RuntimeException('Target capacity evidence is missing.');
     }
 
     /** @param array<string, mixed> $evidence */
@@ -561,10 +611,10 @@ SQL, [
             'SELECT slot_limit, slots_used FROM backup_target_slots WHERE target_id = :id FOR UPDATE',
             ['id' => $row['target_id']],
         );
-        if (false === $node || $this->integer($node['slots_used'] ?? null) >= $this->integer($node['slot_limit'] ?? null)) {
+        if (false === $node || !BackupStartRules::slotAvailable($this->integer($node['slot_limit'] ?? null), $this->integer($node['slots_used'] ?? null), 1, false)) {
             return 'node_slot_unavailable';
         }
-        if (false === $target || $this->integer($target['slots_used'] ?? null) >= $this->integer($target['slot_limit'] ?? null)) {
+        if (false === $target || !BackupStartRules::slotAvailable($this->integer($target['slot_limit'] ?? null), $this->integer($target['slots_used'] ?? null), $parallelLimit, false)) {
             return 'target_slot_unavailable';
         }
 
@@ -580,15 +630,18 @@ FROM backup_capacity_reservations
 WHERE target_id = :target AND released_at IS NULL
 SQL, ['target' => $row['target_id']]);
 
-        return 1 === $this->integer($db->fetchOne(<<<'SQL'
-SELECT CAST(:available AS DECIMAL(65, 0)) >=
-       CAST(:reserved AS DECIMAL(65, 0)) + CAST(:expected AS DECIMAL(65, 0)) + CAST(:minimum AS DECIMAL(65, 0))
-SQL, [
-            'available' => $this->decimal($row['available_bytes'] ?? null),
-            'reserved' => $this->decimal($reserved),
-            'expected' => $this->decimal($row['expected_size_bytes'] ?? null),
-            'minimum' => $this->decimal($row['minimum_free_bytes'] ?? null),
-        ]));
+        return BackupStartRules::capacityAvailable(
+            $this->capacityDecimal($row['available_bytes'] ?? null),
+            $this->capacityDecimal($row['minimum_free_bytes'] ?? null),
+            $this->capacityDecimal($reserved),
+            $this->capacityDecimal($row['expected_size_bytes'] ?? null),
+        );
+    }
+
+    private function capacityDecimal(mixed $value): ?UInt64Decimal
+    {
+        $decimal = $this->decimal($value);
+        return null === $decimal ? null : new UInt64Decimal($decimal);
     }
 
     /** @param array<string, mixed> $row */
@@ -797,13 +850,6 @@ SQL, ['id' => $requestId]));
         }
 
         throw new RuntimeException('Invalid queue UInt64.');
-    }
-
-    private function decimalLessThan(string $left, string $right): bool
-    {
-        $length = strlen($left) <=> strlen($right);
-
-        return $length < 0 || (0 === $length && strcmp($left, $right) < 0);
     }
 
     private function binary(mixed $value): string

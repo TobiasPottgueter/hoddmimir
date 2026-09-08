@@ -88,16 +88,16 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
             self::id('request-a'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         );
         self::assertSame(self::id('request-a'), $store->promote($promotion));
         self::assertSame(self::id('request-a'), $store->promote(new ShadowPromotion(
             self::id('ignored-id'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         )));
 
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
@@ -142,7 +142,7 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
         ]);
         $request = $this->store()->promote(new ShadowPromotion(
             self::id('request-runtime-provider'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $this->connection()->commit();
         $worker = $this->runtimeBackupWorker();
@@ -165,13 +165,13 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
 
     public function testBackupWorkerRoleCanClaimAndPrepareThroughTheCompleteRevalidationReadPath(): void
     {
-        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":2}},"approvedDeletionRetention":null,"failureNotificationRecipients":[]}';
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":2}},"approvedDeletionRetention":null,"failureNotificationRecipients":["ops@example.test"]}';
         $request = $this->store()->promote(new ShadowPromotion(
             self::id('request-runtime-revalidation'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $this->connection()->update('backup_requests', [
             'resolved_policy_json' => $policy,
@@ -199,8 +199,7 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
                 self::id('runtime-run'),
                 $claim->claimToken,
                 $claim->claimFence,
-                $this->now,
-            ));
+                $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
             self::assertSame(SubmissionPreparationStatus::PreparedNow, $preparation->status);
             self::assertNotNull($preparation->submission);
@@ -216,8 +215,8 @@ final class DbalBackupQueueStoreTest extends DatabaseTestCase
             self::id('request-runtime-monitor-success'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $this->store()->claim(new ClaimNextBackupCommand(self::id('runtime-monitor-worker'), $this->now));
         self::assertNotNull($claim);
@@ -329,7 +328,7 @@ SQL, [
 
         $this->store()->promote(new ShadowPromotion(
             self::id('request-evidence-guest-b'), self::id('decision-b'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $this->connection()->executeStatement(
             'UPDATE executor_evidence_refresh_state SET next_due_at = UTC_TIMESTAMP(6) - INTERVAL 1 MICROSECOND',
@@ -432,6 +431,20 @@ SQL, [
         self::assertSame([], $refresh->subjects($claim, $cursor, 1));
     }
 
+    public function testAutomaticShadowPinsInheritedTargetDefaults(): void
+    {
+        $this->connection()->executeStatement("UPDATE backup_targets SET default_backup_mode='stop', default_compression='gzip', default_keep_daily=4 WHERE id = ?", [self::id('target')]);
+        $this->connection()->executeStatement('UPDATE backup_policies SET backup_mode=NULL, compression=NULL, legacy_maxfiles=NULL, keep_all=NULL, keep_last=NULL, keep_hourly=NULL, keep_daily=NULL, keep_weekly=NULL, keep_monthly=NULL, keep_yearly=NULL WHERE id = ?', [self::id('policy')]);
+        $candidate = $this->shadowCandidate(new DbalAutomaticShadowEvaluationSource($this->connection()));
+        self::assertTrue($candidate->policyRetentionCompatible);
+        self::assertIsString($candidate->resolvedPolicyJson);
+        $snapshot = json_decode($candidate->resolvedPolicyJson, true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($snapshot);
+        self::assertSame('stop', $snapshot['mode']);
+        self::assertSame('gzip', $snapshot['compression']);
+        self::assertSame(['prune-backups' => ['keep-daily' => 4]], $snapshot['desiredRetention']);
+    }
+
     public function testAutomaticShadowSourceProjectsExecutorEvidenceFailClosed(): void
     {
         $source = new DbalAutomaticShadowEvaluationSource($this->connection());
@@ -459,6 +472,65 @@ SQL, [
         $missing = $this->shadowCandidate($source);
         self::assertFalse($missing->executorAuthorized);
         self::assertNull($missing->executorObservedAt);
+    }
+
+    public function testAutomaticShadowSourceRejectsAnEnabledPolicyWithoutFailureMailRecipients(): void
+    {
+        $source = new DbalAutomaticShadowEvaluationSource($this->connection());
+        self::assertTrue($this->shadowCandidate($source)->policyRetentionCompatible);
+
+        $this->connection()->update('backup_policies', [
+            'failure_notification_recipients_json' => '[]',
+        ], ['id' => self::id('policy')]);
+
+        $candidate = $this->shadowCandidate($source);
+        self::assertTrue($candidate->policyEnabled);
+        self::assertFalse($candidate->policyFailureNotificationConfigured);
+        self::assertTrue($candidate->policyRetentionCompatible);
+        self::assertNull($candidate->resolvedPolicyJson);
+    }
+
+    public function testAutomaticPromotionRejectsAResolvedPolicyWithoutFailureMailRecipients(): void
+    {
+        $store = $this->store();
+        $json = '{"mode":"snapshot","failureNotificationRecipients":[]}';
+        $this->connection()->update('scheduler_decisions', [
+            'policy_snapshot_hash' => hash('sha256', $json, true),
+        ], ['id' => self::id('decision-a')]);
+
+        try {
+            $store->promote(new ShadowPromotion(
+                self::id('request-no-mail'), self::id('decision-a'), $this->now,
+                $json, hash('sha256', $json, true),
+            ));
+            self::fail('An automatic request without failure recipients was promoted.');
+        } catch (\RuntimeException $failure) {
+            self::assertSame('An automatic backup request requires PVE failure notification recipients.', $failure->getMessage());
+        }
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_requests WHERE id = :id',
+            ['id' => self::id('request-no-mail')],
+        )));
+    }
+
+    public function testQueueClaimDefersAnInconsistentEnabledPolicyWithoutFailureMailRecipients(): void
+    {
+        $store = $this->store();
+        $json = '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}';
+        $request = $store->promote(new ShadowPromotion(
+            self::id('request-no-mail'), self::id('decision-a'), $this->now,
+            $json, hash('sha256', $json, true),
+        ));
+        $this->connection()->update('backup_policies', [
+            'failure_notification_recipients_json' => '[]',
+        ], ['id' => self::id('policy')]);
+
+        self::assertNull($store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now)));
+        self::assertSame('retry_wait', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id = :id', ['id' => $request]));
+        self::assertSame('failure_notification_recipients_unconfigured', $this->connection()->fetchOne(
+            'SELECT detail_code FROM backup_request_events WHERE request_id = :id ORDER BY sequence_no DESC LIMIT 1',
+            ['id' => $request],
+        ));
     }
 
     public function testAutomaticShadowSourceProjectsExpectedBackupSizeEvidenceFailClosed(): void
@@ -498,8 +570,8 @@ SQL, [
             self::id('request-shadow-source'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         self::assertFalse($this->shadowCandidate($source)->activeRequestAbsent);
 
@@ -641,8 +713,8 @@ SQL, [
             self::id('request-a'),
             self::id('decision-a'),
             $this->now,
-            '{"mode":"snapshot"}',
-            hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}',
+            hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $this->connection()->update('executor_permission_evidence', [
             'observed_at' => self::format($this->now->modify('-301 seconds')),
@@ -660,7 +732,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $initial = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($initial);
@@ -716,7 +788,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $initial = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($initial);
@@ -730,7 +802,7 @@ SQL, [
         $this->connection()->update('backup_requests', ['state' => 'starting', 'run_id' => $runId], ['id' => $initial->id]);
         $store->promote(new ShadowPromotion(
             self::id('request-b'), self::id('decision-b'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
 
         $owned = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now->modify('+1 second')));
@@ -750,7 +822,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         self::assertNull($store->claim(new ClaimNextBackupCommand(
             self::id('worker-a'), $this->now, allowNewClaims: false,
@@ -764,10 +836,10 @@ SQL, [
     public function testPreSubmitRevalidationDefersAndReleasesWhenSelectionChanges(): void
     {
         $store = $this->store();
-        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1}}';
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -784,8 +856,7 @@ SQL, [
         );
 
         $result = $submission->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
-            $claim->id, self::id('blocked-run'), $claim->claimToken, $claim->claimFence, $this->now,
-        ));
+            $claim->id, self::id('blocked-run'), $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::Blocked, $result->status);
         self::assertSame('eligibility_changed', $result->blockerCode);
@@ -802,7 +873,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -815,8 +886,7 @@ SQL, [
         );
 
         $result = $submission->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
-            $claim->id, self::id('cancelled-run'), $claim->claimToken, $claim->claimFence, $this->now,
-        ));
+            $claim->id, self::id('cancelled-run'), $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::Blocked, $result->status);
         self::assertSame('cancel_requested', $result->blockerCode);
@@ -825,24 +895,49 @@ SQL, [
         self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_runs')));
     }
 
+    public function testFinalPreSubmitGateBlocksWhenFailureMailRecipientsDisappearAfterClaim(): void
+    {
+        $store = $this->store();
+        $json = '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}';
+        $store->promote(new ShadowPromotion(
+            self::id('request-no-mail'), self::id('decision-a'), $this->now,
+            $json, hash('sha256', $json, true),
+        ));
+        $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
+        self::assertNotNull($claim);
+        $this->seedBackupCredential();
+        $this->connection()->update('backup_policies', [
+            'failure_notification_recipients_json' => '[]',
+        ], ['id' => self::id('policy')]);
+
+        $result = (new DbalBackupSubmissionStore(
+            $this->connection(), new DbalBackupProblemRecorder(),
+        ))->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand(
+            $claim->id, self::id('blocked-run'), $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
+
+        self::assertSame(SubmissionPreparationStatus::Blocked, $result->status);
+        self::assertSame('failure_notification_recipients_unconfigured', $result->blockerCode);
+        $this->assertPreSubmitBlockerPersisted($claim->id, 'failure_notification_recipients_unconfigured', $claim->claimFence);
+    }
+
     public function testPreparedSubmissionPersistsAcceptedAmbiguousAndDefinitiveOutcomesExactlyOnce(): void
     {
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
         $this->seedBackupCredential();
-        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1}}';
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
         $this->connection()->update('backup_requests', [
             'resolved_policy_json' => $policy,
             'resolved_policy_hash' => hash('sha256', $policy, true),
         ], ['id' => $claim->id]);
         $submission = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
         $run = self::id('submission-run');
-        $command = new SubmitClaimedBackupCommand($claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now);
+        $command = new SubmitClaimedBackupCommand($claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now));
         self::assertSame(\App\Application\Backup\Execution\ExistingSubmissionStatus::FreshClaim, $submission->inspectExistingSubmission($command));
         self::assertSame(SubmissionPreparationStatus::PreparedNow, $submission->prepareAfterFullRevalidation($command)->status);
         self::assertSame(\App\Application\Backup\Execution\ExistingSubmissionStatus::RecoveryRequired, $submission->inspectExistingSubmission($command));
@@ -876,7 +971,7 @@ SQL, [
     public function testPreparedSubmissionOmitsDesiredRetentionWithoutDeletionApproval(): void
     {
         $prepared = $this->prepareSubmissionForPolicy(
-            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":[]}',
+            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":["ops@example.test"]}',
         );
 
         self::assertNull($prepared->payload->legacyMaxFiles);
@@ -886,7 +981,7 @@ SQL, [
     public function testPreparedSubmissionIncludesOnlyApprovedDeletionRetention(): void
     {
         $prepared = $this->prepareSubmissionForPolicy(
-            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":[]}',
+            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":["ops@example.test"]}',
         );
 
         self::assertNull($prepared->payload->legacyMaxFiles);
@@ -897,11 +992,11 @@ SQL, [
 
     public function testPreSubmitBlocksCurrentPbsStorageWithoutMappingBeforePayloadConstruction(): void
     {
-        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":[]}';
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":["ops@example.test"]}';
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-pbs-race'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -919,8 +1014,7 @@ SQL, [
             self::id('pbs-race-run'),
             $claim->claimToken,
             $claim->claimFence,
-            $this->now,
-        ));
+            $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::Blocked, $prepared->status);
         self::assertSame('pbs_evidence_invalid', $prepared->blockerCode);
@@ -938,11 +1032,11 @@ SQL, [
             'version_major' => 8,
             'raw_version' => '8.4.0',
         ], ['connection_id' => self::id('connection')]);
-        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":{"maxfiles":7},"failureNotificationRecipients":[]}';
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":{"maxfiles":7},"failureNotificationRecipients":["ops@example.test"]}';
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-pve-upgrade'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -963,8 +1057,7 @@ SQL, [
             self::id('pve-upgrade-run'),
             $claim->claimToken,
             $claim->claimFence,
-            $this->now,
-        ));
+            $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::Blocked, $prepared->status);
         self::assertSame('retention_incompatible', $prepared->blockerCode);
@@ -980,7 +1073,7 @@ SQL, [
     {
         $this->seedPbsShadowEvidence();
         $prepared = $this->prepareSubmissionForPolicy(
-            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":[]}',
+            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":30}},"approvedDeletionRetention":{"prune-backups":{"keep-last":3,"keep-daily":7}},"failureNotificationRecipients":["ops@example.test"]}',
         );
 
         self::assertNull($prepared->payload->legacyMaxFiles);
@@ -992,7 +1085,7 @@ SQL, [
         $this->setAllEvidenceAge(300);
 
         $prepared = $this->prepareSubmissionForPolicy(
-            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":[]}',
+            '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":["ops@example.test"]}',
         );
 
         self::assertSame(100, $prepared->payload->vmid);
@@ -1000,11 +1093,11 @@ SQL, [
 
     public function testPreSubmitFreshnessRejectsTheFirstMicrosecondAfterTheBoundary(): void
     {
-        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":[]}';
+        $policy = '{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":7},"approvedDeletionRetention":null,"failureNotificationRecipients":["ops@example.test"]}';
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-stale'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1026,8 +1119,7 @@ SQL, [
             self::id('stale-run'),
             $claim->claimToken,
             $claim->claimFence,
-            $this->now,
-        ));
+            $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::Blocked, $prepared->status);
         self::assertSame('executor_seen_stale', $prepared->blockerCode);
@@ -1037,12 +1129,27 @@ SQL, [
         ));
     }
 
-    public function testProvenAbsentAmbiguousSubmissionBecomesUnknownExactlyOnce(): void
+    public function testCompleteAbsentSearchCreatesExactlyOneLinkedAttemptWithoutDelay(): void
+    {
+        $this->assertCompleteSearchCreatesLinkedAttempt(RecoveryOutcome::provenNotStarted());
+    }
+
+    public function testMultipleMatchesCreateOneLinkedAttemptUnderNormalStartGates(): void
+    {
+        $this->assertCompleteSearchCreatesLinkedAttempt(RecoveryOutcome::multipleMatches());
+    }
+
+    public function testCancelledAmbiguousRequestDoesNotCreateAnotherAttempt(): void
+    {
+        $this->assertCompleteSearchCreatesLinkedAttempt(RecoveryOutcome::provenNotStarted(), cancel: true);
+    }
+
+    private function assertCompleteSearchCreatesLinkedAttempt(RecoveryOutcome $outcome, bool $cancel = false): void
     {
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1067,16 +1174,80 @@ SQL, [
             $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now,
         );
 
-        $reconciliation->record($command, RecoveryOutcome::provenNotStarted());
-        $reconciliation->record($command, RecoveryOutcome::provenNotStarted());
+        if ($cancel) {
+            $this->connection()->update('backup_requests', ['cancel_requested_at' => self::format($this->now)], ['id' => $claim->id]);
+        }
+        $reconciliation->record($command, $outcome);
+        $reconciliation->record($command, $outcome);
 
         self::assertSame('unknown', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id=:id', ['id' => $claim->id]));
-        self::assertSame('submission_not_found', $this->connection()->fetchOne('SELECT terminal_code FROM backup_requests WHERE id=:id', ['id' => $claim->id]));
-        self::assertSame('0', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
+        self::assertSame(\App\Domain\Backup\RecoveryOutcomeKind::MultipleMatches === $outcome->kind ? 'multiple_submission_matches' : 'submission_not_found', $this->connection()->fetchOne('SELECT terminal_code FROM backup_requests WHERE id=:id', ['id' => $claim->id]));
+        self::assertSame($cancel ? '0' : '1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
         self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_notification_outbox WHERE event_key='monitoring_unknown'")));
         self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_node_slots')));
         self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_target_slots')));
-        self::assertNull($store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now->modify('+5 seconds'))));
+        $next = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now->modify('+1 microsecond')));
+        if ($cancel) {
+            self::assertNull($next);
+            return;
+        }
+        self::assertNotNull($next);
+        self::assertNotSame($claim->id, $next->id);
+        $retry = $this->connection()->fetchAssociative('SELECT * FROM backup_requests WHERE id=:id', ['id' => $next->id]);
+        self::assertIsArray($retry);
+        self::assertSame($claim->id, $retry['root_request_id']);
+        self::assertSame('2', $this->numeric($retry['attempt']));
+        self::assertSame(self::format($this->now->modify('+1 microsecond')), $retry['available_at']);
+        self::assertSame('never_backed_up', $retry['reason']);
+        self::assertSame('300', $this->numeric($retry['priority']));
+        self::assertFalse($this->shadowCandidate(new DbalAutomaticShadowEvaluationSource($this->connection()))->activeRequestAbsent);
+    }
+
+    public function testReconciledAttemptWaitsForManualBackupAndThenStartsWithSameRoot(): void
+    {
+        $this->assertCompleteSearchCreatesLinkedAttempt(RecoveryOutcome::provenNotStarted());
+        $this->seedBackupCredential();
+        $queue = $this->store();
+        $at = $this->now->modify('+5 seconds');
+        $claim = $queue->claim(new ClaimNextBackupCommand(self::id('worker-a'), $at));
+        self::assertNotNull($claim);
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
+        $this->connection()->update('backup_requests', [
+            'resolved_policy_json' => $policy, 'resolved_policy_hash' => hash('sha256', $policy, true),
+        ], ['id' => $claim->id]);
+        $journal = tempnam(sys_get_temp_dir(), 'hoddmimir-reconciled-');
+        self::assertIsString($journal);
+        try {
+            $client = new IntegratedJournalBackupClient($journal, false);
+            $client->busyNode = 'node-a';
+            $transaction = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
+            $service = new SubmitClaimedBackup(new IntegratedExecutionGate(), $transaction, $client,
+                new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new FrozenClock($at));
+            $result = $service->execute(new SubmitClaimedBackupCommand(
+                $claim->id, self::id('new-run'), $claim->claimToken, $claim->claimFence, $at,
+            ));
+            self::assertSame('remote_backup_running', $result->blockerCode);
+            self::assertSame('', file_get_contents($journal));
+            self::assertSame('1', $this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_runs')));
+            self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_node_slots')));
+            self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_target_slots')));
+            self::assertFalse($this->shadowCandidate(new DbalAutomaticShadowEvaluationSource($this->connection()))->activeRequestAbsent);
+
+            $client->busyNode = null;
+            $at = $at->modify('+120 seconds'); // Existing blocked-queue cadence, not a reconciliation delay.
+            $next = $queue->claim(new ClaimNextBackupCommand(self::id('worker-a'), $at));
+            self::assertNotNull($next);
+            self::assertSame($claim->id, $next->id);
+            $service = new SubmitClaimedBackup(new IntegratedExecutionGate(), $transaction, $client,
+                new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new FrozenClock($at));
+            self::assertSame(\App\Application\Backup\Execution\SubmissionExecutionStatus::Accepted,
+                $service->execute(new SubmitClaimedBackupCommand($next->id, self::id('new-run'), $next->claimToken, $next->claimFence, $at))->status);
+            self::assertSame('P', file_get_contents($journal));
+            self::assertSame('unknown', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id=:id', ['id' => self::id('request-a')]));
+            self::assertSame('2', $this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_runs')));
+        } finally {
+            unlink($journal);
+        }
     }
 
     public function testReconciliationRenewsHeartbeatPersistsInconclusiveAndAdoptsOneMatchedTask(): void
@@ -1084,7 +1255,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1125,12 +1296,80 @@ SQL, [
         )));
     }
 
+    public function testReconciliationDoesNotAssignAnAlreadyOwnedTaskToAnotherRun(): void
+    {
+        $store = $this->store();
+        $store->promote(new ShadowPromotion(
+            self::id('request-a'), self::id('decision-a'), $this->now,
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
+        ));
+        $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
+        self::assertNotNull($claim);
+        $run = self::id('reconcile-run');
+        $this->connection()->insert('backup_runs', [
+            'id' => $run, 'request_id' => $claim->id, 'root_request_id' => $claim->id,
+            'attempt' => 1, 'state' => 'reconcile_required', 'claim_token' => $claim->claimToken,
+            'claim_fence' => $claim->claimFence, 'submission_provenance' => 'ambiguous',
+            'started_at' => self::format($this->now), 'submission_node' => 'node-a',
+            'submission_vmid' => 100, 'submission_user' => 'backup@pve',
+            'submission_window_start' => self::format($this->now->modify('-30 seconds')),
+            'submission_window_end' => self::format($this->now->modify('+30 seconds')),
+        ]);
+        $this->connection()->update('backup_requests', [
+            'state' => 'reconcile_required', 'run_id' => $run,
+            'submission_provenance' => 'ambiguous', 'retry_disposition' => 'forbidden_ambiguous',
+        ], ['id' => $claim->id]);
+        $reconciliation = new DbalAmbiguousSubmissionReconciliationStore(
+            $this->connection(), new DbalBackupProblemRecorder(),
+            heartbeats: new DbalBackupWorkerHeartbeatStore($this->connection(), 150, 'test'),
+        );
+        $command = new ReconcileAmbiguousSubmissionCommand($claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now);
+
+        self::assertTrue($reconciliation->renew($command));
+        self::assertSame('reconciliation_page', $this->connection()->fetchOne("SELECT current_activity FROM worker_heartbeats WHERE worker_kind='backup'"));
+        self::assertNotNull($reconciliation->prepare($command));
+        $reconciliation->record($command, RecoveryOutcome::inconclusive());
+        self::assertSame('inconclusive', $this->connection()->fetchOne('SELECT recovery_outcome FROM backup_runs WHERE id=:id', ['id' => $run]));
+
+        $raw = sprintf('UPID:node-a:0000002A:000F4240:%08X:vzdump:100:backup@pve:', $this->now->getTimestamp());
+        $prior = $this->connection()->fetchAssociative('SELECT * FROM backup_requests WHERE id=:id', ['id' => $claim->id]);
+        self::assertIsArray($prior);
+        unset($prior['active_guest_id']);
+        $prior['id'] = self::id('prior-request');
+        $prior['root_request_id'] = $prior['id'];
+        $prior['run_id'] = null;
+        $prior['shadow_decision_id'] = null;
+        $prior['origin'] = 'manual';
+        $prior['state'] = 'cancelled';
+        $prior['terminal_at'] = self::format($this->now);
+        foreach (['claim_token', 'lease_owner', 'lease_issued_at', 'lease_expires_at'] as $field) $prior[$field] = null;
+        $prior['scheduled_at'] = self::format($this->now->modify('-1 second'));
+        $this->connection()->insert('backup_requests', $prior);
+        $this->connection()->insert('backup_runs', [
+            'id' => self::id('prior-run'), 'request_id' => $prior['id'], 'root_request_id' => $prior['id'],
+            'attempt' => 1, 'state' => 'succeeded', 'submission_provenance' => 'accepted', 'claim_fence' => 1, 'claim_token' => self::id('prior-token'),
+            'started_at' => self::format($this->now), 'finished_at' => self::format($this->now),
+            'upid' => $raw, 'upid_hash' => hash('sha256', $raw, true),
+        ]);
+
+        $this->connection()->update('backup_requests', ['state' => 'succeeded', 'run_id' => self::id('prior-run')], ['id' => $prior['id']]);
+
+        $reconciliation->record($command, RecoveryOutcome::matched(new \App\Domain\Backup\TaskUpid($raw)));
+        $reconciliation->record($command, RecoveryOutcome::matched(new \App\Domain\Backup\TaskUpid($raw)));
+        self::assertSame('unknown', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id=:id', ['id' => $claim->id]));
+        self::assertNull($this->connection()->fetchOne('SELECT upid FROM backup_runs WHERE id=:id', ['id' => $run]));
+        self::assertSame($raw, $this->connection()->fetchOne('SELECT upid FROM backup_runs WHERE id=:id', ['id' => self::id('prior-run')]));
+        self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_node_slots')));
+        self::assertSame('0', $this->numeric($this->connection()->fetchOne('SELECT slots_used FROM backup_target_slots')));
+    }
+
     public function testMonitoringPersistsStopOnceLogsFailureRetryRecoveryAndTerminalRelease(): void
     {
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1193,7 +1432,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1230,7 +1469,7 @@ SQL, [
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -1282,7 +1521,7 @@ SQL, ['guest' => self::id('guest')]);
     {
         $store = $this->store();
         $store->promote(new ShadowPromotion(
-            self::id('request-a'), self::id('decision-a'), $this->now, '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            self::id('request-a'), self::id('decision-a'), $this->now, '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $connection = $this->connection();
         $connection->createSavepoint('queue_case');
@@ -1313,12 +1552,12 @@ SQL, ['guest' => self::id('guest')]);
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
         $this->seedBackupCredential();
-        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1}}';
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
         $this->connection()->update('backup_requests', [
             'resolved_policy_json' => $policy,
             'resolved_policy_hash' => hash('sha256', $policy, true),
@@ -1333,12 +1572,16 @@ SQL, ['guest' => self::id('guest')]);
                 new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder()),
                 new IntegratedJournalBackupClient($journal, true),
                 new ControlledRetryPolicy(),
+                new \App\Application\Backup\Execution\CheckBackupNodeTasks(new IntegratedJournalBackupClient($journal, true)),
+                new FrozenClock($this->now),
             );
             $result = $submit->execute(new SubmitClaimedBackupCommand(
-                $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now,
-            ));
+                $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
             self::assertSame(\App\Application\Backup\Execution\SubmissionExecutionStatus::Ambiguous, $result->status);
             self::assertSame('P', file_get_contents($journal));
+            self::assertSame('backup@pve!fixture', $this->connection()->fetchOne(
+                'SELECT submission_user FROM backup_runs WHERE id=:run', ['run' => $run],
+            ));
 
             $takeoverAt = $this->now->modify('+121 seconds');
             $takeover = $store->claim(new ClaimNextBackupCommand(self::id('worker-b'), $takeoverAt));
@@ -1368,12 +1611,12 @@ SQL, ['guest' => self::id('guest')]);
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
         $this->seedBackupCredential();
-        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1}}';
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
         $this->connection()->update('backup_requests', [
             'resolved_policy_json' => $policy,
             'resolved_policy_hash' => hash('sha256', $policy, true),
@@ -1384,8 +1627,7 @@ SQL, ['guest' => self::id('guest')]);
         try {
             $run = self::id('integrated-pre-dispatch-run');
             $command = new SubmitClaimedBackupCommand(
-                $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now,
-            );
+                $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now));
             $transaction = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
             self::assertSame(SubmissionPreparationStatus::PreparedNow, $transaction->prepareAfterFullRevalidation($command)->status);
             self::assertSame('', file_get_contents($journal));
@@ -1406,7 +1648,7 @@ SQL, ['guest' => self::id('guest')]);
             self::assertSame(\App\Application\Backup\Monitoring\ReconciliationStatus::ProvenNotStarted, $status);
             self::assertSame('', file_get_contents($journal));
             self::assertSame('unknown', $this->connection()->fetchOne('SELECT state FROM backup_requests WHERE id=:id', ['id' => $restart->id]));
-            self::assertSame('0', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
+            self::assertSame('1', $this->numeric($this->connection()->fetchOne("SELECT COUNT(*) FROM backup_requests WHERE origin='retry'")));
         } finally {
             @unlink($journal);
         }
@@ -1419,13 +1661,13 @@ SQL, ['guest' => self::id('guest')]);
         }
         $store = $this->store();
         $store->promote(new ShadowPromotion(
-            self::id('request-a'), self::id('decision-a'), $this->now, '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            self::id('request-a'), self::id('decision-a'), $this->now, '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $store->promote(new ShadowPromotion(
-            self::id('request-b'), self::id('decision-b'), $this->now, '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            self::id('request-b'), self::id('decision-b'), $this->now, '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $this->seedBackupCredential();
-        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1}}';
+        $policy = '{"mode":"snapshot","compression":"zstd","desiredRetention":{"maxfiles":1},"failureNotificationRecipients":["ops@example.test"]}';
         $this->connection()->executeStatement(
             'UPDATE backup_requests SET resolved_policy_json=:policy, resolved_policy_hash=:hash',
             ['policy' => $policy, 'hash' => hash('sha256', $policy, true)],
@@ -1470,12 +1712,12 @@ SQL, ['guest' => self::id('guest')]);
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-a'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         try {
             $store->promote(new ShadowPromotion(
                 self::id('request-c'), self::id('decision-c'), $this->now->modify('+1 second'),
-                '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+                '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
             ));
             self::fail('A guest must not gain a second active request.');
         } catch (\RuntimeException $error) {
@@ -1840,6 +2082,7 @@ SQL, ['id' => $requestId]);
             'revision' => 1, 'policy_priority' => 100, 'backup_mode' => 'snapshot',
             'compression' => 'zstd', 'maximum_age_seconds' => 3600,
             'schedule' => 'collector_cycle', 'keep_last' => 1,
+            'failure_notification_recipients_json' => '["ops@example.test"]',
             'retention_execution_enabled' => 0, 'created_at' => $now, 'updated_at' => $now,
         ]);
         $this->connection()->insert('backup_policy_assignments', [
@@ -1876,7 +2119,7 @@ SQL, ['id' => $requestId]);
             'guest_id' => $guest, 'node_id' => $node, 'placement_revision' => 1,
             'placement_observed_at' => $now, 'outcome' => 'eligible', 'reason' => 'never_backed_up',
             'priority' => 300, 'policy_id' => $policy, 'policy_revision' => 1,
-            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot"}', true),
+            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
             'target_id' => $target, 'target_revision' => 1,
             'inventory_observed_at' => $now, 'capacity_observed_at' => $now,
         ]);
@@ -1886,7 +2129,7 @@ SQL, ['id' => $requestId]);
             'guest_id' => $guest, 'node_id' => $node, 'placement_revision' => 1,
             'placement_observed_at' => $now, 'outcome' => 'eligible', 'reason' => 'never_backed_up',
             'priority' => 300, 'policy_id' => $policy, 'policy_revision' => 1,
-            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot"}', true),
+            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
             'target_id' => $target, 'target_revision' => 1,
             'inventory_observed_at' => $now, 'capacity_observed_at' => $now,
         ]);
@@ -1896,7 +2139,7 @@ SQL, ['id' => $requestId]);
             'guest_id' => $guestB, 'node_id' => $node, 'placement_revision' => 1,
             'placement_observed_at' => $now, 'outcome' => 'eligible', 'reason' => 'never_backed_up',
             'priority' => 300, 'policy_id' => $policy, 'policy_revision' => 1,
-            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot"}', true),
+            'policy_snapshot_hash' => hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
             'target_id' => $target, 'target_revision' => 1,
             'inventory_observed_at' => $now, 'capacity_observed_at' => $now,
         ]);
@@ -1936,10 +2179,11 @@ SQL, ['id' => $requestId]);
                         new DbalBackupSubmissionStore($connection, new DbalBackupProblemRecorder()),
                         new IntegratedJournalBackupClient($journal, false),
                         new ControlledRetryPolicy(),
+                        new \App\Application\Backup\Execution\CheckBackupNodeTasks(new IntegratedJournalBackupClient($journal, false)),
+                        new FrozenClock($this->now),
                     );
                     $submission->execute(new SubmitClaimedBackupCommand(
-                        $claim->id, self::id('run-'.$worker), $claim->claimToken, $claim->claimFence, $this->now,
-                    ));
+                        $claim->id, self::id('run-'.$worker), $claim->claimToken, $claim->claimFence, $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
                     fwrite($child, 'submitted');
                 }
             } catch (Throwable $exception) {
@@ -2043,7 +2287,7 @@ SQL, ['id' => $requestId]);
         $store = $this->store();
         $store->promote(new ShadowPromotion(
             self::id('request-retention'), self::id('decision-a'), $this->now,
-            '{"mode":"snapshot"}', hash('sha256', '{"mode":"snapshot"}', true),
+            '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', hash('sha256', '{"mode":"snapshot","failureNotificationRecipients":["ops@example.test"]}', true),
         ));
         $claim = $store->claim(new ClaimNextBackupCommand(self::id('worker-a'), $this->now));
         self::assertNotNull($claim);
@@ -2058,8 +2302,7 @@ SQL, ['id' => $requestId]);
             self::id('retention-run'),
             $claim->claimToken,
             $claim->claimFence,
-            $this->now,
-        ));
+            $this->now, taskEvidence: new \App\Application\Backup\Execution\BackupNodeTaskEvidence(['node-a', 'node-b'], $this->now)));
 
         self::assertSame(SubmissionPreparationStatus::PreparedNow, $prepared->status);
         self::assertNotNull($prepared->submission);
@@ -2115,6 +2358,7 @@ final readonly class IntegratedExecutionGate implements BackupExecutionGate
 
 final class IntegratedJournalBackupClient implements PveBackupClient, PveBackupClientProvider
 {
+    public ?string $busyNode = null;
     public function __construct(private readonly string $journal, private readonly bool $ambiguous)
     {
     }
@@ -2158,7 +2402,11 @@ final class IntegratedJournalBackupClient implements PveBackupClient, PveBackupC
 
     public function taskPage(string $node, PveTaskQuery $query): PveTaskPage
     {
-        throw new \LogicException('The integrated reconciliation source supplies bounded evidence directly.');
+        $tasks = $node === $this->busyNode ? [new PveBackupTask(
+            PveUpid::parse('UPID:'.$node.':00000001:00000002:67000000:vzdump:999:root@pam:'),
+            PveTaskSource::Active, null, 'RUNNING',
+        )] : [];
+        return new PveTaskPage($query, count($tasks), $tasks, []);
     }
 }
 
@@ -2215,7 +2463,8 @@ final readonly class IntegratedReconciliationSource implements AmbiguousSubmissi
             $identity->node,
             $start,
             $identity->vmid,
-            $identity->user,
+            // Proxmox supplies the complete token principal independently of our snapshot.
+            'backup@pve!fixture',
         ));
 
         return new AmbiguousSubmissionEvidence(true, [

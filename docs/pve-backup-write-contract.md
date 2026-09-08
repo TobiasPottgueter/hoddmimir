@@ -1,5 +1,10 @@
 # PVE backup-write runtime contract
 
+## Vertragsnachtrag vom 7. September 2026
+
+The transport still sends at most one POST per submission attempt. A distinct, linked attempt may be authorized by the application only under [ADR 0005](adr/0005-automatic-backup-recovery.md). That accepted policy is not yet implemented; it does not enable transport retries or change DELETE semantics.
+
+
 ## Status and activation boundary
 
 This document defines the typed PVE 7/8/9 write contract used by the backup
@@ -82,7 +87,7 @@ The client accepts only a credential encrypted for
 only inside the scoped authorization callback and is neither stored in a DTO
 nor exposed through debug or serialization paths.
 
-The shared native-client factory exclusively owns TLS trust. System CA and
+The shared cURL-backed client factory exclusively owns TLS trust. System CA and
 custom CA verify peer and hostname; the explicitly selected fingerprint mode
 instead requires the exact SHA-256 leaf digest and fails before transmitting
 HTTP headers on a mismatch. Backup requests cannot override this policy and no

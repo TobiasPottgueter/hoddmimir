@@ -126,6 +126,10 @@ final class BackupPrimitivesTest extends TestCase
         self::assertSame(RecoveryOutcomeKind::ProvenNotStarted, RecoveryOutcome::provenNotStarted()->kind);
         self::assertSame(RecoveryOutcomeKind::Inconclusive, RecoveryOutcome::inconclusive()->kind);
         self::assertSame(RecoveryOutcomeKind::MultipleMatches, RecoveryOutcome::multipleMatches()->kind);
+        self::assertFalse(RecoveryOutcome::matched($upid)->permitsNewAttempt());
+        self::assertFalse(RecoveryOutcome::inconclusive()->permitsNewAttempt());
+        self::assertTrue(RecoveryOutcome::provenNotStarted()->permitsNewAttempt());
+        self::assertTrue(RecoveryOutcome::multipleMatches()->permitsNewAttempt());
         foreach (BackupRequestState::cases() as $state) {
             self::assertSame(in_array($state, [
                 BackupRequestState::Succeeded,

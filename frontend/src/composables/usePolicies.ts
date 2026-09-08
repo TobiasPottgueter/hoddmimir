@@ -36,6 +36,8 @@ const blockerLabels = {
   priority_unconfigured: "Priorität ist nicht konfiguriert",
   thresholds_unconfigured: "Schwellwerte sind nicht konfiguriert",
   schedule_unconfigured: "Zeitplan ist nicht konfiguriert",
+  failure_notification_recipients_unconfigured:
+    "Mindestens ein Empfänger für PVE-Fehlermails ist erforderlich",
   retention_incompatible: "Retention ist mit der PVE-Version nicht kompatibel",
 } satisfies Record<PolicyBlockerCode, string>;
 

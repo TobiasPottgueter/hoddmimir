@@ -26,5 +26,6 @@ enum PolicyActivationBlockerCode: string
     case PriorityUnconfigured = 'priority_unconfigured';
     case ThresholdsUnconfigured = 'thresholds_unconfigured';
     case ScheduleUnconfigured = 'schedule_unconfigured';
+    case FailureNotificationRecipientsUnconfigured = 'failure_notification_recipients_unconfigured';
     case RetentionIncompatible = 'retention_incompatible';
 }

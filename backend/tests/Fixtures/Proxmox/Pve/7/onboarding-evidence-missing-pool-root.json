@@ -8,7 +8,8 @@
     {"path": "/", "type": "group", "ugid": "Bots", "roleid": "HoddmimirScan", "propagate": 1},
     {"path": "/", "type": "group", "ugid": "Bots", "roleid": "HoddmimirBackup", "propagate": 1},
     {"path": "/", "type": "token", "ugid": "hoddmimir@pve!scan", "roleid": "HoddmimirScan", "propagate": 1},
-    {"path": "/", "type": "token", "ugid": "hoddmimir@pve!backup", "roleid": "HoddmimirBackup", "propagate": 1}
+    {"path": "/", "type": "token", "ugid": "hoddmimir@pve!backup", "roleid": "HoddmimirBackup", "propagate": 1},
+    {"path": "/nodes", "type": "token", "ugid": "hoddmimir@pve!backup", "roleid": "HoddmimirScan", "propagate": 1}
   ]},
   "scanPermissions": {"data": {
     "/": {"Sys.Audit": 1, "VM.Audit": 1, "Pool.Audit": 1, "Datastore.Audit": 1},
@@ -18,6 +19,7 @@
     "/storage": {"Sys.Audit": 1, "VM.Audit": 1, "Pool.Audit": 1, "Datastore.Audit": 1}
   }},
   "backupPermissions": {"data": {
+    "/nodes": {"Sys.Audit": 1, "VM.Audit": 1, "Pool.Audit": 1, "Datastore.Audit": 1},
     "/vms": {"VM.Backup": 1, "Datastore.AllocateSpace": 1},
     "/storage": {"VM.Backup": 1, "Datastore.AllocateSpace": 1}
   }},
@@ -31,6 +33,7 @@
   },
   "backupPropagationProbes": {
     "/vms/999999999": {"data": {"/vms/999999999": {"VM.Backup": 1}}},
-    "/storage/hoddmimir-propagation-probe": {"data": {"/storage/hoddmimir-propagation-probe": {"Datastore.AllocateSpace": 1}}}
+    "/storage/hoddmimir-propagation-probe": {"data": {"/storage/hoddmimir-propagation-probe": {"Datastore.AllocateSpace": 1}}},
+    "/nodes/hoddmimir-propagation-probe": {"data": {"/nodes/hoddmimir-propagation-probe": {"Sys.Audit": 1}}}
   }
 }

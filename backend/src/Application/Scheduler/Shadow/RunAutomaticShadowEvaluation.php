@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Scheduler\Shadow;
 
+use App\Domain\Scheduler\BackupStartRules;
 use App\Application\Collector\CollectorLease;
 use App\Application\Inventory\InventoryIdentifier;
 use App\Domain\Scheduler\AutomaticReasonInputs;
@@ -204,30 +205,38 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
         $policy = $this->subject($candidate->policyId);
         $target = $this->subject($candidate->targetId);
         $node = $this->subject($candidate->nodeId ?? $candidate->guestId);
+        $checks = BackupStartRules::resourceChecks(new \App\Domain\Scheduler\BackupResourceEvidence(
+            $candidate->connectionEnabled, $candidate->clusterEnabled, $candidate->guestActive, $candidate->guestTemplate,
+            null !== $candidate->nodeId && $candidate->nodeEnabled, true, $candidate->policyEnabled, $candidate->targetEnabled,
+            true, false, true, $candidate->storageEnabled, $candidate->storageActive, $candidate->executorAuthorized,
+            $candidate->targetNodeAllowed, $candidate->selectionIncluded, $candidate->explicitlyExcluded,
+            $candidate->activeRequestAbsent, null !== $candidate->availableBytes && null !== $candidate->minimumFreeBytes,
+        ));
         $gates = [
-            $this->flag(GateCode::ConnectionEnabled, GateScope::Connection, $connection, $candidate->connectionEnabled, GateDetailCode::Disabled),
-            $this->flag(GateCode::ClusterEnabled, GateScope::Cluster, $cluster, $candidate->clusterEnabled, GateDetailCode::Archived),
-            $this->flag(GateCode::NodeEnabled, GateScope::Node, $node, null !== $candidate->nodeId && $candidate->nodeEnabled, null === $candidate->nodeId ? GateDetailCode::Missing : GateDetailCode::Disabled),
-            $this->flag(GateCode::GuestEnabled, GateScope::Guest, $guest, $candidate->selectionIncluded, GateDetailCode::Disabled),
-            $this->flag(GateCode::PolicyEnabled, GateScope::Policy, $policy, $candidate->policyEnabled, GateDetailCode::Disabled),
-            $this->flag(GateCode::TargetEnabled, GateScope::Target, $target, $candidate->targetEnabled, GateDetailCode::Disabled),
-            $this->flag(GateCode::ExplicitExclusionAbsent, GateScope::Guest, $guest, !$candidate->explicitlyExcluded, GateDetailCode::ExplicitlyExcluded),
-            $this->flag(GateCode::GuestActive, GateScope::Guest, $guest, $candidate->guestActive && false === $candidate->guestTemplate, $candidate->guestActive ? (null === $candidate->guestTemplate ? GateDetailCode::Missing : GateDetailCode::Inactive) : GateDetailCode::Archived),
+            $this->flag(GateCode::ConnectionEnabled, GateScope::Connection, $connection, $checks['connection'], GateDetailCode::Disabled),
+            $this->flag(GateCode::ClusterEnabled, GateScope::Cluster, $cluster, $checks['cluster'], GateDetailCode::Archived),
+            $this->flag(GateCode::NodeEnabled, GateScope::Node, $node, $checks['node'], null === $candidate->nodeId ? GateDetailCode::Missing : GateDetailCode::Disabled),
+            $this->flag(GateCode::GuestEnabled, GateScope::Guest, $guest, $checks['selection'], GateDetailCode::Disabled),
+            $this->flag(GateCode::PolicyEnabled, GateScope::Policy, $policy, $checks['policy'], GateDetailCode::Disabled),
+            $this->flag(GateCode::PolicyFailureNotificationConfigured, GateScope::Policy, $policy, $candidate->policyFailureNotificationConfigured, GateDetailCode::Unconfigured),
+            $this->flag(GateCode::TargetEnabled, GateScope::Target, $target, $checks['target'], GateDetailCode::Disabled),
+            $this->flag(GateCode::ExplicitExclusionAbsent, GateScope::Guest, $guest, $checks['exclusion_absent'], GateDetailCode::ExplicitlyExcluded),
+            $this->flag(GateCode::GuestActive, GateScope::Guest, $guest, $checks['guest'], $candidate->guestActive ? (null === $candidate->guestTemplate ? GateDetailCode::Missing : GateDetailCode::Inactive) : GateDetailCode::Archived),
             $this->freshness->evaluate(GateCode::InventoryFresh, GateScope::Inventory, $guest, $now, $candidate->inventoryObservedAt),
             $this->flag(GateCode::PlacementPresent, GateScope::Placement, $guest, null !== $candidate->nodeId, GateDetailCode::Missing),
             $this->freshness->evaluate(GateCode::PlacementFresh, GateScope::Placement, $guest, $now, $candidate->placementObservedAt),
-            $this->flag(GateCode::TargetNodeAllowed, GateScope::Target, $node, $candidate->targetNodeAllowed, GateDetailCode::NotAllowed),
-            $this->flag(GateCode::TargetStorageEnabled, GateScope::Target, $target, $candidate->storageEnabled, GateDetailCode::Disabled),
-            $this->flag(GateCode::TargetStorageActive, GateScope::Target, $target, $candidate->storageActive, GateDetailCode::Inactive),
+            $this->flag(GateCode::TargetNodeAllowed, GateScope::Target, $node, $checks['target_node'], GateDetailCode::NotAllowed),
+            $this->flag(GateCode::TargetStorageEnabled, GateScope::Target, $target, $checks['storage_enabled'], GateDetailCode::Disabled),
+            $this->flag(GateCode::TargetStorageActive, GateScope::Target, $target, $checks['storage_active'], GateDetailCode::Inactive),
             $this->freshness->evaluate(GateCode::CapacityFresh, GateScope::Capacity, $target, $now, $candidate->capacityObservedAt),
             $this->flag(
                 GateCode::MinimumFreeSpace,
                 GateScope::Capacity,
                 $target,
-                null !== $candidate->availableBytes
-                    && null !== $candidate->minimumFreeBytes
-                    && $candidate->expectedBackupSizePresent
-                    && $candidate->minimumFreeBytes->lessThanOrEqual($candidate->availableBytes),
+                $candidate->expectedBackupSizePresent && BackupStartRules::capacityAvailable(
+                    $candidate->availableBytes, $candidate->minimumFreeBytes,
+                    new \App\Domain\Shared\UInt64Decimal('0'), new \App\Domain\Shared\UInt64Decimal('0'),
+                ),
                 null === $candidate->availableBytes
                     || null === $candidate->minimumFreeBytes
                     || !$candidate->expectedBackupSizePresent
@@ -239,9 +248,9 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             $this->flag(GateCode::PbsMappingValid, GateScope::PbsMapping, $target, $candidate->pbsMappingValid, GateDetailCode::InvalidMapping),
             $this->freshness->evaluate(GateCode::InventoryFresh, GateScope::PbsMapping, $target, $now, $candidate->pbsObservedAt),
             $this->freshness->evaluate(GateCode::ExecutorAuthorizationFresh, GateScope::Authorization, $target, $now, $candidate->executorObservedAt),
-            $this->flag(GateCode::ExecutorAuthorized, GateScope::Authorization, $target, $candidate->executorAuthorized, null === $candidate->executorObservedAt ? GateDetailCode::Missing : GateDetailCode::Unauthorized),
+            $this->flag(GateCode::ExecutorAuthorized, GateScope::Authorization, $target, $checks['executor'], null === $candidate->executorObservedAt ? GateDetailCode::Missing : GateDetailCode::Unauthorized),
             $this->flag(GateCode::PolicyRetentionCompatible, GateScope::Policy, $policy, $candidate->policyRetentionCompatible, GateDetailCode::Incompatible),
-            $this->flag(GateCode::ActiveRequestAbsent, GateScope::Request, $guest, $candidate->activeRequestAbsent, GateDetailCode::ActiveRequestExists),
+            $this->flag(GateCode::ActiveRequestAbsent, GateScope::Request, $guest, $checks['active_request_absent'], GateDetailCode::ActiveRequestExists),
         ];
 
         $reason = $this->reason($lease, $candidate, $now);
@@ -282,10 +291,11 @@ final readonly class RunAutomaticShadowEvaluation implements AutomaticShadowEval
             ? $now->add(new DateInterval('P100Y'))
             : $candidate->lastSuccessAt->add(new DateInterval('PT'.$candidate->maximumAgeSeconds.'S'));
         $bytes = null;
-        if (null !== $candidate->currentBytes && null !== $candidate->baselineBytes
+        $counterFresh = $this->freshness->isFresh($now, $candidate->writeStateObservedAt);
+        if ($counterFresh && null !== $candidate->currentBytes && null !== $candidate->baselineBytes
             && !$candidate->baselineBytes->lessThanOrEqual($candidate->currentBytes)) {
             $this->source->recordCounterReset($lease, $candidate, $now);
-        } elseif (null !== $candidate->currentBytes && null !== $candidate->baselineBytes
+        } elseif ($counterFresh && null !== $candidate->currentBytes && null !== $candidate->baselineBytes
             && null !== $candidate->bytesThreshold && null !== $candidate->cooldownSeconds) {
             $bytes = ByteReasonEvidence::fromCounters(
                 $candidate->lastSuccessAt->add(new DateInterval('PT'.$candidate->cooldownSeconds.'S')),

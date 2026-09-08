@@ -16,6 +16,7 @@ final readonly class ConfigurationCommandFactory
 {
     private const array COMMON = ['expectedRevision'];
     private const array TARGET = ['expectedRevision','displayName','connectionId','clusterId','storageId','minimumFreeBytes','fixedParallelLimit','pbsConnectionId','pbsDatastoreId','pbsNamespaceId','allowedNodeIds'];
+    private const array TARGET_DEFAULTS = ['defaultBackupMode','defaultCompression','defaultLegacyMaxfiles','defaultKeepAll','defaultKeepLast','defaultKeepHourly','defaultKeepDaily','defaultKeepWeekly','defaultKeepMonthly','defaultKeepYearly'];
     private const array POLICY = ['expectedRevision','displayName','connectionId','clusterId','targetId','priority','backupMode','compression','maximumAgeSeconds','bytesWrittenThreshold','cooldownSeconds','schedule','legacyMaxfiles','keepAll','keepLast','keepHourly','keepDaily','keepWeekly','keepMonthly','keepYearly','retentionExecutionEnabled','failureNotificationRecipients'];
     private const array BULK = ['expectedRevision','entries'];
 
@@ -32,7 +33,7 @@ final readonly class ConfigurationCommandFactory
         if (!is_array($decoded) || array_is_list($decoded)) throw new InvalidArgumentException('The command body must be an object.');
         /** @var array<string, mixed> $decoded */
         $allowed = match ($type) {
-            ConfigurationCommandType::TargetCreate, ConfigurationCommandType::TargetUpdate => self::TARGET,
+            ConfigurationCommandType::TargetCreate, ConfigurationCommandType::TargetUpdate => [...self::TARGET, ...self::TARGET_DEFAULTS],
             ConfigurationCommandType::PolicyCreate, ConfigurationCommandType::PolicyUpdate => self::POLICY,
             ConfigurationCommandType::SelectionUpsert, ConfigurationCommandType::SelectionDisable,
             ConfigurationCommandType::GuestOverrideUpsert, ConfigurationCommandType::GuestOverrideDisable => self::BULK,
@@ -44,7 +45,7 @@ final readonly class ConfigurationCommandFactory
         if (in_array($type, [ConfigurationCommandType::TargetCreate, ConfigurationCommandType::TargetUpdate,
             ConfigurationCommandType::PolicyCreate, ConfigurationCommandType::PolicyUpdate], true)) {
             foreach ($allowed as $required) {
-                if (!array_key_exists($required, $decoded)) throw new InvalidArgumentException('The command body is incomplete.');
+                if (!in_array($required, self::TARGET_DEFAULTS, true) && !array_key_exists($required, $decoded)) throw new InvalidArgumentException('The command body is incomplete.');
             }
         }
         $revision = $decoded['expectedRevision'] ?? null;

@@ -56,7 +56,22 @@ defineEmits<{
       </div>
       <div>
         <dt>Modus / Kompression</dt>
-        <dd>{{ policy.mode ?? "–" }} / {{ policy.compression ?? "–" }}</dd>
+        <dd>
+          {{ policy.effectiveMode ?? policy.mode ?? "Nicht festgelegt" }} /
+          {{
+            policy.effectiveCompression ??
+            policy.compression ??
+            "Nicht festgelegt"
+          }}
+          <small
+            v-if="
+              (policy.mode === null && policy.effectiveMode) ||
+              (policy.compression === null && policy.effectiveCompression)
+            "
+          >
+            (mit Zielvorgaben)</small
+          >
+        </dd>
       </div>
       <div>
         <dt>Zeitplan</dt>
@@ -88,14 +103,25 @@ defineEmits<{
       </div>
       <div>
         <dt>Retention</dt>
-        <dd>{{ retentionSummary(policy.desiredRetention) }}</dd>
+        <dd>
+          {{
+            retentionSummary(
+              policy.effectiveRetention ?? policy.desiredRetention,
+            )
+          }}
+          <small
+            v-if="policy.desiredRetention === null && policy.effectiveRetention"
+          >
+            (vom Backupziel)</small
+          >
+        </dd>
       </div>
       <div>
         <dt>PVE-Fehlermails</dt>
         <dd>
           {{
             policy.failureNotificationRecipients.length === 0
-              ? "Deaktiviert"
+              ? "Nicht konfiguriert"
               : policy.failureNotificationRecipients.join(", ")
           }}
         </dd>

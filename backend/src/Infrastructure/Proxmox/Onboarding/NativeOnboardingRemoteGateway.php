@@ -66,6 +66,7 @@ final readonly class NativeOnboardingRemoteGateway implements OnboardingRemoteGa
 
     /** @var list<array{string, string, string}> */
     private const array PVE_BACKUP_PROPAGATION_PROBES = [
+        ['/nodes', 'Sys.Audit', '/nodes/hoddmimir-propagation-probe'],
         ['/vms', 'VM.Backup', '/vms/999999999'],
         ['/storage', 'Datastore.AllocateSpace', '/storage/hoddmimir-propagation-probe'],
     ];

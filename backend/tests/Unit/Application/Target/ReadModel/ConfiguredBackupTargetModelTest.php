@@ -53,6 +53,17 @@ final class ConfiguredBackupTargetModelTest extends TestCase
             'pbsConnectionId' => null,
             'pbsDatastoreId' => null,
             'pbsNamespaceId' => null,
+            'defaultBackupMode' => null,
+            'defaultCompression' => null,
+            'defaultLegacyMaxfiles' => null,
+            'defaultKeepAll' => null,
+            'defaultKeepLast' => null,
+            'defaultKeepHourly' => null,
+            'defaultKeepDaily' => null,
+            'defaultKeepWeekly' => null,
+            'defaultKeepMonthly' => null,
+            'defaultKeepYearly' => null,
+
             'disabledAt' => '2026-07-12T10:00:00.000000Z',
             'allowedNodes' => [
                 ['id' => '21112233-4455-6677-8899-aabbccddeeff', 'name' => 'node-a'],
@@ -63,6 +74,25 @@ final class ConfiguredBackupTargetModelTest extends TestCase
         ], $payload);
 
         self::assertNull($this->target(false, null)->disabledAt, 'An enabled=false row without timestamp remains distinguishable as a draft.');
+    }
+
+    public function testDefaultsProjectionPreservesExplicitRetentionRules(): void
+    {
+        $defaults = new \App\Domain\Policy\BackupDefaults(\App\Domain\Policy\BackupMode::Snapshot,
+            \App\Domain\Policy\Compression::Zstd, \App\Domain\Policy\RetentionPolicy::prune(false, 1, 2, 3, 4, 5, 6));
+        $data = $this->target(false, null, defaults: $defaults)->toArray();
+        self::assertSame('snapshot', $data['defaultBackupMode']);
+        self::assertSame('zstd', $data['defaultCompression']);
+        self::assertFalse($data['defaultKeepAll']);
+        self::assertSame(1, $data['defaultKeepLast']);
+        self::assertSame(2, $data['defaultKeepHourly']);
+        self::assertSame(3, $data['defaultKeepDaily']);
+        self::assertSame(4, $data['defaultKeepWeekly']);
+        self::assertSame(5, $data['defaultKeepMonthly']);
+        self::assertSame(6, $data['defaultKeepYearly']);
+        self::assertNull($data['defaultLegacyMaxfiles']);
+        $legacy = new \App\Domain\Policy\BackupDefaults(retention: \App\Domain\Policy\RetentionPolicy::legacyMaxFiles(7));
+        self::assertSame(7, $this->target(false, null, defaults: $legacy)->toArray()['defaultLegacyMaxfiles']);
     }
 
     public function testQueryBindsCursorToSearchAndEnabledFilters(): void
@@ -178,6 +208,7 @@ final class ConfiguredBackupTargetModelTest extends TestCase
         ?string $disabledAt,
         int $revision = 3,
         ?int $fixedLimit = null,
+        \App\Domain\Policy\BackupDefaults $defaults = new \App\Domain\Policy\BackupDefaults(),
     ): ConfiguredBackupTarget {
         return new ConfiguredBackupTarget(
             self::ID,
@@ -205,6 +236,7 @@ final class ConfiguredBackupTargetModelTest extends TestCase
                 TargetActivationBlocker::ConcurrencyUnconfigured,
                 TargetActivationBlocker::ConcurrencyUnconfigured,
             ],
+            $defaults,
         );
     }
 }

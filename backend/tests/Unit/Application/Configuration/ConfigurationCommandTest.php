@@ -26,6 +26,7 @@ use App\Domain\Policy\PolicyId;
 use App\Domain\Policy\BackupPolicy;
 use App\Domain\Policy\BackupMode;
 use App\Domain\Policy\Compression;
+use App\Domain\Policy\FailureNotificationRecipients;
 use App\Domain\Policy\PolicyPriority;
 use App\Domain\Policy\PolicyRevision;
 use App\Domain\Policy\PolicyThresholds;
@@ -251,7 +252,8 @@ final class FakeConfigurationRepository implements TargetCommandRepository, Poli
         $id = new PolicyId(str_repeat('i', 16));
         $this->policy = BackupPolicy::draft($id, new PolicyRevision(1), new BackupTargetId(str_repeat('t', 16)),
             BackupMode::Snapshot, Compression::Zstd, RetentionPolicy::prune(null, 1, null, null, null, null, null),
-            new PolicyPriority(1), new PolicyThresholds(60, null, null), Schedule::CollectorCycle);
+            new PolicyPriority(1), new PolicyThresholds(60, null, null), Schedule::CollectorCycle,
+            new FailureNotificationRecipients(['ops@example.test']));
     }
     public function find(BackupTargetId $id): ?BackupTarget { return $this->target; }
     public function findPolicy(PolicyId $id): ?BackupPolicy

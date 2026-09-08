@@ -21,10 +21,14 @@ final readonly class OnboardingEvidenceVerifier
         'Sys.Audit', 'VM.Audit', 'Pool.Audit', 'Datastore.Audit', 'Sys.Log',
     ];
     private const array PVE_BACKUP_REQUIRED = [
+        ['/nodes', 'Sys.Audit'],
         ['/vms', 'VM.Backup'],
         ['/storage', 'Datastore.AllocateSpace'],
     ];
-    private const array PVE_BACKUP_ALLOWED = ['VM.Backup', 'Datastore.AllocateSpace'];
+    private const array PVE_BACKUP_ALLOWED = [
+        'VM.Backup', 'Datastore.AllocateSpace',
+        'Sys.Audit', 'VM.Audit', 'Pool.Audit', 'Datastore.Audit',
+    ];
     private const array PBS_SCAN_REQUIRED = [
         ['/system/status', 'Sys.Audit'],
         ['/system/tasks', 'Sys.Audit'],

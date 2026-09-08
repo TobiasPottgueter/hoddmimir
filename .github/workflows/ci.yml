@@ -134,6 +134,10 @@ jobs:
       - name: Test deployment behavior
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
+      - name: Verify real MariaDB maintenance backup and restore
+        working-directory: .
+        run: make maintenance-db-test
+
   backend-validation:
     name: Backend validation
     runs-on: ubuntu-latest

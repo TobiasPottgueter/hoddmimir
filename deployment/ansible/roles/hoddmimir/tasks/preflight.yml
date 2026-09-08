@@ -44,6 +44,11 @@
       - hoddmimir_deployment_profile is string
       - hoddmimir_deployment_profile in ['production', 'lab']
       - hoddmimir_manage_https is boolean
+      - hoddmimir_maintenance_external_schedulers_paused is boolean
+      - hoddmimir_maintenance_timeout_seconds is integer
+      - hoddmimir_maintenance_timeout_seconds >= 1
+      - hoddmimir_maintenance_timeout_seconds <= 86400
+      - hoddmimir_maintenance_directory == hoddmimir_install_directory ~ '/maintenance'
       - hoddmimir_project_name is match('^[a-z0-9][a-z0-9_-]{0,62}$')
       - hoddmimir_image_repository is string
       - hoddmimir_image_repository is match('^[a-z0-9.-]+/[a-z0-9._-]+(?:/[a-z0-9._-]+)*$')

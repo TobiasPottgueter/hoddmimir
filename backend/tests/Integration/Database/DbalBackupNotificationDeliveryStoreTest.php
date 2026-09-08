@@ -162,12 +162,15 @@ final class DbalBackupNotificationDeliveryStoreTest extends DatabaseTestCase
         try {
             $this->connection()->insert('backup_notification_outbox', [
                 'id' => self::id('event'),
+                'obligation_id' => self::id('root'),
+                'occurrence_id' => self::id('run'),
                 'root_request_id' => self::id('root'),
                 'request_id' => self::id('request'),
                 'run_id' => self::id('run'),
                 'notification_kind' => 'failure',
                 'event_key' => 'task_failed',
                 'attempt' => 7,
+                'check_number' => 7,
                 'payload_json' => $payload,
                 'state' => 'pending',
                 'delivery_attempts' => 0,
@@ -175,6 +178,8 @@ final class DbalBackupNotificationDeliveryStoreTest extends DatabaseTestCase
                 'created_at' => self::format($this->now),
             ], [
                 'id' => ParameterType::BINARY,
+                'obligation_id' => ParameterType::BINARY,
+                'occurrence_id' => ParameterType::BINARY,
                 'root_request_id' => ParameterType::BINARY,
                 'request_id' => ParameterType::BINARY,
                 'run_id' => ParameterType::BINARY,

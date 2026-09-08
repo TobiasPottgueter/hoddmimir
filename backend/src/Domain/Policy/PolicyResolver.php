@@ -25,13 +25,13 @@ final readonly class PolicyResolver
             throw new DomainException('An enabled backup policy is not valid for the requested PVE major.');
         }
 
-        $retention = $guestRetention ?? $policy->retention;
+        $retention = $guestRetention ?? $policy->effectiveRetention();
         /** @var \App\Domain\Target\BackupTargetId $targetId */
         $targetId = $policy->targetId;
         /** @var BackupMode $mode */
-        $mode = $policy->mode;
+        $mode = $policy->effectiveMode();
         /** @var Compression $compression */
-        $compression = $policy->compression;
+        $compression = $policy->effectiveCompression();
         /** @var RetentionPolicy $retention */
         /** @var PolicyPriority $priority */
         $priority = $policy->priority;

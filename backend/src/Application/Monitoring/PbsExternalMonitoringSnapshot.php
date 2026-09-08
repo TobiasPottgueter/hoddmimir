@@ -14,7 +14,10 @@ final readonly class PbsExternalMonitoringSnapshot
 {
     /** @var array<string, string> */ public array $errors;
 
-    /** @param array<string, string> $errors Keys: acl, prune, sync, verify, tasks. */
+    /**
+     * @param array<string, string> $errors Keys: acl, prune, sync, verify, tasks.
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $inspections
+     */
     public function __construct(
         public ?PbsAclEvidence $acl,
         public ?PbsJobListSnapshot $pruneJobs,
@@ -22,6 +25,7 @@ final readonly class PbsExternalMonitoringSnapshot
         public ?PbsJobListSnapshot $verifyJobs,
         public ?PbsTaskScanSnapshot $tasks,
         array $errors,
+        public array $inspections = [],
     ) {
         foreach ($errors as $key => $code) {
             if (!isset(['acl' => true, 'prune' => true, 'sync' => true, 'verify' => true, 'tasks' => true][$key])

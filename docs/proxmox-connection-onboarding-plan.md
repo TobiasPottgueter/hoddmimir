@@ -59,7 +59,11 @@ folgenden Zielzustand:
 
 Die Gruppe erhält am Root-Pfad `/` beide Rollen mit Propagation. Der
 Scan-Token erhält dort ausschließlich `HoddmimirScan`, der Backup-Token
-ausschließlich `HoddmimirBackup`, jeweils ebenfalls mit Propagation. Die
+`HoddmimirBackup`, jeweils ebenfalls mit Propagation. Für die Task-Sicht
+benötigt der Backup-Token zusätzlich effektives `Sys.Audit` auf den Nodes.
+Bereits über `/` geerbte Rechte aus `HoddmimirScan` genügen; keine neue Rolle
+oder zusätzliche ACL ist dann nötig. Fehlt die Sicht, kann die bestehende
+Rolle `HoddmimirScan` gezielt auf `/nodes` ergänzt werden. Die
 Gruppenzuweisung gibt dem Basisbenutzer die Vereinigungsmenge, während die
 Token-ACLs die effektiven Laufzeitrechte trennen. Neue Nodes, VMs, CTs, Pools
 und Storages sind ohne spätere ACL-Anpassung automatisch abgedeckt.
@@ -141,18 +145,21 @@ Der Backup-Token muss installationsweit propagiert besitzen:
 
 | Pfadfamilie | erforderliches Privileg |
 |---|---|
+| `/nodes` einschließlich aller Nodes | `Sys.Audit` (direkt oder von `/` geerbt) |
 | `/vms` und durch Pools enthaltene Gäste | `VM.Backup` |
 | `/storage` und durch Pools enthaltene Storages | `Datastore.AllocateSpace` |
 
 Die kombinierte Rolle kann auf Pfaden zusätzlich das jeweils dort nicht
 ausgewertete Schwesterprivileg zeigen. Entscheidend ist, dass
 `VM.Backup` auf allen Gästen und `Datastore.AllocateSpace` auf allen Storages
-wirksam ist und kein drittes Privileg hinzukommt.
+wirksam ist. Die vier Leserechte von `HoddmimirScan` sind zusätzlich zulässig,
+auch wenn sie bereits von `/` geerbt werden; weitere Schreibrechte bleiben verboten.
 
 Insbesondere sind `Sys.Modify`, `Permissions.Modify`, `VM.PowerMgmt`,
 `VM.Allocate`, `VM.Config.*`, `Datastore.Allocate` sowie Benutzer- und
 ACL-Verwaltung harte Fehler. Der Worker darf eigene VZDump-Tasks anhand ihrer
-UPID ohne diese Zusatzrechte lesen und stoppen. Fremde Tasks, root-only
+UPID ohne diese Zusatzrechte lesen und stoppen. Fremde Tasks werden zur
+Slotprüfung nur gelesen; ihr Abbruch bleibt verboten. Root-only
 VZDump-Parameter und Parameter mit `Sys.Modify`-Bedarf bleiben verboten.
 Löschwirksame `maxfiles`-/`prune-backups`-Parameter dürfen nur aus der separat
 freigegebenen `approvedDeletionRetention` entstehen; ohne die explizite

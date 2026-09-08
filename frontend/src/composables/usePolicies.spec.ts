@@ -59,6 +59,9 @@ describe("usePolicies", () => {
     expect(
       policyBlockerLabel("retention_execution_forbidden_for_pbs_target"),
     ).toContain("PBS-Ziele");
+    expect(
+      policyBlockerLabel("failure_notification_recipients_unconfigured"),
+    ).toContain("PVE-Fehlermails");
     for (const [scope, label] of [
       ["global", "Global"],
       ["connection", "Verbindung"],

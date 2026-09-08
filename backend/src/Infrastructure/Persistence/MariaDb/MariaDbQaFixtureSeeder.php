@@ -164,6 +164,7 @@ final readonly class MariaDbQaFixtureSeeder implements QaFixtureSeeder
                     'revision' => 1, 'policy_priority' => 300, 'backup_mode' => 'snapshot',
                     'compression' => 'zstd', 'maximum_age_seconds' => 86400,
                     'schedule' => 'collector_cycle', 'keep_last' => 7,
+                    'failure_notification_recipients_json' => '["ops@example.invalid"]',
                     'retention_execution_enabled' => 0, 'created_at' => $now, 'updated_at' => $now,
                 ]);
                 foreach ([[self::GLOBAL_ASSIGNMENT, 'global', null, 'include'], [self::EXCLUDE_ASSIGNMENT, 'guest', self::QEMU, 'exclude']] as [$id, $scope, $guestId, $value]) {
@@ -203,7 +204,7 @@ final readonly class MariaDbQaFixtureSeeder implements QaFixtureSeeder
                     'target_id' => $target, 'target_revision' => 1,
                     'inventory_observed_at' => $now, 'capacity_observed_at' => $now,
                 ]);
-                $resolved='{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":7}},"failureNotificationRecipients":[]}';
+                $resolved='{"version":2,"mode":"snapshot","compression":"zstd","desiredRetention":{"prune-backups":{"keep-last":7}},"failureNotificationRecipients":["ops@example.invalid"]}';
                 $request=$this->id(self::REQUEST);$backupRun=$this->id(self::BACKUP_RUN);
                 $this->connection->insert('backup_requests',[
                     'id'=>$request,'root_request_id'=>$request,'attempt'=>1,'origin'=>'manual','state'=>'succeeded','reason'=>'manual','priority'=>400,
@@ -219,7 +220,7 @@ final readonly class MariaDbQaFixtureSeeder implements QaFixtureSeeder
                 $this->connection->insert('backup_run_events',['id'=>$this->id('f0000000-0000-4000-8000-000000000002'),'run_id'=>$backupRun,'sequence_no'=>1,'event_type'=>'task_succeeded','state'=>'succeeded','occurred_at'=>$now]);
                 $this->connection->insert('backup_run_log_entries',['run_id'=>$backupRun,'line_no'=>0,'observed_at'=>$now,'content'=>'QA sanitized backup log']);
                 $payload=json_encode(['consecutiveFailures'=>1,'detailCode'=>null,'guestName'=>'qa-lxc-201','guestType'=>'lxc','nextRetryAt'=>null,'node'=>'qa-node-b','openedAt'=>$this->clock->now()->modify('-1 hour')->format('Y-m-d\TH:i:s.u\Z'),'occurredAt'=>$this->clock->now()->format('Y-m-d\TH:i:s.u\Z'),'problemCode'=>'task_failed','targetLabel'=>'QA Existing Target','vmid'=>201],JSON_THROW_ON_ERROR);
-                $this->connection->insert('backup_notification_outbox',['id'=>$this->id(self::NOTIFICATION),'root_request_id'=>$request,'request_id'=>$request,'run_id'=>$backupRun,'notification_kind'=>'recovery','event_key'=>'qa.recovery','attempt'=>1,'payload_json'=>$payload,'state'=>'sent','delivery_attempts'=>1,'available_at'=>$now,'created_at'=>$now,'sent_at'=>$now]);
+                $this->connection->insert('backup_notification_outbox',['id'=>$this->id(self::NOTIFICATION),'obligation_id'=>$this->id(self::REQUEST),'occurrence_id'=>$backupRun,'root_request_id'=>$request,'request_id'=>$request,'run_id'=>$backupRun,'notification_kind'=>'recovery','event_key'=>'qa.recovery','attempt'=>1,'check_number'=>1,'payload_json'=>$payload,'state'=>'sent','delivery_attempts'=>1,'available_at'=>$now,'created_at'=>$now,'sent_at'=>$now]);
             });
         } finally {
             $this->connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');

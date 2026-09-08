@@ -11,6 +11,7 @@ enum GateCode: string
     case NodeEnabled = 'node_enabled';
     case GuestEnabled = 'guest_enabled';
     case PolicyEnabled = 'policy_enabled';
+    case PolicyFailureNotificationConfigured = 'policy_failure_notification_configured';
     case PolicyRetentionCompatible = 'policy_retention_compatible';
     case TargetEnabled = 'target_enabled';
     case ExplicitExclusionAbsent = 'explicit_exclusion_absent';

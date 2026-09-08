@@ -9,8 +9,8 @@ FROM ${PHP_IMAGE} AS php-base
 
 ARG ICU_VERSION=76.1-r1
 ARG C_ARES_VERSION=1.34.8-r0
-ARG CURL_VERSION=8.20.0-r0
-ARG LIBCURL_VERSION=8.20.0-r0
+ARG CURL_VERSION=8.22.0-r0
+ARG LIBCURL_VERSION=8.22.0-r0
 ARG AUTOCONF_VERSION=2.72-r1
 ARG DPKG_DEV_VERSION=1.22.21-r0
 ARG DPKG_VERSION=1.22.21-r0
@@ -22,6 +22,8 @@ ARG MAKE_VERSION=4.4.1-r3
 ARG PKGCONF_VERSION=2.5.1-r0
 ARG RE2C_VERSION=4.3.1-r0
 ARG SU_EXEC_VERSION=0.3-r0
+ARG OPENSSL_VERSION=3.5.8-r0
+ARG SQLITE_VERSION=3.53.4-r0
 
 ENV APP_ENV=prod \
     APP_DEBUG=0 \
@@ -33,6 +35,10 @@ RUN apk add --no-cache \
         "curl=${CURL_VERSION}" \
         "icu-libs=${ICU_VERSION}" \
         "libcurl=${LIBCURL_VERSION}" \
+        "libcrypto3=${OPENSSL_VERSION}" \
+        "libssl3=${OPENSSL_VERSION}" \
+        "openssl=${OPENSSL_VERSION}" \
+        "sqlite-libs=${SQLITE_VERSION}" \
         "su-exec=${SU_EXEC_VERSION}" \
     && apk add --no-cache --virtual .php-ext-build-deps \
         "autoconf=${AUTOCONF_VERSION}" \

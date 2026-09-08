@@ -15,6 +15,7 @@ final readonly class SubmitClaimedBackupCommand
         public string $claimToken,
         public int $claimFence,
         public DateTimeImmutable $now,
+        public ?BackupNodeTaskEvidence $taskEvidence = null,
     ) {
         foreach ([$requestId, $runId, $claimToken] as $id) {
             if (16 !== strlen($id)) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import QueueHistory from "@/components/operations/QueueHistory.vue";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Message from "primevue/message";
@@ -93,6 +94,7 @@ onMounted(() => {
         </p>
       </div>
     </div>
+    <QueueHistory />
     <Message v-if="store.error" severity="error" :closable="false">{{
       store.error
     }}</Message>

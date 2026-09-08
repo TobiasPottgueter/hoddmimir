@@ -60,6 +60,53 @@ final class BackupOperationsApiTest extends WebTestCase
         $this->client->request('GET','/api/v1/operations/runs/'.self::UUID); self::assertResponseIsSuccessful();
         $this->client->request('GET','/api/v1/operations/runs/missing'); self::assertResponseStatusCodeSame(404);
     }
+    public function testQueueHistoryIsProtectedBoundedAndValidatesFilters(): void
+    {
+        $metrics = $this->createMock(\App\Application\Backup\Metrics\QueueMetricStore::class);
+        $metrics->expects(self::exactly(2))->method('history')->willReturn([]);
+        self::getContainer()->set(\App\Infrastructure\Persistence\MariaDb\DbalQueueMetricStore::class, $metrics);
+        $this->auth->authenticated = false;
+        $this->client->request('GET', '/api/v1/operations/queue/history');
+        self::assertResponseStatusCodeSame(401);
+        $this->auth->authenticated = true;
+        $this->auth->permissions = [];
+        $this->client->request('GET', '/api/v1/operations/queue/history');
+        self::assertResponseStatusCodeSame(403);
+        $this->auth->permissions = [Permission::InventoryRead];
+        foreach (['hours=25', 'hours=024', 'targetId=invalid', 'unexpected=yes'] as $query) {
+            $this->client->request('GET', '/api/v1/operations/queue/history?'.$query);
+            self::assertResponseStatusCodeSame(400);
+        }
+        $this->client->request('GET', '/api/v1/operations/queue/history');
+        self::assertResponseIsSuccessful();
+        self::assertSame(['bucketSeconds'=>120, 'retentionDays'=>30, 'items'=>[]], $this->json());
+        $this->client->request('GET', '/api/v1/operations/queue/history?hours=720&targetId='.self::TARGET_ID);
+        self::assertResponseIsSuccessful();
+        self::assertSame(3600, $this->json()['bucketSeconds']);
+    }
+
+    public function testPbsTasksAreProtectedAndValidateTheReadSurface(): void
+    {
+        $tasks = $this->createStub(\App\Application\Monitoring\PbsTaskReadModel::class);
+        $tasks->method('tasks')->willReturn(['items' => [], 'total' => 0]);
+        $tasks->method('detail')->willReturn(null);
+        self::getContainer()->set(\App\Infrastructure\Persistence\MariaDb\DbalPbsTaskReadModel::class, $tasks);
+        $this->auth->authenticated = false;
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks'); self::assertResponseStatusCodeSame(401);
+        $this->auth->authenticated = true; $this->auth->permissions = [];
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks'); self::assertResponseStatusCodeSame(403);
+        $this->auth->permissions = [Permission::InventoryRead];
+        foreach (['offset=-1', 'offset=10000000', 'connectionId=wrong', 'scan=now'] as $query) {
+            $this->client->request('GET', '/api/v1/operations/pbs-tasks?'.$query); self::assertResponseStatusCodeSame(400);
+        }
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks'); self::assertResponseIsSuccessful();
+        self::assertSame(['items' => [], 'total' => 0], $this->json());
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks?connectionId='.self::UUID.'&offset=50'); self::assertResponseIsSuccessful();
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks/'.self::UUID); self::assertResponseStatusCodeSame(404);
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks/invalid'); self::assertResponseStatusCodeSame(400);
+        $this->client->request('GET', '/api/v1/operations/pbs-tasks/'.self::UUID.'?download=true'); self::assertResponseStatusCodeSame(400);
+    }
+
     public function testAllReadRoutesAndClosedQueryErrorsAreMapped(): void
     {
         $this->auth->permissions=[Permission::InventoryRead,Permission::AuditRead];

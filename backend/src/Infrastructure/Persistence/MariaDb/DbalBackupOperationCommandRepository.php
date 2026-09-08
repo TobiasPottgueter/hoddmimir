@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Persistence\MariaDb;
 
+use App\Domain\Scheduler\BackupStartRules;
 use App\Application\Backup\Operations\BackupOperationCommand;
 use App\Application\Backup\Operations\BackupOperationCommandRepository;
 use App\Application\Backup\Operations\BackupOperationCommandResult;
@@ -97,6 +98,7 @@ final readonly class DbalBackupOperationCommandRepository implements BackupOpera
 
         $row = $this->connection->fetchAssociative(<<<'SQL'
 SELECT policy.*, target.revision AS target_revision, target.status AS target_status,
+       target.default_backup_mode, target.default_compression, target.default_legacy_maxfiles, target.default_keep_all, target.default_keep_last, target.default_keep_hourly, target.default_keep_daily, target.default_keep_weekly, target.default_keep_monthly, target.default_keep_yearly,
        storage.storage_type AS target_storage_type,
        guest.connection_id AS guest_connection_id, guest.cluster_id AS guest_cluster_id,
        guest.inventory_state AS guest_state, guest.is_template, guest.provisioned_size_bytes,
@@ -125,7 +127,7 @@ SQL, ['guest_id' => $command->guestId, 'policy_id' => $command->policyId],
         if ($revision !== $lockedPolicyRevision) throw new RuntimeException('The locked policy revision changed within the manual request transaction.');
         if ('enabled' !== $this->text($row['status'] ?? null)) return $this->blocked('policy_not_enabled');
         if ('enabled' !== $this->text($row['target_status'] ?? null)) return $this->blocked('target_not_enabled');
-        if ('active' !== $this->text($row['guest_state'] ?? null) || 1 === $this->nullableInteger($row['is_template'] ?? null)) return $this->blocked('guest_not_eligible');
+        if (!BackupStartRules::guestEligible('active' === $this->text($row['guest_state'] ?? null), null === ($row['is_template'] ?? null) ? null : 1 === $this->nullableInteger($row['is_template']))) return $this->blocked('guest_not_eligible');
         if (!is_string($row['node_id'] ?? null) || !is_string($row['placement_observed_at'] ?? null)) return $this->blocked('placement_missing');
         $size = $this->nullableInteger($row['provisioned_size_bytes'] ?? null);
         if (null === $size || $size < 1) return $this->blocked('expected_size_missing');
@@ -133,14 +135,18 @@ SQL, ['guest_id' => $command->guestId, 'policy_id' => $command->policyId],
         $now = $this->databaseNow();
         $pveMajor = $this->nullableInteger($row['pve_major'] ?? null);
         if (null === $pveMajor) return $this->blocked('pve_evidence_missing');
+        $failureRecipients = $this->failureRecipients($row['failure_notification_recipients_json'] ?? null);
+        if (!BackupStartRules::notificationRecipientsConfigured($failureRecipients->addresses)) return $this->blocked('failure_notification_recipients_unconfigured');
         $policy = BackupPolicy::rehydrate(
             new PolicyId($command->policyId), new PolicyRevision($revision), PolicyStatus::Enabled,
             new BackupTargetId($this->binary($row['target_id'] ?? null)),
-            BackupMode::from($this->text($row['backup_mode'] ?? null)), Compression::from($this->text($row['compression'] ?? null)),
+            null === ($row['backup_mode'] ?? null) ? null : BackupMode::from($this->text($row['backup_mode'])),
+            null === ($row['compression'] ?? null) ? null : Compression::from($this->text($row['compression'])),
             $this->retention($row, ''), new PolicyPriority($this->integer($row['policy_priority'] ?? null)),
             new PolicyThresholds($this->nullableInteger($row['maximum_age_seconds'] ?? null), $this->nullableDecimal($row['bytes_written_threshold'] ?? null), $this->nullableInteger($row['cooldown_seconds'] ?? null)),
             Schedule::from($this->text($row['schedule'] ?? null)),
-            $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),
+            $failureRecipients,
+            (new BackupDefaultsMapper())->fromRow($row),
         );
         $resolvedPolicy = $this->policyResolver->resolve(
             $policy, $pveMajor,

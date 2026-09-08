@@ -24,6 +24,7 @@ use App\Application\Proxmox\Pve\PveBackupApiFailureCode;
 use App\Application\Proxmox\Pve\PveBackupClient;
 use App\Application\Proxmox\Pve\PveBackupClientProvider;
 use App\Application\Proxmox\Pve\PveBackupCompression;
+use App\Application\Proxmox\Pve\PveBackupFailureRecipients;
 use App\Application\Proxmox\Pve\PveBackupMode;
 use App\Application\Proxmox\Pve\PveBackupSubmission;
 use App\Application\Proxmox\Pve\PveBackupSubmissionResult;
@@ -101,12 +102,88 @@ final class BackupExecutionApplicationTest extends TestCase
         self::assertSame(['VM.Backup', 'Datastore.AllocateSpace'], $blocked->missingPermissions);
     }
 
+    public function testManualBackupOccupiesSlotAndDefersWithoutCreatingRunThenAllowsStart(): void
+    {
+        $transaction = new RecordingSubmissionTransaction();
+        $client = new FakeBackupClient();
+        $client->activeTasks = [new \App\Application\Proxmox\Pve\PveBackupTask(
+            PveUpid::parse('UPID:pve-a:00000001:00000002:67000000:vzdump:999:root@pam:'),
+            \App\Application\Proxmox\Pve\PveTaskSource::Active, null, 'RUNNING',
+        )];
+        $service = new SubmitClaimedBackup(new MutableExecutionGate(true), $transaction, $client,
+            new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new ExecutionClock());
+        $result = $service->execute($this->submitCommand());
+        self::assertSame('remote_backup_running', $result->blockerCode);
+        self::assertSame(0, $client->submitCalls);
+        self::assertSame(0, $transaction->prepareCalls);
+        self::assertSame(['remote_backup_running'], $transaction->deferred);
+        $client->activeTasks = [];
+        $service->execute($this->submitCommand());
+        self::assertSame(1, $client->submitCalls);
+        self::assertSame(1, $transaction->prepareCalls);
+        self::assertNotNull($transaction->preparedCommand?->taskEvidence);
+    }
+
+    public function testFailedTaskReadDefersWithoutSubmissionOrFailureAttempt(): void
+    {
+        $transaction = new RecordingSubmissionTransaction();
+        $client = new FakeBackupClient();
+        $client->taskFailure = PveBackupApiFailure::for(PveBackupApiFailureCode::PermissionDenied);
+        $service = new SubmitClaimedBackup(new MutableExecutionGate(true), $transaction, $client,
+            new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new ExecutionClock());
+        self::assertSame('remote_tasks_unavailable', $service->execute($this->submitCommand())->blockerCode);
+        self::assertSame(0, $client->submitCalls);
+        self::assertSame(0, $transaction->prepareCalls);
+        self::assertSame([], $transaction->notices);
+    }
+
+    public function testSlowTaskReadExpiresEvidenceBeforeAnyRunOrPost(): void
+    {
+        $transaction = new RecordingSubmissionTransaction();
+        $client = new FakeBackupClient();
+        $clock = new ExecutionClock();
+        $client->onTaskRead = static function () use ($clock): void { $clock->at = $clock->now()->modify('+31 seconds'); };
+        $service = new SubmitClaimedBackup(new MutableExecutionGate(true), $transaction, $client,
+            new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), $clock);
+        self::assertSame('remote_tasks_stale', $service->execute($this->submitCommand())->blockerCode);
+        self::assertSame(0, $client->submitCalls);
+        self::assertSame(0, $transaction->prepareCalls);
+    }
+
+    public function testPartialTaskPageAndMissingScopeCannotCreateRun(): void
+    {
+        $transaction = new RecordingSubmissionTransaction();
+        $client = new FakeBackupClient();
+        $client->taskIssues = [new \App\Application\Proxmox\Pve\PveBackupInventoryIssue(
+            \App\Application\Proxmox\Pve\PveBackupInventoryIssueCode::InvalidField,
+            '/nodes/pve-a/tasks', '/data/0',
+        )];
+        $service = new SubmitClaimedBackup(new MutableExecutionGate(true), $transaction, $client,
+            new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new ExecutionClock());
+        self::assertSame('remote_tasks_unavailable', $service->execute($this->submitCommand())->blockerCode);
+        $transaction->nodes = [];
+        self::assertSame('remote_tasks_unavailable', $service->execute($this->submitCommand())->blockerCode);
+        self::assertSame(0, $client->submitCalls);
+        self::assertSame(0, $transaction->prepareCalls);
+    }
+
+    public function testEveryRequiredNodeIsReadAndUnknownScopeBlocks(): void
+    {
+        $client = new FakeBackupClient();
+        $check = new \App\Application\Backup\Execution\CheckBackupNodeTasks($client);
+        self::assertNull($check->blocker(self::ID, ['old-node', 'new-node', 'old-node']));
+        self::assertSame(['old-node', 'new-node'], $client->taskNodes);
+        self::assertSame('remote_tasks_unavailable', $check->blocker(self::ID, []));
+        $client->rawTaskCount = 1;
+        self::assertSame('remote_tasks_unavailable', $check->blocker(self::ID, ['node-a']));
+    }
+
     public function testExecutionGateAndPreparationPreventEveryWriteBeforePreparedNow(): void
     {
         $gate = new MutableExecutionGate(false);
         $transaction = new RecordingSubmissionTransaction();
         $client = new FakeBackupClient();
-        $orchestrator = new SubmitClaimedBackup($gate, $transaction, $client, new ControlledRetryPolicy());
+        $orchestrator = new SubmitClaimedBackup($gate, $transaction, $client, new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new ExecutionClock());
 
         self::assertSame(SubmissionExecutionStatus::Disabled, $orchestrator->execute($this->submitCommand())->status);
         self::assertSame(0, $client->submitCalls);
@@ -136,7 +213,7 @@ final class BackupExecutionApplicationTest extends TestCase
         $gate = new MutableExecutionGate(true);
         $transaction = new RecordingSubmissionTransaction();
         $client = new FakeBackupClient();
-        $orchestrator = new SubmitClaimedBackup($gate, $transaction, $client, new ControlledRetryPolicy());
+        $orchestrator = new SubmitClaimedBackup($gate, $transaction, $client, new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), new ExecutionClock());
 
         $upid = PveUpid::parse('UPID:pve-a:0000002A:000F4240:67000000:vzdump:101:backup@pve:');
         $client->result = PveBackupSubmissionResult::accepted($upid);
@@ -305,7 +382,8 @@ final class BackupExecutionApplicationTest extends TestCase
     {
         return new PveBackupSubmission(
             'pve-a', 101, PveGuestType::Qemu, 'backup-store',
-            PveBackupMode::Snapshot, PveBackupCompression::Zstd, legacyMaxFiles: 1,
+            PveBackupMode::Snapshot, PveBackupCompression::Zstd,
+            new PveBackupFailureRecipients(['ops@example.invalid']), legacyMaxFiles: 1,
         );
     }
 
@@ -336,13 +414,18 @@ final class RecordingSubmissionTransaction implements BackupSubmissionTransactio
     public SubmissionPreparation $preparation;
     public ExistingSubmissionStatus $existing = ExistingSubmissionStatus::FreshClaim;
     public int $inspectCalls = 0;
+    /** @var list<string> */ public array $nodes = ['pve-a'];
     public int $prepareCalls = 0;
+    /** @var list<string> */ public array $deferred = [];
+    public ?SubmitClaimedBackupCommand $preparedCommand = null;
     /** @var list<string> */ public array $records = [];
 
     /** @var list<DefinitiveBackupFailureNotice> */ public array $notices = [];
-    public function __construct() { $this->preparation = new SubmissionPreparation(SubmissionPreparationStatus::PreparedNow, submission: new PreparedBackupSubmission(new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'backup-store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, legacyMaxFiles: 1), 1, str_repeat('g', 16), str_repeat('b', 16), 'Primary target', 'Guest 101')); }
+    public function __construct() { $this->preparation = new SubmissionPreparation(SubmissionPreparationStatus::PreparedNow, submission: new PreparedBackupSubmission(new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'backup-store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients(['ops@example.invalid']), legacyMaxFiles: 1), 1, str_repeat('g', 16), str_repeat('b', 16), 'Primary target', 'Guest 101')); }
     public function inspectExistingSubmission(SubmitClaimedBackupCommand $command): ExistingSubmissionStatus { ++$this->inspectCalls; return $this->existing; }
-    public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation { ++$this->prepareCalls; return $this->preparation; }
+    public function taskInspectionNodes(SubmitClaimedBackupCommand $command): array { return $this->nodes; }
+    public function deferRemoteTaskCheck(SubmitClaimedBackupCommand $command, string $blocker): void { $this->deferred[] = $blocker; }
+    public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation { ++$this->prepareCalls; $this->preparedCommand = $command; return $this->preparation; }
     public function recordAccepted(SubmitClaimedBackupCommand $command, PveUpid $upid): void { $this->records[] = 'accepted'; }
     public function recordDefinitiveRejection(SubmitClaimedBackupCommand $command, PveBackupApiFailureCode $failure, DefinitiveBackupFailureNotice $notice): void { $this->records[] = 'rejected:'.$failure->value; $this->notices[] = $notice; }
     public function recordAmbiguous(SubmitClaimedBackupCommand $command, ?PveBackupApiFailureCode $failure): void { $this->records[] = 'ambiguous:'.(null === $failure ? 'none' : $failure->value); }
@@ -351,6 +434,12 @@ final class RecordingSubmissionTransaction implements BackupSubmissionTransactio
 final class FakeBackupClient implements PveBackupClient, PveBackupClientProvider
 {
     public int $submitCalls = 0;
+    /** @var list<\App\Application\Proxmox\Pve\PveBackupTask> */ public array $activeTasks = [];
+    /** @var list<string> */ public array $taskNodes = [];
+    public ?PveBackupApiFailure $taskFailure = null;
+    public int $rawTaskCount = 0;
+    /** @var list<\App\Application\Proxmox\Pve\PveBackupInventoryIssue> */ public array $taskIssues = [];
+    public ?\Closure $onTaskRead = null;
     public PveBackupSubmissionResult $result;
     public ?PveBackupApiFailure $failure = null;
     public ?PveBackupSubmission $lastSubmission = null;
@@ -359,7 +448,7 @@ final class FakeBackupClient implements PveBackupClient, PveBackupClientProvider
     public function forRequest(string $requestId): PveBackupClient { return $this; }
     public function taskStatus(PveUpid $upid): PveTaskStatus { throw new \LogicException(); }
     public function taskLog(PveUpid $upid, PveTaskLogQuery $query): PveTaskLogPage { throw new \LogicException(); }
-    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { throw new \LogicException(); }
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { $this->taskNodes[] = $node; if (null !== $this->onTaskRead) ($this->onTaskRead)(); if (null !== $this->taskFailure) throw $this->taskFailure; return new PveTaskPage($query, max($this->rawTaskCount, count($this->activeTasks)), $this->activeTasks, $this->taskIssues); }
     public function stopTask(PveUpid $upid): PveTaskStopResult { throw new \LogicException(); }
 }
 
@@ -380,5 +469,6 @@ final class InMemoryExecutorEvidenceStore implements ExecutorPermissionEvidenceS
 
 final class ExecutionClock implements Clock
 {
-    public function now(): DateTimeImmutable { return new DateTimeImmutable('2026-07-12T18:00:00Z'); }
+    public ?DateTimeImmutable $at = null;
+    public function now(): DateTimeImmutable { return $this->at ?? new DateTimeImmutable('2026-07-12T18:00:00Z'); }
 }

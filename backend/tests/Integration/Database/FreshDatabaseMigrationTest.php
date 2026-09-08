@@ -76,6 +76,8 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         'pve_observed_backup_tasks',
         'pve_storage_pbs_mappings',
         'pve_storages',
+        'queue_metric_samples',
+        'queue_metric_ticks',
         'role_permissions',
         'roles',
         'scheduler_decision_gates',
@@ -145,7 +147,7 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
             'SELECT version FROM doctrine_migration_versions ORDER BY version',
         );
 
-        self::assertCount(35, $versions);
+        self::assertCount(40, $versions);
         self::assertIsString($versions[0]);
         self::assertStringEndsWith('Version20260710000100', $versions[0]);
         self::assertIsString($versions[1]);
@@ -216,6 +218,16 @@ final class FreshDatabaseMigrationTest extends DatabaseTestCase
         self::assertStringEndsWith('Version20260719000200', $versions[33]);
         self::assertIsString($versions[34]);
         self::assertStringEndsWith('Version20260719000300', $versions[34]);
+        self::assertIsString($versions[35]);
+        self::assertStringEndsWith('Version20260719000400', $versions[35]);
+        self::assertIsString($versions[36]);
+        self::assertStringEndsWith('Version20260719000500', $versions[36]);
+        self::assertIsString($versions[37]);
+        self::assertStringEndsWith('Version20260908000100', $versions[37]);
+        self::assertIsString($versions[38]);
+        self::assertStringEndsWith('Version20260908000200', $versions[38]);
+        self::assertIsString($versions[39]);
+        self::assertStringEndsWith('Version20260908000300', $versions[39]);
     }
 
     public function testActiveBackupRequestGuestKeyIsGeneratedAndUnique(): void

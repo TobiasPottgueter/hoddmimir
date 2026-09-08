@@ -78,7 +78,8 @@ final class DbalConfiguredBackupTargetReadModelTest extends DatabaseTestCase
             'target_id' => $target['id'], 'display_name' => 'Fresh policy', 'status' => 'draft', 'revision' => 1,
             'policy_priority' => 100, 'backup_mode' => 'snapshot', 'compression' => 'zstd',
             'maximum_age_seconds' => 3600, 'schedule' => 'collector_cycle', 'keep_last' => 2,
-            'retention_execution_enabled' => 0, 'failure_notification_recipients_json' => '[]',
+            'retention_execution_enabled' => 0,
+            'failure_notification_recipients_json' => '["ops@example.test"]',
             'created_at' => self::NOW, 'updated_at' => self::NOW,
         ]);
 

@@ -90,6 +90,7 @@ final class OnboardingEvidenceFixtureContractTest extends TestCase
         $backupPropagation = $this->pvePropagation($document['backupPropagationProbes'] ?? null, [
             '/vms/999999999' => ['/vms', 'VM.Backup'],
             '/storage/hoddmimir-propagation-probe' => ['/storage', 'Datastore.AllocateSpace'],
+            '/nodes/hoddmimir-propagation-probe' => ['/nodes', 'Sys.Audit'],
         ]);
 
         return new OnboardingRemoteEvidence(true, [

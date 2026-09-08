@@ -27,6 +27,29 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
     private const string REQUEST = 'operation-reques';
     private const string GUEST = 'operation-guest1';
 
+    public function testManualRequestPinsInheritedTargetDefaults(): void
+    {
+        $clock = new FrozenClock(new DateTimeImmutable('2026-07-13T00:00:00Z'));
+        $this->seedQaFixture($clock);
+        $policyId = self::uuid('80000000-0000-4000-8000-000000000001');
+        $targetId = $this->connection()->fetchOne('SELECT target_id FROM backup_policies WHERE id = ?', [$policyId]);
+        $this->connection()->executeStatement("UPDATE backup_targets SET default_backup_mode='stop', default_compression='gzip', default_keep_last=7 WHERE id = ?", [$targetId]);
+        $this->connection()->executeStatement('UPDATE backup_policies SET backup_mode=NULL, compression=NULL, legacy_maxfiles=NULL, keep_all=NULL, keep_last=NULL, keep_hourly=NULL, keep_daily=NULL, keep_weekly=NULL, keep_monthly=NULL, keep_yearly=NULL WHERE id = ?', [$policyId]);
+        $repository = new DbalBackupOperationCommandRepository($this->connection(), new SystemSecurityIdentifierGenerator(), $clock, new PolicyResolver());
+        $principal = new AuthenticatedPrincipal(new UserId(self::USER), new NormalizedUsername('qa-admin'), [Permission::BackupOperationsManage]);
+        $requestId = self::uuid('c0000000-0000-4000-8000-000000000002');
+        $command = new BackupOperationCommand(BackupOperationCommandType::ManualRequest, $requestId, $policyId,
+            self::uuid('50000000-0000-4000-8000-000000000101'), 1, 'inherited-manual', 'defaults-manual1');
+        self::assertSame(BackupOperationCommandStatus::Applied, $repository->execute($command, $principal)->status);
+        $json = $this->connection()->fetchOne('SELECT resolved_policy_json FROM backup_requests WHERE id = ?', [$requestId]);
+        self::assertIsString($json);
+        $snapshot = json_decode($json, true, 32, JSON_THROW_ON_ERROR);
+        self::assertIsArray($snapshot);
+        self::assertSame('stop', $snapshot['mode']);
+        self::assertSame('gzip', $snapshot['compression']);
+        self::assertSame(['prune-backups' => ['keep-last' => 7]], $snapshot['desiredRetention']);
+    }
+
     public function testAppliedCommandsReplayAndAuditTheirRevisions(): void
     {
         $clock = new FrozenClock(new DateTimeImmutable('2026-07-13T00:00:00Z'));
@@ -151,6 +174,35 @@ final class DbalBackupOperationCommandRepositoryTest extends DatabaseTestCase
         self::assertIsArray($pbsSnapshot);
         self::assertNotNull($pbsSnapshot['desiredRetention']);
         self::assertNull($pbsSnapshot['approvedDeletionRetention']);
+    }
+
+    public function testManualRequestRejectsAnInconsistentEnabledPolicyWithoutFailureMailRecipients(): void
+    {
+        $clock = new FrozenClock(new DateTimeImmutable('2026-07-13T00:00:00Z'));
+        $this->seedQaFixture($clock);
+        $policy = self::uuid('80000000-0000-4000-8000-000000000001');
+        $guest = self::uuid('50000000-0000-4000-8000-000000000101');
+        $this->connection()->update('backup_policies', [
+            'failure_notification_recipients_json' => '[]',
+        ], ['id' => $policy]);
+        $repository = new DbalBackupOperationCommandRepository(
+            $this->connection(), new SystemSecurityIdentifierGenerator(), $clock, new PolicyResolver(),
+        );
+        $principal = new AuthenticatedPrincipal(
+            new UserId(self::USER), new NormalizedUsername('qa-admin'), [Permission::BackupOperationsManage],
+        );
+        $request = self::uuid('c4000000-0000-4000-8000-000000000001');
+
+        $result = $repository->execute(new BackupOperationCommand(
+            BackupOperationCommandType::ManualRequest, $request, $policy, $guest, 1,
+            'manual-no-mail', 'op-no-mail-00001',
+        ), $principal);
+
+        self::assertSame(BackupOperationCommandStatus::Blocked, $result->status);
+        self::assertSame('failure_notification_recipients_unconfigured', $result->blocker);
+        self::assertSame('0', self::scalarString($this->connection()->fetchOne(
+            'SELECT COUNT(*) FROM backup_requests WHERE id = :id', ['id' => $request],
+        )));
     }
 
     public function testConcurrentPolicyUpdateMakesTheStaleManualRequestConflict(): void

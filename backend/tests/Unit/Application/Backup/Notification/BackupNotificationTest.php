@@ -60,6 +60,22 @@ TEXT, $body);
         self::assertStringNotContainsString('UPID:', $body);
     }
 
+    public function testRunlessPrePostMessageUsesCheckNumberAndNeverClaimsABackupAttempt(): void
+    {
+        $notification = $this->notification(
+            attempt: null,
+            checkNumber: 3,
+            problemCode: BackupProblemCode::CapacityBlocked,
+            detail: 'minimum_free_space.insufficient_free_space',
+        );
+
+        self::assertNull($notification->attempt);
+        self::assertStringStartsWith(
+            'Backupstart blockiert – Prüfversuch Nr. 3',
+            (new MatrixNotificationFormatter())->format($notification),
+        );
+    }
+
     public function testRecoveryMessageContainsFailureCountAndNoRetry(): void
     {
         $body = (new MatrixNotificationFormatter())->format($this->notification(BackupNotificationKind::Recovery));
@@ -284,7 +300,7 @@ TEXT, $body);
     private function notification(
         BackupNotificationKind $kind = BackupNotificationKind::Failure,
         string $eventId = 'eeeeeeeeeeeeeeee',
-        int $attempt = 7,
+        ?int $attempt = 7,
         string $guestName = 'customer-dc',
         int $vmid = 202033,
         string $node = 'otto',
@@ -296,6 +312,8 @@ TEXT, $body);
         int $failures = 7,
         bool $supplyDefaultRetry = true,
         ?PveGuestType $guestType = null,
+        ?int $checkNumber = null,
+        BackupProblemCode $problemCode = BackupProblemCode::TaskFailed,
     ): BackupNotification {
         $occurredAt ??= $this->at('2026-07-13T10:00:00.123456Z');
         $openedAt ??= $this->at('2026-07-13T09:00:00.123456Z');
@@ -307,12 +325,13 @@ TEXT, $body);
             $eventId,
             $kind,
             $attempt,
+            $checkNumber ?? $attempt ?? 1,
             $guestName,
             $vmid,
             $guestType ?? (BackupNotificationKind::Failure === $kind ? PveGuestType::Qemu : PveGuestType::Lxc),
             $node,
             $target,
-            BackupProblemCode::TaskFailed,
+            $problemCode,
             $detail,
             $openedAt,
             $occurredAt,

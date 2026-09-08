@@ -38,12 +38,17 @@ final class PveBackupWriteContractsTest extends TestCase
             'mode' => 'snapshot',
             'compress' => 'zstd',
             'maxfiles' => 3,
+            'mailto' => 'ops@example.invalid',
+            'mailnotification' => 'failure',
         ], $legacy);
 
         $prune = $builder->build($this->version(8), $this->submission(
             pruneBackups: new PvePruneBackups(false, 7, null, 3),
         ));
         self::assertSame('keep-all=0,keep-last=7,keep-daily=3', $prune['prune-backups']);
+        self::assertSame('legacy-sendmail', $prune['notification-mode']);
+        self::assertSame('ops@example.invalid', $prune['mailto']);
+        self::assertSame('failure', $prune['mailnotification']);
 
         $pve9 = $builder->build($this->version(9), $this->submission(
             pruneBackups: new PvePruneBackups(true),
@@ -56,8 +61,8 @@ final class PveBackupWriteContractsTest extends TestCase
         self::assertSame('keep-all=1', $pve9['prune-backups']);
         self::assertSame('backup-alerts@example.invalid,platform@example.invalid', $pve9['mailto']);
         self::assertSame('failure', $pve9['mailnotification']);
-        self::assertArrayNotHasKey('mailto', $legacy);
-        self::assertArrayNotHasKey('mailnotification', $legacy);
+        self::assertSame('legacy-sendmail', $pve9['notification-mode']);
+        self::assertArrayNotHasKey('notification-mode', $legacy);
         foreach (['job-id', 'tmpdir', 'dumpdir', 'script', 'fleecing'] as $forbidden) {
             self::assertArrayNotHasKey($forbidden, $legacy);
             self::assertArrayNotHasKey($forbidden, $prune);
@@ -66,6 +71,42 @@ final class PveBackupWriteContractsTest extends TestCase
 
         $pruneSerializer = new \ReflectionMethod($builder, 'prunePropertyString');
         self::assertSame('', $pruneSerializer->invoke($builder, new PvePruneBackups()));
+    }
+
+    /** @param array<string, string> $expectedNotificationFields */
+    #[DataProvider('notificationPayloadProvider')]
+    public function testNotificationPayloadIsVersionAware(
+        int $major,
+        array $expectedNotificationFields,
+    ): void {
+        $payload = (new BuildPveVzdumpPayload())->build(
+            $this->version($major),
+            $this->submission(),
+        );
+
+        self::assertSame(
+            $expectedNotificationFields,
+            array_intersect_key($payload, array_flip(['notification-mode', 'mailto', 'mailnotification'])),
+        );
+    }
+
+    /** @return iterable<string, array{int, array<string, string>}> */
+    public static function notificationPayloadProvider(): iterable
+    {
+        yield 'PVE 7' => [7, [
+            'mailto' => 'ops@example.invalid',
+            'mailnotification' => 'failure',
+        ]];
+        yield 'PVE 8' => [8, [
+            'notification-mode' => 'legacy-sendmail',
+            'mailto' => 'ops@example.invalid',
+            'mailnotification' => 'failure',
+        ]];
+        yield 'PVE 9' => [9, [
+            'notification-mode' => 'legacy-sendmail',
+            'mailto' => 'ops@example.invalid',
+            'mailnotification' => 'failure',
+        ]];
     }
 
     public function testPve9RejectsLegacyMaxfilesAndUnsupportedMajorsLocally(): void
@@ -84,23 +125,24 @@ final class PveBackupWriteContractsTest extends TestCase
     /** @return iterable<string, array{callable(): PveBackupSubmission}> */
     public static function invalidSubmissionProvider(): iterable
     {
-        yield 'node' => [static fn () => new PveBackupSubmission('-bad', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd)];
-        yield 'vmid low' => [static fn () => new PveBackupSubmission('pve-a', 99, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd)];
-        yield 'vmid high' => [static fn () => new PveBackupSubmission('pve-a', 1_000_000_000, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd)];
-        yield 'storage' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, '_bad', PveBackupMode::Snapshot, PveBackupCompression::Zstd)];
-        yield 'maxfiles low' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, legacyMaxFiles: 0)];
-        yield 'maxfiles high' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, legacyMaxFiles: 1_000_001)];
-        yield 'empty prune' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PvePruneBackups())];
-        yield 'bad prune low' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PvePruneBackups(keepLast: 0))];
-        yield 'bad prune high' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PvePruneBackups(keepLast: 1_000_001))];
-        yield 'dual retention' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PvePruneBackups(keepLast: 1), 1)];
-        yield 'empty recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients([]))];
-        yield 'invalid recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients(["ops@example.invalid\nBcc: leak@example.invalid"]))];
-        yield 'padded recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients([' ops@example.invalid']))];
-        yield 'blank recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients(['']))];
-        yield 'oversized recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients([str_repeat('x', 243).'@example.invalid']))];
-        yield 'duplicate recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients(['ops@example.invalid', 'OPS@example.invalid']))];
-        yield 'too many recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, failureNotificationRecipients: new PveBackupFailureRecipients(array_fill(0, 33, 'ops@example.invalid')))];
+        $recipients = new PveBackupFailureRecipients(['ops@example.invalid']);
+        yield 'node' => [static fn () => new PveBackupSubmission('-bad', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients)];
+        yield 'vmid low' => [static fn () => new PveBackupSubmission('pve-a', 99, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients)];
+        yield 'vmid high' => [static fn () => new PveBackupSubmission('pve-a', 1_000_000_000, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients)];
+        yield 'storage' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, '_bad', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients)];
+        yield 'maxfiles low' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, legacyMaxFiles: 0)];
+        yield 'maxfiles high' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, legacyMaxFiles: 1_000_001)];
+        yield 'empty prune' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, new PvePruneBackups())];
+        yield 'bad prune low' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, new PvePruneBackups(keepLast: 0))];
+        yield 'bad prune high' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, new PvePruneBackups(keepLast: 1_000_001))];
+        yield 'dual retention' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, $recipients, new PvePruneBackups(keepLast: 1), 1)];
+        yield 'empty recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients([]))];
+        yield 'invalid recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients(["ops@example.invalid\nBcc: leak@example.invalid"]))];
+        yield 'padded recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients([' ops@example.invalid']))];
+        yield 'blank recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients(['']))];
+        yield 'oversized recipient' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients([str_repeat('x', 243).'@example.invalid']))];
+        yield 'duplicate recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients(['ops@example.invalid', 'OPS@example.invalid']))];
+        yield 'too many recipients' => [static fn () => new PveBackupSubmission('pve-a', 101, PveGuestType::Qemu, 'store', PveBackupMode::Snapshot, PveBackupCompression::Zstd, new PveBackupFailureRecipients(array_fill(0, 33, 'ops@example.invalid')))];
     }
 
     public function testSingleFailureRecipientSerializesWithoutDelimiter(): void
@@ -109,6 +151,18 @@ final class PveBackupWriteContractsTest extends TestCase
             'ops@example.invalid',
             (new PveBackupFailureRecipients(['ops@example.invalid']))->parameterValue(),
         );
+    }
+
+    public function testSubmissionTypeRequiresNonNullableFailureRecipients(): void
+    {
+        $constructor = (new \ReflectionClass(PveBackupSubmission::class))->getConstructor();
+        self::assertNotNull($constructor);
+        $parameter = $constructor->getParameters()[6];
+
+        self::assertSame('failureNotificationRecipients', $parameter->getName());
+        self::assertFalse($parameter->allowsNull());
+        self::assertFalse($parameter->isOptional());
+        self::assertSame(PveBackupFailureRecipients::class, (string) $parameter->getType());
     }
 
     public function testSubmissionAndStopResultsEnforceTheirStateContracts(): void
@@ -171,9 +225,9 @@ final class PveBackupWriteContractsTest extends TestCase
             'backup-store',
             PveBackupMode::Snapshot,
             PveBackupCompression::Zstd,
+            $failureNotificationRecipients ?? new PveBackupFailureRecipients(['ops@example.invalid']),
             $pruneBackups,
             $legacyMaxFiles,
-            $failureNotificationRecipients,
         );
     }
 

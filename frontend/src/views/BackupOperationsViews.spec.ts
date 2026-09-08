@@ -63,6 +63,7 @@ const baseNotification = {
   state: "sent" as const,
   attempt: 1,
   deliveryAttempts: 1,
+  checkNumber: 1,
   guestName: "vm",
   guestType: "qemu" as const,
   vmid: 100,
@@ -78,6 +79,7 @@ const baseNotification = {
   sentAt: "2026-07-13T00:01:00.000000Z",
 };
 const stubs = {
+  QueueHistory: true,
   Button: {
     template:
       "<button @click=\"$emit('click')\"><slot />{{ $attrs.label }}</button>",

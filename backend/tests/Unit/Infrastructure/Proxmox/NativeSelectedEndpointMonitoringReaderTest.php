@@ -307,6 +307,10 @@ final class FixedNativePbsMonitoringFactory implements PbsMonitoringClientFactor
 
 final class FixedNativePbsMonitoringClient implements PbsMonitoringClient
 {
+    public function inspect(\App\Application\Proxmox\Pbs\PbsUpid $upid): \App\Application\Proxmox\Pbs\PbsTaskInspection
+    {
+        return new \App\Application\Proxmox\Pbs\PbsTaskInspection($upid, 'running', null, null, [], false, null, null);
+    }
     public int $pages = 0;
     /** @param list<string> $failures */
     public function __construct(

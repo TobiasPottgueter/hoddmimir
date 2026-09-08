@@ -15,7 +15,7 @@ use RuntimeException;
 
 final readonly class DbalConnectionScanCatalog implements ConnectionScanCatalog
 {
-    public function __construct(private Connection $connection)
+    public function __construct(private Connection $connection, private bool $includeDisabled = false)
     {
     }
 
@@ -31,10 +31,11 @@ final readonly class DbalConnectionScanCatalog implements ConnectionScanCatalog
                     e.priority
                 FROM proxmox_connections c
                 LEFT JOIN proxmox_connection_endpoints e
-                    ON e.connection_id = c.id AND e.enabled = 1
-                WHERE c.enabled = 1
+                    ON e.connection_id = c.id AND (e.enabled = 1 OR :include_disabled = 1)
+                WHERE c.enabled = 1 OR :include_disabled = 1
                 ORDER BY c.id, e.priority, e.id
                 SQL,
+            ['include_disabled' => (int) $this->includeDisabled],
         );
 
         /** @var array<string, array{connection_id: string, product: ProxmoxProduct, revision: int, endpoints: list<EndpointScanReference>}> $grouped */

@@ -7,6 +7,9 @@ hoddmimir_migration_compose_file: "{{ hoddmimir_install_directory }}/compose.mig
 hoddmimir_environment_file: "{{ hoddmimir_install_directory }}/runtime.env"
 hoddmimir_mariadb_init_script: "{{ hoddmimir_install_directory }}/10-create-app-users.sh"
 hoddmimir_transaction_lock_file: "{{ hoddmimir_install_directory }}/.deployment-transaction.lock"
+hoddmimir_maintenance_directory: "{{ hoddmimir_install_directory }}/maintenance"
+hoddmimir_maintenance_timeout_seconds: 3600
+hoddmimir_maintenance_external_schedulers_paused: false
 hoddmimir_staging_prefix: .deployment-staging-
 hoddmimir_docker_executable: docker
 hoddmimir_python_executable: /usr/bin/python3

@@ -33,6 +33,17 @@ final readonly class PbsRequest
     public static function verifyJobs(): self { return new self(['admin', 'verify'], [], 4_194_304); }
     public static function permissions(): self { return new self(['access', 'permissions'], [], 8_388_608); }
 
+    public static function taskStatus(\App\Application\Proxmox\Pbs\PbsUpid $upid): self
+    {
+        return new self(['nodes', 'localhost', 'tasks', $upid->value, 'status'], [], 65_536);
+    }
+
+    public static function taskLog(\App\Application\Proxmox\Pbs\PbsUpid $upid): self
+    {
+        // One look-ahead line distinguishes an exact 500-line log from truncation.
+        return new self(['nodes', 'localhost', 'tasks', $upid->value, 'log'], ['start' => 0, 'limit' => 501], 2_097_152);
+    }
+
     public static function permission(string $path): self
     {
         $fixedPaths = ['/system/status' => true, '/system/tasks' => true, '/datastore' => true, '/remote' => true];

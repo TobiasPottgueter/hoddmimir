@@ -8,6 +8,7 @@ use App\Application\Proxmox\Pve\PveBackupApiFailure;
 use App\Application\Proxmox\Pve\PveBackupApiFailureCode;
 use App\Application\Proxmox\Pve\BuildPveVzdumpPayload;
 use App\Application\Proxmox\Pve\PveBackupCompression;
+use App\Application\Proxmox\Pve\PveBackupFailureRecipients;
 use App\Application\Proxmox\Pve\PveBackupMode;
 use App\Application\Proxmox\Pve\PveBackupSubmission;
 use App\Application\Proxmox\Pve\PveBackupSubmissionStatus;
@@ -370,6 +371,7 @@ final class PveBackupHttpTransportTest extends TestCase
                 'backup-store',
                 PveBackupMode::Snapshot,
                 PveBackupCompression::Zstd,
+                new PveBackupFailureRecipients(['ops@example.invalid']),
             ));
 
             self::assertSame(PveBackupSubmissionStatus::Ambiguous, $result->status);

@@ -14,6 +14,8 @@ const gateLabels: Record<ShadowGateCode, string> = {
   node_enabled: "Node aktiviert",
   guest_enabled: "Gast aktiviert",
   policy_enabled: "Policy aktiviert",
+  policy_failure_notification_configured:
+    "PVE-Fehlerbenachrichtigung konfiguriert",
   policy_retention_compatible: "Retention mit PVE-Version kompatibel",
   target_enabled: "Backup-Ziel aktiviert",
   explicit_exclusion_absent: "Keine explizite Ausnahme",
@@ -76,6 +78,7 @@ const detailLabels: Record<ShadowGateDetailCode, string> = {
   concurrency_limit_reached: "Parallelitätsgrenze erreicht",
   invalid_mapping: "Ungültige Zuordnung",
   incompatible: "Nicht kompatibel",
+  unconfigured: "Nicht konfiguriert",
   active_request_exists: "Aktive Anforderung vorhanden",
   higher_ranked_candidate: "Höher priorisierter Kandidat vorhanden",
 };

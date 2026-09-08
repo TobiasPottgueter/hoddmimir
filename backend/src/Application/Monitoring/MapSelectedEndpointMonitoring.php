@@ -207,7 +207,7 @@ final readonly class MapSelectedEndpointMonitoring
             );
         }
 
-        return $this->commit($run, $scopes, [], [], [], $snapshot->tasks->tasks, $observedAt);
+        return $this->commit($run, $scopes, [], [], [], $snapshot->tasks->tasks, $observedAt, $snapshot->inspections);
     }
 
     private function pveTaskScope(
@@ -257,6 +257,7 @@ final readonly class MapSelectedEndpointMonitoring
      * @param list<\App\Application\Proxmox\Pve\PveBackupTask> $pveTasks
      * @param list<\App\Application\Proxmox\Pbs\PbsJobObservation> $pbsJobs
      * @param list<\App\Application\Proxmox\Pbs\PbsTaskObservation> $pbsTasks
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $pbsInspections
      */
     private function commit(
         MonitoringRunStart $run,
@@ -266,6 +267,7 @@ final readonly class MapSelectedEndpointMonitoring
         array $pbsJobs,
         array $pbsTasks,
         DateTimeImmutable $observedAt,
+        array $pbsInspections = [],
     ): MonitoringCommit {
         return new MonitoringCommit(
             $run->runId,
@@ -282,6 +284,7 @@ final readonly class MapSelectedEndpointMonitoring
             $pbsJobs,
             $pbsTasks,
             $observedAt,
+            $pbsInspections,
         );
     }
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import importlib.util
 import os
 import re
 import shutil
@@ -297,6 +298,7 @@ class DockerCompose:
     def __init__(self, executable: str, wait_timeout: int) -> None:
         self.executable = executable
         self.wait_timeout = wait_timeout
+        self.allow_schema_changes = True
 
     def _run(
         self,
@@ -394,6 +396,8 @@ class DockerCompose:
         )
         if status.returncode == 0:
             return False
+        if not self.allow_schema_changes:
+            raise DeploymentError("Schema changes require the maintenance/backup/restore workflow; image-only migration is disabled.")
 
         self._run(
             (compose_file, migration_compose_file),
@@ -708,7 +712,24 @@ def build_managed_files(arguments: argparse.Namespace) -> list[ManagedFile]:
     return managed_files
 
 
+def maintenance_module():
+    spec = importlib.util.spec_from_file_location("hoddmimir_maintenance_upgrade", Path(__file__).with_name("maintenance_upgrade.py"))
+    if spec is None or spec.loader is None:
+        raise DeploymentError("Maintenance executor is unavailable.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, object]:
+    if getattr(arguments, 'maintenance_directory', None):
+        active = Path(arguments.current_compose_file).parent / '.maintenance-transactions' / 'active.json'
+        if active.exists():
+            module = maintenance_module()
+            try:
+                return module.Upgrade(arguments, DockerCompose(arguments.docker_executable, arguments.wait_timeout), sys.modules[__name__]).run(build_managed_files(arguments))
+            except module.MaintenanceError as error:
+                raise DeploymentError(str(error)) from None
     staged_directory = Path(arguments.staging_directory)
     staged_compose_file = staged_directory / "compose.yaml"
     staged_migration_compose_file = staged_directory / "compose.migration.yaml"
@@ -743,6 +764,20 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
     )
     docker.validate(staged_compose_file)
     docker.validate_migration(staged_compose_file, staged_migration_compose_file)
+
+    if previous_compose_exists and not getattr(arguments, 'maintenance_directory', None):
+        docker.allow_schema_changes = False
+    maintenance = None
+    maintenance_control = None
+    if getattr(arguments, 'maintenance_directory', None):
+        maintenance = maintenance_module()
+        try:
+            if previous_compose_exists:
+                return maintenance.Upgrade(arguments, docker, sys.modules[__name__]).run(managed_files)
+            maintenance_control = maintenance.Control(Path(arguments.maintenance_directory), arguments.maintenance_timeout)
+            maintenance_control.initialize(False)
+        except maintenance.MaintenanceError as error:
+            raise DeploymentError(str(error)) from None
 
     changed_files = [managed_file for managed_file in managed_files if needs_update(managed_file)]
     previous_secrets_directory_exists = current_secrets_directory.is_dir()
@@ -809,9 +844,15 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
             arguments.migration_service,
         )
         candidate_services_may_have_started = True
-        docker.force_recreate_applications(current_compose_file, application_services)
+        if maintenance is not None:
+            operations = maintenance.DockerMaintenance(docker, arguments)
+            operations.validate()
+            operations.start_frozen()
+            operations.wait_web()
+        else:
+            docker.force_recreate_applications(current_compose_file, application_services)
         verify_stack(docker, current_compose_file, expected_services, arguments.health_url)
-    except (DeploymentError, OSError) as deployment_error:
+    except (DeploymentError, OSError, RuntimeError) as deployment_error:
         if not mutation_started:
             raise
         failure_detail = (
@@ -854,6 +895,8 @@ def _run_transaction_with_lock_held(arguments: argparse.Namespace) -> dict[str, 
             f"it is forward-only and was not rolled back. Cause: {failure_detail}",
         ) from deployment_error
 
+    if maintenance_control is not None:
+        maintenance_control.phase('open')
     shutil.rmtree(backup_directory)
 
     return {"changed": True, "status": "deployed"}
@@ -881,6 +924,9 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--database-bootstrap-script", required=True)
     parser.add_argument("--encryption-keyring-revision", required=True)
     parser.add_argument("--transaction-lock-file", required=True)
+    parser.add_argument("--maintenance-directory")
+    parser.add_argument("--maintenance-timeout", type=int, default=3600)
+    parser.add_argument("--maintenance-external-schedulers-paused", action="store_true")
 
     return parser.parse_args(argv)
 

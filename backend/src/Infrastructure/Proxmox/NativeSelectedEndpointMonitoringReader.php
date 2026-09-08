@@ -89,6 +89,7 @@ final readonly class NativeSelectedEndpointMonitoringReader implements SelectedE
         }
         $tasks = (new PbsTaskScanner($client, $this->pbsLimits))->scan($window);
 
-        return new PbsExternalMonitoringSnapshot($acl, $prune, $sync, $verify, $tasks, $errors);
+        $inspections = (new \App\Application\Proxmox\Pbs\CollectPbsTaskInspections())->collect($client, $tasks->tasks);
+        return new PbsExternalMonitoringSnapshot($acl, $prune, $sync, $verify, $tasks, $errors, $inspections);
     }
 }

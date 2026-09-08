@@ -39,6 +39,9 @@ final readonly class ConfiguredPolicy
         public ?string $disabledAt,
         public array $blockers,
         public array $failureNotificationRecipients = [],
+        public ?string $effectiveMode = null,
+        public ?string $effectiveCompression = null,
+        public ?PolicyRetention $effectiveRetention = null,
     ) {
         foreach ([$id, $connectionId, $clusterId] as $identifier) {
             new ReadModelIdentifier($identifier);
@@ -72,6 +75,9 @@ final readonly class ConfiguredPolicy
             'targetId' => $this->targetId,
             'targetName' => $this->targetName,
             'priority' => $this->priority,
+            'effectiveMode' => $this->effectiveMode ?? $this->mode,
+            'effectiveCompression' => $this->effectiveCompression ?? $this->compression,
+            'effectiveRetention' => ($this->effectiveRetention ?? $this->desiredRetention)?->toArray(),
             'mode' => $this->mode,
             'compression' => $this->compression,
             'maximumAgeSeconds' => $this->maximumAgeSeconds,

@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Proxmox;
 
-use Symfony\Component\HttpClient\NativeHttpClient;
+use Symfony\Component\HttpClient\CurlHttpClient;
+use App\Infrastructure\Proxmox\ProxmoxConnectionHttpClient;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final readonly class PveNativeHttpClientFactory implements PveHttpClientFactory
@@ -15,7 +16,10 @@ final readonly class PveNativeHttpClientFactory implements PveHttpClientFactory
 
     public function create(PveTlsConfiguration $tls): HttpClientInterface
     {
-        return new NativeHttpClient($this->options($tls));
+        $options = $this->options($tls);
+        $fingerprint = $tls->certificateFingerprint?->sha256;
+        unset($options['peer_fingerprint']);
+        return new ProxmoxConnectionHttpClient(new CurlHttpClient($options), $fingerprint);
     }
 
     /** @return array<string, mixed> */
@@ -45,7 +49,7 @@ final readonly class PveNativeHttpClientFactory implements PveHttpClientFactory
 
         // Fingerprint pinning is an exclusive trust mode. The exact leaf
         // certificate digest replaces CA-chain and hostname trust, while the
-        // TLS handshake still fails closed before HTTP headers are sent when
+        // pre-request certificate check still fails closed before HTTP headers are sent when
         // the presented certificate does not match the configured pin.
         return array_replace($options, [
             'verify_peer' => false,

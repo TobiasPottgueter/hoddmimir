@@ -22,6 +22,7 @@ final readonly class CollectorRuntimeLoop
         private StopRequested $stopRequested,
         private CollectorRuntimeWaiter $waiter,
         private int $gridWidthSeconds = GridSchedule::DEFAULT_WIDTH_SECONDS,
+        private \App\Application\Maintenance\MaintenanceAccess $maintenance = new \App\Application\Maintenance\UnrestrictedMaintenanceAccess(),
     ) {
         if ($this->gridWidthSeconds < 1 || $this->gridWidthSeconds > GridSchedule::MAXIMUM_WIDTH_SECONDS) {
             throw new \InvalidArgumentException('The collector grid width must be between one second and one year.');
@@ -35,6 +36,14 @@ final readonly class CollectorRuntimeLoop
 
         try {
             while ($running) {
+                $permit = $this->maintenance->acquire(\App\Application\Maintenance\MaintenanceActivity::CollectInventory);
+                if (null === $permit) {
+                    if ($once) return new CollectorWorkerRunResult(CollectorWorkerRunCode::NoCycleDue);
+                    if ($this->stopRequested->isStopRequested()) return new CollectorWorkerRunResult(CollectorWorkerRunCode::CollectorStopped);
+                    $this->waiter->wait(self::MAXIMUM_IDLE_WAIT_SECONDS);
+                    continue;
+                }
+                try {
                 $readiness = $this->readinessProbe->probe(WorkerKind::Collector);
                 if (!$readiness->isReady()) {
                     if ($once) {
@@ -53,6 +62,8 @@ final readonly class CollectorRuntimeLoop
                     if ($initialized) {
                         $this->degradeIdleBestEffort($workerId);
                     }
+                    $permit->release();
+                    $permit = null;
                     $this->waiter->wait(self::MAXIMUM_IDLE_WAIT_SECONDS);
 
                     continue;
@@ -84,6 +95,8 @@ final readonly class CollectorRuntimeLoop
                         return new CollectorWorkerRunResult(CollectorWorkerRunCode::CollectorStopped);
                     }
 
+                    $permit->release();
+                    $permit = null;
                     $this->waiter->wait($this->idleWaitSeconds($decision->databaseNow, $decision->retryAt));
 
                     continue;
@@ -103,6 +116,9 @@ final readonly class CollectorRuntimeLoop
                 };
                 if (!$continue) {
                     return $outcome;
+                }
+                } finally {
+                    $permit?->release();
                 }
             }
 

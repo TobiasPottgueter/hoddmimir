@@ -126,7 +126,7 @@ final class ExecutionDisabledExecutorEvidenceRuntimeTest extends TestCase
             $refresh,
             $queue,
             $execution,
-            new SubmitClaimedBackup($execution, new ContractSubmissionTransaction(), $pve, new ControlledRetryPolicy()),
+            new SubmitClaimedBackup($execution, new ContractSubmissionTransaction(), $pve, new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($pve), $clock),
             new MonitorClaimedBackup($monitoring, $pve, new PveTaskStatusClassifier(), $clock, $execution),
             new ReconcileAmbiguousSubmission(new ContractReconciliationStore(), new ContractReconciliationSource(), $clock),
             new ContractRunIds(),
@@ -321,12 +321,14 @@ final class ContractPveClient implements PveBackupClient, PveBackupClientProvide
         return new PveTaskLogPage($query, []);
     }
     public function stopTask(PveUpid $upid): PveTaskStopResult { ++$this->stopCalls; return PveTaskStopResult::requested(); }
-    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { throw new \LogicException('unused'); }
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { return new PveTaskPage($query, 0, [], []); }
 }
 
 final readonly class ContractSubmissionTransaction implements BackupSubmissionTransaction
 {
     public function inspectExistingSubmission(SubmitClaimedBackupCommand $command): ExistingSubmissionStatus { throw new \LogicException('unused'); }
+    public function taskInspectionNodes(SubmitClaimedBackupCommand $command): array { return ['node-a']; }
+    public function deferRemoteTaskCheck(SubmitClaimedBackupCommand $command, string $blocker): void {}
     public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation { throw new \LogicException('unused'); }
     public function recordAccepted(SubmitClaimedBackupCommand $command, PveUpid $upid): void { throw new \LogicException('unused'); }
     public function recordDefinitiveRejection(SubmitClaimedBackupCommand $command, PveBackupApiFailureCode $failure, DefinitiveBackupFailureNotice $notice): void { throw new \LogicException('unused'); }

@@ -11,6 +11,7 @@ use App\Infrastructure\Proxmox\Pbs\PbsNativeHttpClientFactory;
 use App\Infrastructure\Proxmox\Pbs\PbsTlsConfiguration;
 use App\Infrastructure\Proxmox\PveCertificateFingerprint;
 use App\Infrastructure\Proxmox\PveCustomCaMaterializer;
+use App\Infrastructure\Proxmox\PveCustomCaCertificate;
 use App\Infrastructure\Proxmox\PveNativeHttpClientFactory;
 use App\Infrastructure\Proxmox\PveTlsConfiguration;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -51,23 +52,101 @@ final class NativeFingerprintTlsBoundaryTest extends TestCase
         $wrongFingerprint = ('0' === $probe->fingerprint[0] ? '1' : '0').substr($probe->fingerprint, 1);
 
         try {
-            $response = $this->client($clientKind, $probe->directory, $wrongFingerprint)->request(
-                'GET',
-                $probe->url.'/api2/json/version',
-                ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]],
-            );
-
             try {
+                $response = $this->client($clientKind, $probe->directory, $wrongFingerprint)->request(
+                    'GET', $probe->url.'/api2/json/version',
+                    ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]],
+                );
                 $response->getStatusCode();
                 self::fail('A mismatching certificate fingerprint must abort the TLS request.');
             } catch (TransportExceptionInterface) {
-                // Expected: the exact leaf certificate digest did not match.
+                // The exact leaf check aborts before any HTTP authorization can be sent.
             }
 
             $probe->await();
             self::assertStringNotContainsString(self::AUTHORIZATION_SENTINEL, $probe->capturedRequest());
         } finally {
             $probe->close();
+        }
+    }
+
+    #[DataProvider('clientKindProvider')]
+    public function testConnectionDeadlineStopsAStalledTlsHandshakeBeforeSendingHeaders(string $clientKind): void
+    {
+        $probe = NativeSelfSignedTlsProbe::start(handshakeDelay: 6.5);
+        try {
+            $started = hrtime(true);
+            try {
+                $this->client($clientKind, $probe->directory, $probe->fingerprint)->request('GET', $probe->url,
+                    ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]])->getStatusCode();
+                self::fail('A stalled TLS handshake must exceed the separate connection deadline.');
+            } catch (TransportExceptionInterface) {
+                $elapsed = (hrtime(true) - $started) / 1e9;
+                self::assertGreaterThanOrEqual(4.5, $elapsed);
+                self::assertLessThan(6.3, $elapsed);
+            }
+            $probe->await();
+            self::assertStringNotContainsString(self::AUTHORIZATION_SENTINEL, $probe->capturedRequest());
+        } finally { $probe->close(); }
+    }
+
+    #[DataProvider('clientKindProvider')]
+    public function testResponseMayTakeLongerThanTheConnectionDeadline(string $clientKind): void
+    {
+        $probe = NativeSelfSignedTlsProbe::start(responseDelay: 6.0);
+        try {
+            $started = hrtime(true);
+            $response = $this->client($clientKind, $probe->directory, $probe->fingerprint)->request('GET', $probe->url,
+                ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]]);
+            self::assertSame(401, $response->getStatusCode());
+            self::assertGreaterThanOrEqual(5.5, (hrtime(true) - $started) / 1e9);
+            $probe->await();
+            self::assertStringContainsString(self::AUTHORIZATION_SENTINEL, $probe->capturedRequest());
+        } finally { $probe->close(); }
+    }
+
+    #[DataProvider('clientKindProvider')]
+    public function testConsecutivePinnedRequestsRequireCertificateEvidenceEachTime(string $clientKind): void
+    {
+        $probe = NativeSelfSignedTlsProbe::start(requestCount: 2);
+        try {
+            $client = $this->client($clientKind, $probe->directory, $probe->fingerprint);
+            for ($request = 0; $request < 2; ++$request) {
+                self::assertSame(401, $client->request('GET', $probe->url, ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]])->getStatusCode());
+            }
+            $probe->await();
+            self::assertSame(2, substr_count($probe->capturedRequest(), self::AUTHORIZATION_SENTINEL));
+        } finally { $probe->close(); }
+    }
+
+    #[DataProvider('clientKindProvider')]
+    public function testCaModesEnforceTrustAndHostnameBeforeSendingHeaders(string $clientKind): void
+    {
+        foreach (['system-untrusted', 'custom-wrong-host', 'custom-valid'] as $mode) {
+            $probe = NativeSelfSignedTlsProbe::start(commonName: 'localhost');
+            try {
+                $files = new NativeAtomicFileMaterializer();
+                $bundle = file_get_contents($probe->directory.'/server.pem'); self::assertIsString($bundle);
+                self::assertSame(1, preg_match('/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/s', $bundle, $matches));
+                /** @var array{0: non-falsy-string} $matches A successful full certificate match. */
+                $pem = $matches[0]."\n";
+                $client = 'pve' === $clientKind
+                    ? (new PveNativeHttpClientFactory(new PveCustomCaMaterializer($files, $probe->directory)))->create(
+                        'system-untrusted' === $mode ? PveTlsConfiguration::systemCa() : PveTlsConfiguration::customCa(PveCustomCaCertificate::fromPem($pem)))
+                    : (new PbsNativeHttpClientFactory(new PbsCustomCaMaterializer($files, $probe->directory)))->create(
+                        'system-untrusted' === $mode ? PbsTlsConfiguration::systemCa() : PbsTlsConfiguration::customCa(\App\Infrastructure\Proxmox\Pbs\PbsCustomCaCertificate::fromPem($pem)));
+                $url = 'custom-wrong-host' === $mode ? $probe->url : str_replace('127.0.0.1', 'localhost', $probe->url);
+                try {
+                    $response = $client->request('GET', $url, ['headers' => ['Authorization' => self::AUTHORIZATION_SENTINEL]]);
+                    self::assertSame(401, $response->getStatusCode());
+                    self::assertSame('custom-valid', $mode);
+                } catch (TransportExceptionInterface) {
+                    self::assertNotSame('custom-valid', $mode);
+                }
+                $probe->await();
+                if ('custom-valid' === $mode) self::assertStringContainsString(self::AUTHORIZATION_SENTINEL, $probe->capturedRequest());
+                else self::assertStringNotContainsString(self::AUTHORIZATION_SENTINEL, $probe->capturedRequest());
+            } finally { $probe->close(); }
         }
     }
 
@@ -108,7 +187,7 @@ final class NativeSelfSignedTlsProbe
     ) {
     }
 
-    public static function start(): self
+    public static function start(float $handshakeDelay = 0.0, float $responseDelay = 0.0, string $commonName = 'hostname-does-not-match.invalid', int $requestCount = 1): self
     {
         $directory = sys_get_temp_dir().'/hoddmimir-native-tls-'.bin2hex(random_bytes(12));
         if (!mkdir($directory, 0700, true)) {
@@ -128,7 +207,7 @@ final class NativeSelfSignedTlsProbe
         }
         /** @var \OpenSSLAsymmetricKey $privateKey */
         $request = openssl_csr_new(
-            ['commonName' => 'hostname-does-not-match.invalid'],
+            ['commonName' => $commonName],
             $privateKey,
             ['digest_alg' => 'sha256'],
         );
@@ -164,7 +243,7 @@ final class NativeSelfSignedTlsProbe
             'crypto_method' => STREAM_CRYPTO_METHOD_TLS_SERVER,
         ]]);
         $server = stream_socket_server(
-            'tls://127.0.0.1:0',
+            ($handshakeDelay > 0 ? 'tcp' : 'tls').'://127.0.0.1:0',
             $errorCode,
             $errorMessage,
             STREAM_SERVER_BIND | STREAM_SERVER_LISTEN,
@@ -185,7 +264,9 @@ final class NativeSelfSignedTlsProbe
             throw new RuntimeException('TLS probe process could not be started.');
         }
         if (0 === $processId) {
-            self::serveOneRequest($server, $capturePath);
+            for ($i = 0; $i < $requestCount; ++$i) self::serveOneRequest($server, $capturePath, $handshakeDelay, $responseDelay);
+            fclose($server);
+            exit(0);
         }
         fclose($server);
 
@@ -226,16 +307,20 @@ final class NativeSelfSignedTlsProbe
         }
         @unlink($this->capturePath);
         @unlink($this->directory.'/server.pem');
+        foreach (glob($this->directory.'/*') ?: [] as $file) @unlink($file);
         @rmdir($this->directory);
     }
 
     /** @param resource $server */
-    private static function serveOneRequest($server, string $capturePath): never
+    private static function serveOneRequest($server, string $capturePath, float $handshakeDelay, float $responseDelay): void
     {
         $connection = @stream_socket_accept($server, 8.0);
-        fclose($server);
         $request = '';
         if (false !== $connection) {
+            if ($handshakeDelay > 0) {
+                usleep((int) ($handshakeDelay * 1e6));
+                if (true !== @stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_SERVER)) { fclose($connection); return; }
+            }
             stream_set_timeout($connection, 2);
             while (!str_contains($request, "\r\n\r\n") && strlen($request) <= 65_536) {
                 $chunk = fread($connection, 8192);
@@ -244,13 +329,13 @@ final class NativeSelfSignedTlsProbe
                 }
                 $request .= $chunk;
             }
-            file_put_contents($capturePath, $request);
+            file_put_contents($capturePath, $request, FILE_APPEND);
             if (str_contains($request, "\r\n\r\n")) {
+                if ($responseDelay > 0) usleep((int) ($responseDelay * 1e6));
                 fwrite($connection, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }
             fclose($connection);
         }
 
-        exit(0);
     }
 }

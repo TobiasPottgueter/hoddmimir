@@ -26,6 +26,7 @@ final readonly class DbalAmbiguousSubmissionReconciliationStore implements Ambig
         private DbalBackupProblemRecorder $problems,
         private int $leaseSeconds = 120,
         private ?BackupWorkerHeartbeatStore $heartbeats = null,
+        private \App\Application\Maintenance\MaintenanceAccess $maintenance = new \App\Application\Maintenance\UnrestrictedMaintenanceAccess(),
     )
     {
         if ($leaseSeconds < 1 || $leaseSeconds > 3600) throw new \InvalidArgumentException('Invalid reconciliation lease duration.');
@@ -89,6 +90,10 @@ final readonly class DbalAmbiguousSubmissionReconciliationStore implements Ambig
     public function record(ReconcileAmbiguousSubmissionCommand $command, RecoveryOutcome $outcome): void
     {
         $this->connection->transactional(function (Connection $db) use ($command, $outcome): void {
+            $guest = $db->fetchOne('SELECT guest_id FROM backup_requests WHERE id=:id',
+                ['id' => $command->requestId], ['id' => ParameterType::BINARY]);
+            if (false === $guest) return;
+            (new DbalBackupRequestGuestGuard())->lock($db, [$this->binary($guest)]);
             $row = $this->authority($db, $command);
             if (null === $row || 'reconcile_required' !== ($row['request_state'] ?? null)) return;
             if (RecoveryOutcomeKind::Matched === $outcome->kind) {
@@ -99,10 +104,22 @@ final readonly class DbalAmbiguousSubmissionReconciliationStore implements Ambig
                     || !hash_equals($upid->user, $this->text($row['submission_user'] ?? null))
                     || $upid->startTime < $this->date($row['submission_window_start'] ?? null)->getTimestamp()
                     || $upid->startTime > $this->date($row['submission_window_end'] ?? null)->getTimestamp()) throw new RuntimeException('A reconciled task changed submission identity.');
+                // A complete remote search can return an older task inside the overlapping
+                // submission window. Its existing local owner excludes it as this run's match.
+                // The guest guard serializes this check with other assignments for this guest.
+                if (false !== $db->fetchOne('SELECT id FROM backup_runs WHERE upid_hash=:hash AND id<>:run',
+                    ['hash' => hash('sha256', $raw, true), 'run' => $command->runId],
+                    ['hash' => ParameterType::BINARY, 'run' => ParameterType::BINARY])) {
+                    $outcome = RecoveryOutcome::provenNotStarted();
+                }
+            }
+            if (RecoveryOutcomeKind::Matched === $outcome->kind) {
+                $raw = $outcome->upid->value ?? throw new RuntimeException('Matched recovery lacks UPID.');
                 $this->requireAffected($db->executeStatement("UPDATE backup_runs SET state = 'running', submission_provenance = 'accepted', upid = :upid, upid_hash = :hash, recovery_outcome = 'matched', recovery_checked_at = :now, revision = revision + 1 WHERE id = :run AND state='reconcile_required' AND claim_token = :token AND claim_fence = :fence", ['upid' => $raw, 'hash' => hash('sha256', $raw, true), 'now' => self::format($command->now), 'run' => $command->runId, 'token' => $command->claimToken, 'fence' => $command->claimFence]), 'matched run');
                 $this->requireAffected($db->executeStatement("UPDATE backup_requests SET state = 'running', submission_provenance = 'accepted', retry_disposition = 'controlled_allowed', revision = revision + 1, updated_at = :now WHERE id = :request AND state='reconcile_required' AND run_id=:run AND claim_token = :token AND claim_fence = :fence", ['now' => self::format($command->now), 'request' => $command->requestId, 'run' => $command->runId, 'token' => $command->claimToken, 'fence' => $command->claimFence]), 'matched request');
                 $state = 'running'; $detail = null;
-            } elseif (in_array($outcome->kind, [RecoveryOutcomeKind::ProvenNotStarted, RecoveryOutcomeKind::MultipleMatches], true)) {
+            } elseif ($outcome->permitsNewAttempt()
+                && \App\Application\Maintenance\MaintenancePhase::Open === $this->maintenance->phase()) {
                 $detail = RecoveryOutcomeKind::ProvenNotStarted === $outcome->kind
                     ? 'submission_not_found'
                     : 'multiple_submission_matches';
@@ -110,6 +127,9 @@ final readonly class DbalAmbiguousSubmissionReconciliationStore implements Ambig
                 $this->requireAffected($db->executeStatement("UPDATE backup_runs SET state='unknown', recovery_outcome=:outcome, recovery_checked_at=:now, finished_at=:now, revision=revision+1 WHERE id=:run AND state='reconcile_required' AND claim_token=:token AND claim_fence=:fence", ['outcome' => $outcome->kind->value, 'now' => self::format($command->now), 'run' => $command->runId, 'token' => $command->claimToken, 'fence' => $command->claimFence]), 'terminal reconciliation run');
                 $this->requireAffected($db->executeStatement("UPDATE backup_requests SET state='unknown', retry_disposition='forbidden_ambiguous', terminal_code=:code, terminal_at=:now, claim_token=NULL, lease_owner=NULL, lease_issued_at=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=:now WHERE id=:request AND state='reconcile_required' AND run_id=:run AND claim_token=:token AND claim_fence=:fence", ['code' => $detail, 'now' => self::format($command->now), 'request' => $command->requestId, 'run' => $command->runId, 'token' => $command->claimToken, 'fence' => $command->claimFence]), 'terminal reconciliation request');
                 $this->releaseResources($db, $row, $command->now);
+                if (null === ($row['cancel_requested_at'] ?? null)) {
+                    $this->createReconciledAttempt($db, $command);
+                }
                 $this->problems->attention($db, $row, $command->runId, BackupProblemCode::MonitoringUnknown, $detail, $command->now);
             } else {
                 $detail = $outcome->kind->value; $state = 'reconcile_required';
@@ -117,6 +137,41 @@ final readonly class DbalAmbiguousSubmissionReconciliationStore implements Ambig
             }
             $this->event($db, $command, 'reconciliation_'.$outcome->kind->value, $state, $detail);
         });
+    }
+
+    private function createReconciledAttempt(Connection $db, ReconcileAmbiguousSubmissionCommand $command): void
+    {
+        $retry = substr(hash('sha256', "reconciled-attempt\0".$command->requestId, true), 0, 16);
+        $latest = $db->fetchOne(<<<'SQL'
+SELECT MAX(previous.scheduled_at) FROM backup_requests request
+JOIN backup_requests previous ON previous.policy_id=request.policy_id AND previous.guest_id=request.guest_id
+WHERE request.id=:request
+SQL, ['request' => $command->requestId], ['request' => ParameterType::BINARY]);
+        // Preserve unique schedule identity, without delaying available_at or introducing a recovery timer.
+        $latestAt = $this->date($latest);
+        $scheduledAt = $latestAt >= $command->now ? $latestAt->modify('+1 microsecond') : $command->now;
+        $this->requireAffected($db->executeStatement(<<<'SQL'
+INSERT INTO backup_requests (
+ id,root_request_id,attempt,origin,state,reason,priority,scheduled_at,available_at,
+ connection_id,cluster_id,guest_id,node_id,placement_revision,placement_observed_at,
+ policy_id,policy_revision,target_id,target_revision,shadow_decision_id,resolved_policy_json,
+ resolved_policy_hash,expected_size_bytes,retry_disposition,submission_provenance,revision,
+ claim_fence,created_at,updated_at
+)
+SELECT :retry,root_request_id,attempt+1,'retry','retry_wait',reason,priority,:scheduled,:scheduled,
+ connection_id,cluster_id,guest_id,node_id,placement_revision,placement_observed_at,
+ policy_id,policy_revision,target_id,target_revision,NULL,resolved_policy_json,resolved_policy_hash,
+ expected_size_bytes,'not_applicable','not_submitted',1,0,:now,:now
+FROM backup_requests WHERE id=:request AND state='unknown'
+SQL, ['retry' => $retry, 'scheduled' => self::format($scheduledAt), 'now' => self::format($command->now), 'request' => $command->requestId],
+            ['retry' => ParameterType::BINARY, 'request' => ParameterType::BINARY]), 'reconciled attempt');
+        $db->insert('backup_request_events', [
+            'id' => substr(hash('sha256', "reconciled-event\0".$retry, true), 0, 16),
+            'request_id' => $retry, 'sequence_no' => 1,
+            'event_type' => 'reconciliation_retry_scheduled', 'state' => 'retry_wait',
+            'occurred_at' => self::format($command->now),
+            'detail_code' => 'complete_task_search_without_unique_match',
+        ]);
     }
 
     /** @param array<string,mixed> $row */

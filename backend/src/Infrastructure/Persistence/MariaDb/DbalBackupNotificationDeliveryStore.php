@@ -154,7 +154,8 @@ SQL, [
         return new BackupNotification(
             $this->binary($row['id'] ?? null),
             BackupNotificationKind::from($this->text($row['notification_kind'] ?? null)),
-            $this->integer($row['attempt'] ?? null),
+            null === ($row['attempt'] ?? null) ? null : $this->integer($row['attempt']),
+            $this->integer($row['check_number'] ?? null),
             $this->text($payload['guestName']),
             $this->integer($payload['vmid']),
             PveGuestType::from($this->text($payload['guestType'])),

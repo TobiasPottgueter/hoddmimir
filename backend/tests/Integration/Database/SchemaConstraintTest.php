@@ -71,6 +71,7 @@ final class SchemaConstraintTest extends DatabaseTestCase
             'chk_pbs_observed_tasks_worker_type',
             'chk_pbs_observed_tasks_lifecycle',
             'chk_pbs_observed_tasks_status',
+            'chk_pbs_observed_tasks_inspection',
         ] as $requiredConstraint) {
             self::assertContains($requiredConstraint, $constraintNames);
         }
@@ -217,6 +218,7 @@ final class SchemaConstraintTest extends DatabaseTestCase
                 'chk_pbs_observed_tasks_worker_type' => ['worker_type' => 'tape-backup'],
                 'chk_pbs_observed_tasks_lifecycle' => ['finished_at' => self::NOW],
                 'chk_pbs_observed_tasks_status' => ['remote_status' => 'ok'],
+                'chk_pbs_observed_tasks_inspection' => ['inspection_json' => '{invalid'],
             ] as $constraint => $override) {
                 $this->assertConstraintRejects(
                     $constraint,

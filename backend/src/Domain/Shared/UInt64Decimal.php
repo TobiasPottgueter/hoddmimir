@@ -25,4 +25,21 @@ final readonly class UInt64Decimal
         $length = strlen($this->value) <=> strlen($other->value);
         return $length < 0 || (0 === $length && strcmp($this->value, $other->value) <= 0);
     }
+
+    public function minus(self $other): self
+    {
+        if (!$other->lessThanOrEqual($this)) {
+            throw new InvalidArgumentException('An unsigned decimal subtraction cannot be negative.');
+        }
+        $right = str_pad($other->value, strlen($this->value), '0', STR_PAD_LEFT);
+        $result = '';
+        $borrow = 0;
+        for ($index = strlen($this->value) - 1; $index >= 0; --$index) {
+            $digit = (int) $this->value[$index] - (int) $right[$index] - $borrow;
+            $borrow = $digit < 0 ? 1 : 0;
+            $result = (string) ($digit + 10 * $borrow).$result;
+        }
+        $result = ltrim($result, '0');
+        return new self('' === $result ? '0' : $result);
+    }
 }

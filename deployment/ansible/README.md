@@ -135,7 +135,7 @@ make deploy
 make verify
 ```
 
-Bootstrap connects initially as `root`, installs Python if absent, and configures Alpine, Docker, and OpenRC. Deploy creates `/opt/hoddmimir` and root-only secrets under `/etc/hoddmimir/secrets`.
+Bootstrap connects initially as `root`, installs Python if absent, and configures Alpine, Docker, and OpenRC. It enables the BusyBox `ntpd` client so task reconciliation and leases use a synchronized host clock; the host's existing NTP peer configuration is retained. Deploy creates `/opt/hoddmimir` and root-only secrets under `/etc/hoddmimir/secrets`.
 
 ### Public HTTPS boundary
 
@@ -224,7 +224,7 @@ Keyring recovery changes immediately before the three candidate application cont
 
 A 64-character lowercase raw key can be established as a one-key structured keyring only as a first-deployment/offline seed with no installed Compose file, identical material, and exactly one staged primary key. If an installed Compose file exists, normal deployment blocks the raw key before Docker and requires separate offline maintenance; it never assumes the running image is read-only.
 
-MariaDB DDL is forward-only and is never rolled back by the deployment transaction. A failed migration or later application failure may therefore leave a fully or partially applied schema while application artifacts are restored. Every migration must use an expand/contract sequence: expand changes remain compatible with both the previous and candidate images, and destructive contract changes occur only in a later release after rollback to the older image is no longer possible. Readiness requires all migrations expected by an image but deliberately tolerates additional newer migrations during recovery.
+**Legacy image-only recovery contract (schema upgrades now blocked):** MariaDB DDL is forward-only and is never rolled back by the deployment transaction. A failed migration or later application failure may therefore leave a fully or partially applied schema while application artifacts are restored. Every migration must use an expand/contract sequence: expand changes remain compatible with both the previous and candidate images, and destructive contract changes occur only in a later release after rollback to the older image is no longer possible. Readiness requires all migrations expected by an image but deliberately tolerates additional newer migrations during recovery.
 
 Failed first-time deployments are stopped without deleting the MariaDB volume. The five MariaDB credential files remain root-only on disk after such a failure because the persistent database may already have initialized those users; a retry must reuse the same values. Before candidate services may start, application and encryption secrets without a previous installed state are removed. After that boundary, the application secret is removed but the structured encryption keyring is retained so a retry can decrypt any candidate envelope already persisted.
 
@@ -237,3 +237,97 @@ Credential rotation is a separate maintenance transaction: take and verify a log
 The stdlib test suite renders the real Compose template and exercises inventory validation, preflight gates, file modes, first deployment, unchanged verification failure, changed rollback with file restoration, rollback re-verification, and the MariaDB credential gate against an isolated fake Docker executable.
 
 Never commit `hosts.yml`, `vault.yml`, vault passwords, registry credentials, or generated secret files. Secret validation and file writes use Ansible `no_log`.
+
+## Maintenance upgrades (protocol 1)
+
+The Ansible deployment now uses the persistent maintenance/backup/restore
+transaction from [ADR 0006](../../docs/adr/0006-maintenance-upgrade-database-restore.md).
+The older transaction description above applies to initial installation and the
+legacy image-only path. For existing installations that path rejects pending
+migrations. The protocol-1 upgrade replaces it with these steps:
+
+1. Close the shared host gate, drain ongoing backup monitoring, and directly
+   check complete PVE/PBS task evidence. Disabled connections and original
+   submission nodes remain in scope. Unknown evidence blocks migration.
+2. Stop application services, validate the old application's DB roles, and save
+   database schema/data/migration versions, MariaDB grant tables, exact image
+   digests, Compose/environment/bootstrap files and secrets/keyring.
+3. Restore the logical snapshot into an isolated MariaDB container, compare a
+   deterministic second dump, and run application validation against that copy.
+   Recheck remote quiescence before allowing migration.
+4. Install and migrate the candidate while the gate stays frozen. Check actual
+   reads/writes under migration, collector, backup and web identities, credential
+   decryption, RBAC, notification outbox, worker initialization, HTTP health and
+   the API maintenance response. Transactional probe writes are rolled back;
+   no backup or notification is sent.
+5. On failure before release, stop candidate services, restore the database and
+   matching files, validate the old application, then reopen. Recovery failures
+   leave maintenance active. A durable release marker forbids database rollback
+   after operation has been reopened.
+
+Configuration:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `hoddmimir_maintenance_directory` | `{{ hoddmimir_install_directory }}/maintenance` | Shared host control directory, mounted read-only in application services |
+| `hoddmimir_maintenance_timeout_seconds` | `3600` | Limit for drain/lock/individual maintenance operations; not an overall deployment deadline |
+| `hoddmimir_maintenance_external_schedulers_paused` | `false` | Operator acknowledgement that external schedules and administrator starts are paused for the window |
+
+Before a changed upgrade, coordinate external PVE/PBS backup activity and supply
+`--extra-vars hoddmimir_maintenance_external_schedulers_paused=true` with the normal
+Ansible deployment command. This acknowledgement does not enable backup execution;
+its existing explicit activation requirement remains. Busy remote tasks are
+polled every five seconds. Network/permission failures stop the operation.
+The API returns HTTP 503 with `Retry-After: 30` during maintenance.
+
+Snapshots are retained under `{{ hoddmimir_install_directory }}/.maintenance-transactions/<id>`
+(root-only directory, files mode 0600). They contain secrets and database contents.
+There is deliberately no automatic deletion: retain the active transaction and
+its snapshot until recovery/release is complete, then apply the operator's secure
+backup retention policy. Keep an off-host protected copy for host-loss recovery.
+A logical dump on the deployment host alone does not protect against host loss.
+
+After interruption, rerun the deployment with the same installation paths. An
+active journal is recovered before accepting another candidate. Do not delete
+`active.json`, edit the gate to `open`, or restore a snapshot after the release
+marker. Database-engine/image/volume changes and database-password rotation are
+separate maintenance procedures and are rejected by this upgrade path.
+
+An installed baseline must already implement protocol 1 and mount the same
+control directory. Existing older images are rejected before mutation; changing
+Compose alone does not make them maintenance-aware. The one-time transition from
+such images is exclusively manual, using a separately tested offline bootstrap
+procedure; the transition must not be automated. Fresh
+installations establish the baseline automatically.
+
+Validation: `make deployment-test` covers isolated transaction/Compose/preflight
+and recovery contracts; `make maintenance-db-test` additionally runs a real
+MariaDB dump/partial-DDL/restore test (the ordinary discovery skips that test unless
+its image is supplied). PHP integration tests exercise the real application
+schema and all four DB roles. Full container/quality gates and a protocol-capable
+live PVE/PBS upgrade/recovery rehearsal remain release requirements.
+The six maintenance scenarios were rehearsed against the real DEV PVE 7/8/9
+and PBS 3/4 systems on 2026-09-08; see the [acceptance report](../../docs/audits/2026-09-07/08-dev-maintenance-acceptance.md)
+for exact scope, the collector idle-lock correction, tested images, and evidence.
+
+`make maintenance-runtime-test` exercises the complete application stack with
+real MariaDB, the production Compose templates and the maintenance transaction.
+It covers a foreign backup task and an unreachable endpoint through a local
+TLS fixture, success, partial DDL failure, SIGKILL before release, recovery, and
+SIGKILL at the durable no-restore boundary. It checks binary data, unchanged
+secret files, HTTP maintenance, all four database roles, and the reopened gate.
+The test owns a random disposable Compose project and deletes only its volumes.
+It loads no inventory or real credentials. Its temporary, disabled PVE connection
+points only to the dedicated local test bridge and uses a generated CA with TLS
+verification enabled. The fixture accepts read requests only and never forwards
+traffic. No notification targets are enabled; the live PVE/PBS rehearsal is still
+separate. The probe must enter maintenance before checking remote quiescence.
+
+Set `HODDMIMIR_MAINTENANCE_RUNTIME_IMAGES` to a JSON file with `worker`, `web`,
+and `mariadb` references. Each must have the form
+`127.0.0.1:<port>/hoddmimir-acceptance/<image>@sha256:<digest>` in a temporary
+loopback-only registry, populated from the scanned local image archives.
+The test deliberately rejects release registries and tags. It uses subnet
+`172.31.249.0/24`; ensure this disposable-test subnet is free before running.
+Ordinary test discovery skips this resource-intensive rehearsal unless the
+environment variable is explicitly supplied.

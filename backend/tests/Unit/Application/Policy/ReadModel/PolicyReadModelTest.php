@@ -50,6 +50,9 @@ final class PolicyReadModelTest extends TestCase
             'targetId' => self::OTHER,
             'targetName' => 'Target',
             'priority' => 500,
+            'effectiveMode' => 'snapshot',
+            'effectiveCompression' => 'zstd',
+            'effectiveRetention' => $retention->toArray(),
             'mode' => 'snapshot',
             'compression' => 'zstd',
             'maximumAgeSeconds' => 3600,
@@ -67,6 +70,24 @@ final class PolicyReadModelTest extends TestCase
         self::assertIsArray($page['items']);
         self::assertIsArray($page['items'][0]);
         self::assertSame('Nightly', $page['items'][0]['displayName']);
+    }
+
+    public function testEffectiveDefaultsAreSeparateFromPolicyOverrides(): void
+    {
+        $retention = new PolicyRetention(null, true, null, null, null, null, null, null);
+        $policy = new ConfiguredPolicy(self::ID, 1, 'draft', 'Inherited', self::ID, 'PVE', self::OTHER, 'Cluster',
+            self::OTHER, 'Target', 1, null, null, 60, null, null, 'collector_cycle', null, false, null, [], [],
+            'stop', 'gzip', $retention);
+        $data = $policy->toArray();
+        self::assertNull($data['mode']);
+        self::assertNull($data['compression']);
+        self::assertNull($data['desiredRetention']);
+        self::assertSame('stop', $data['effectiveMode']);
+        self::assertSame('gzip', $data['effectiveCompression']);
+        self::assertSame($retention->toArray(), $data['effectiveRetention']);
+        $empty = new ConfiguredPolicy(self::ID, 1, 'draft', 'Empty', self::ID, 'PVE', self::OTHER, 'Cluster',
+            null, null, null, null, null, null, null, null, null, null, false, null, []);
+        self::assertNull($empty->toArray()['effectiveRetention']);
     }
 
     #[DataProvider('invalidPolicyProvider')]

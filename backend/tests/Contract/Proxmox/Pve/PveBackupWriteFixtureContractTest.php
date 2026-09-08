@@ -36,6 +36,7 @@ final class PveBackupWriteFixtureContractTest extends TestCase
             'pbs-archive',
             PveBackupMode::Snapshot,
             PveBackupCompression::Zstd,
+            $this->failureRecipients(),
         );
         $withApproval = new PveBackupSubmission(
             'pve8-a',
@@ -44,6 +45,7 @@ final class PveBackupWriteFixtureContractTest extends TestCase
             'pbs-archive',
             PveBackupMode::Snapshot,
             PveBackupCompression::Zstd,
+            $this->failureRecipients(),
             pruneBackups: new PvePruneBackups(keepLast: 3),
         );
 
@@ -74,13 +76,18 @@ final class PveBackupWriteFixtureContractTest extends TestCase
         self::assertSame($request, (new BuildPveVzdumpPayload())->build($version, $submission));
         self::assertSame([], array_diff(
             array_keys($request),
-            ['vmid', 'storage', 'mode', 'compress', 'prune-backups', 'maxfiles', 'mailto', 'mailnotification'],
+            ['vmid', 'storage', 'mode', 'compress', 'prune-backups', 'maxfiles', 'notification-mode', 'mailto', 'mailnotification'],
         ));
         foreach (['node', 'remove', 'script', 'tmpdir', 'bwlimit'] as $rootOnlyField) {
             self::assertArrayNotHasKey($rootOnlyField, $request);
         }
         self::assertSame('backup-alerts@example.invalid,platform@example.invalid', $request['mailto']);
         self::assertSame('failure', $request['mailnotification']);
+        if (7 === $major) {
+            self::assertArrayNotHasKey('notification-mode', $request);
+        } else {
+            self::assertSame('legacy-sendmail', $request['notification-mode']);
+        }
         if (9 === $major) {
             self::assertArrayNotHasKey('maxfiles', $request);
             self::assertStringNotContainsString('"maxfiles"', $this->fixture($major, $requestFixture));
@@ -127,8 +134,8 @@ final class PveBackupWriteFixtureContractTest extends TestCase
                 'backup-vault',
                 PveBackupMode::Snapshot,
                 PveBackupCompression::Zstd,
+                $this->failureRecipients(),
                 legacyMaxFiles: 3,
-                failureNotificationRecipients: $this->failureRecipients(),
             ),
             8 => new PveBackupSubmission(
                 $node,
@@ -137,8 +144,8 @@ final class PveBackupWriteFixtureContractTest extends TestCase
                 'pbs-archive',
                 PveBackupMode::Suspend,
                 PveBackupCompression::Zstd,
+                $this->failureRecipients(),
                 pruneBackups: new PvePruneBackups(keepLast: 3, keepDaily: 7),
-                failureNotificationRecipients: $this->failureRecipients(),
             ),
             9 => new PveBackupSubmission(
                 $node,
@@ -147,8 +154,8 @@ final class PveBackupWriteFixtureContractTest extends TestCase
                 'pbs-primary',
                 PveBackupMode::Snapshot,
                 PveBackupCompression::Zstd,
+                $this->failureRecipients(),
                 pruneBackups: new PvePruneBackups(keepLast: 2, keepDaily: 7, keepWeekly: 4),
-                failureNotificationRecipients: $this->failureRecipients(),
             ),
             default => throw new RuntimeException('Unsupported test major.'),
         };

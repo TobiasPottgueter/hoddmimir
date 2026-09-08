@@ -147,6 +147,19 @@ final readonly class DbalMonitoringRunStore implements MonitoringRunStore
                 }
             }
 
+            foreach ($commit->pbsInspections as $inspection) {
+                $connection->update('pbs_observed_tasks', [
+                    'inspection_json' => json_encode([
+                        'status' => $inspection->status, 'exitStatus' => $inspection->exitStatus,
+                        'endTime' => $inspection->endTime, 'lines' => $inspection->lines,
+                        'truncated' => $inspection->truncated,
+                        'statusFailure' => $inspection->statusFailure?->value,
+                        'logFailure' => $inspection->logFailure?->value,
+                    ], JSON_THROW_ON_ERROR),
+                    'inspected_at' => $this->format($commit->observedAt),
+                ], ['connection_id' => $commit->connectionId->binary(), 'upid_hash' => hash('sha256', $inspection->upid->value, true)]);
+            }
+
             foreach ($commit->scopes as $scope) {
                 $this->insertScope($connection, $commit, $scope);
             }

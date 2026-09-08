@@ -42,6 +42,7 @@ use App\Application\Proxmox\Pve\PveBackupApiFailureCode;
 use App\Application\Proxmox\Pve\PveBackupClient;
 use App\Application\Proxmox\Pve\PveBackupClientProvider;
 use App\Application\Proxmox\Pve\PveBackupCompression;
+use App\Application\Proxmox\Pve\PveBackupFailureRecipients;
 use App\Application\Proxmox\Pve\PveBackupMode;
 use App\Application\Proxmox\Pve\PveBackupSubmission;
 use App\Application\Proxmox\Pve\PveBackupSubmissionResult;
@@ -216,6 +217,28 @@ final class BackupWorkerRunnerTest extends TestCase
         )->runOnce(self::id('worker'));
     }
 
+    public function testFrozenMaintenanceDoesNotClaimMonitorRefreshOrDeliver(): void
+    {
+        $events = new RunnerEvents();
+        $gate = $this->createStub(\App\Application\Maintenance\MaintenanceAccess::class);
+        $gate->method('acquire')->willReturn(null);
+        $runner = $this->runner(new RunnerQueue(events: $events), true, new RunnerNotifications($events), refresh: new RunnerEvidenceRefresh(events: $events), maintenance: $gate);
+        self::assertSame(BackupWorkerTickStatus::NoWork, $runner->runOnce(self::id('worker')));
+        self::assertSame([], $events->values);
+    }
+
+    public function testWorkerReleasesMaintenancePermitWhenTickFails(): void
+    {
+        $events = new RunnerEvents();
+        $permit = $this->createMock(\App\Application\Maintenance\MaintenancePermit::class);
+        $permit->expects(self::once())->method('release');
+        $gate = $this->createStub(\App\Application\Maintenance\MaintenanceAccess::class);
+        $gate->method('acquire')->willReturn($permit);
+        $runner = $this->runner(new RunnerQueue(events: $events), true, new RunnerNotifications($events), maintenance: $gate);
+        $this->expectException(\InvalidArgumentException::class);
+        $runner->runOnce('invalid');
+    }
+
     private function runner(
         RunnerQueue $queue,
         bool $enabled,
@@ -224,6 +247,7 @@ final class BackupWorkerRunnerTest extends TestCase
         ?RunnerIds $identifiers = null,
         ?ExecutorEvidenceRefresh $refresh = null,
         ?Clock $clock = null,
+        ?\App\Application\Maintenance\MaintenanceAccess $maintenance = null,
     ): BackupWorkerRunner
     {
         $clock ??= new RunnerClock($this->now());
@@ -233,12 +257,13 @@ final class BackupWorkerRunnerTest extends TestCase
             $refresh ?? new RunnerEvidenceRefresh(),
             $queue,
             new RunnerExecutionGate($enabled),
-            new SubmitClaimedBackup(new RunnerExecutionGate($enabled), $transaction, $client, new ControlledRetryPolicy()),
+            new SubmitClaimedBackup(new RunnerExecutionGate($enabled), $transaction, $client, new ControlledRetryPolicy(), new \App\Application\Backup\Execution\CheckBackupNodeTasks($client), $clock),
             new MonitorClaimedBackup(new RunnerMonitoringTransaction($queue->events), $client, new PveTaskStatusClassifier(), $clock, new RunnerExecutionGate($enabled)),
             new ReconcileAmbiguousSubmission(new RunnerReconciliationStore($queue->events), new RunnerReconciliationSource(), $clock),
             $identifiers ?? new RunnerIds(),
             $notifications,
             $clock,
+            $maintenance ?? new \App\Application\Maintenance\UnrestrictedMaintenanceAccess(),
         );
     }
 
@@ -308,7 +333,9 @@ final class RunnerSubmissionTransaction implements BackupSubmissionTransaction
 {
     public ExistingSubmissionStatus $existing = ExistingSubmissionStatus::FreshClaim;
     public function inspectExistingSubmission(SubmitClaimedBackupCommand $command): ExistingSubmissionStatus { return $this->existing; }
-    public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation { return new SubmissionPreparation(SubmissionPreparationStatus::PreparedNow, submission: new PreparedBackupSubmission(new PveBackupSubmission('node-a',100,PveGuestType::Qemu,'backup',PveBackupMode::Snapshot,PveBackupCompression::Zstd),1,str_repeat('g',16),str_repeat('t',16),'Target','Guest')); }
+    public function taskInspectionNodes(SubmitClaimedBackupCommand $command): array { return ['node-a']; }
+    public function deferRemoteTaskCheck(SubmitClaimedBackupCommand $command, string $blocker): void {}
+    public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation { return new SubmissionPreparation(SubmissionPreparationStatus::PreparedNow, submission: new PreparedBackupSubmission(new PveBackupSubmission('node-a',100,PveGuestType::Qemu,'backup',PveBackupMode::Snapshot,PveBackupCompression::Zstd,new PveBackupFailureRecipients(['ops@example.invalid'])),1,str_repeat('g',16),str_repeat('t',16),'Target','Guest')); }
     public function recordAccepted(SubmitClaimedBackupCommand $command, PveUpid $upid): void {}
     public function recordDefinitiveRejection(SubmitClaimedBackupCommand $command, PveBackupApiFailureCode $failure, DefinitiveBackupFailureNotice $notice): void {}
     public function recordAmbiguous(SubmitClaimedBackupCommand $command, ?PveBackupApiFailureCode $failure): void {}
@@ -320,7 +347,7 @@ final class RunnerClient implements PveBackupClient, PveBackupClientProvider
     public function taskStatus(PveUpid $upid): PveTaskStatus { throw new \LogicException('unused'); }
     public function taskLog(PveUpid $upid, PveTaskLogQuery $query): PveTaskLogPage { throw new \LogicException('unused'); }
     public function stopTask(PveUpid $upid): PveTaskStopResult { throw new \LogicException('unused'); }
-    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { throw new \LogicException('unused'); }
+    public function taskPage(string $node, PveTaskQuery $query): PveTaskPage { return new PveTaskPage($query, 0, [], []); }
 }
 final class RunnerMonitoringTransaction implements BackupMonitoringTransaction
 {

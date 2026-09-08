@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Persistence\MariaDb;
 
+use App\Domain\Scheduler\BackupStartRules;
 use App\Application\Collector\CollectorLease;
 use App\Application\Collector\CollectorLeaseOwnershipLost;
 use App\Application\Scheduler\Shadow\AutomaticShadowCandidate;
@@ -44,6 +45,7 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
        policy.policy_priority, policy.backup_mode, policy.compression, policy.schedule,
        policy.legacy_maxfiles, policy.keep_all, policy.keep_last, policy.keep_hourly, policy.keep_daily,
        policy.keep_weekly, policy.keep_monthly, policy.keep_yearly, policy.retention_execution_enabled,
+       target.default_backup_mode, target.default_compression, target.default_legacy_maxfiles, target.default_keep_all, target.default_keep_last, target.default_keep_hourly, target.default_keep_daily, target.default_keep_weekly, target.default_keep_monthly, target.default_keep_yearly,
        policy.failure_notification_recipients_json,
        guest_override.backup_mode AS guest_backup_mode, guest_override.compression AS guest_compression,
        guest_override.legacy_maxfiles AS guest_legacy_maxfiles, guest_override.keep_all AS guest_keep_all,
@@ -72,29 +74,24 @@ SELECT connection.id AS connection_id, connection.enabled AS connection_enabled,
        storage.storage_type AS target_storage_type,
        target.minimum_free_bytes, target.fixed_parallel_limit,
        EXISTS(SELECT 1 FROM backup_target_allowed_nodes allowed WHERE allowed.target_id = target.id AND allowed.node_id = placement.node_id) AS target_node_allowed,
-       storage.disabled AS storage_disabled, storage.inventory_state AS storage_state,
+       storage.supports_backup, storage.disabled AS storage_disabled, storage.inventory_state AS storage_state,
        node_storage.enabled AS storage_enabled, node_storage.active AS storage_active,
        node_storage.available_bytes, pbs_capacity.available_bytes AS pbs_available_bytes,
        CASE WHEN storage.storage_type <> 'pbs' THEN node_storage.observed_at
             WHEN node_storage.observed_at IS NULL OR pbs_capacity.observed_at IS NULL THEN NULL
             ELSE LEAST(node_storage.observed_at, pbs_capacity.observed_at) END AS capacity_observed_at,
-       CASE WHEN node_slot.node_id IS NULL THEN 1
-            ELSE node_slot.slot_limit = 1 AND node_slot.slots_used < node_slot.slot_limit END AS node_concurrency_available,
-       CASE WHEN target.fixed_parallel_limit IS NULL OR target.fixed_parallel_limit < 1 THEN 0
-            WHEN target_slot.target_id IS NULL THEN 1
-            ELSE target_slot.slot_limit = target.fixed_parallel_limit
-              AND target_slot.slots_used < target_slot.slot_limit END AS target_concurrency_available,
+       node_slot.slot_limit AS node_slot_limit, node_slot.slots_used AS node_slots_used,
+       target_slot.slot_limit AS target_slot_limit, target_slot.slots_used AS target_slots_used,
+       pbs_connection.enabled AS pbs_connection_enabled,
+       pbs_datastore.allows_backup_writes AS pbs_writes, pbs_datastore.inventory_state AS pbs_state,
+       pbs_capacity.semantics AS pbs_capacity_semantics,
        (storage.storage_type <> 'pbs' OR (target.pbs_connection_id IS NOT NULL
          AND target.pbs_datastore_id IS NOT NULL AND mapping.storage_id IS NOT NULL
-         AND EXISTS(SELECT 1 FROM proxmox_connections pbs_connection
-           WHERE pbs_connection.id = target.pbs_connection_id
-             AND pbs_connection.product = 'pbs' AND pbs_connection.enabled = 1)
          AND EXISTS(SELECT 1 FROM proxmox_connection_endpoints pbs_endpoint
            WHERE pbs_endpoint.connection_id = target.pbs_connection_id
              AND pbs_endpoint.enabled = 1
              AND pbs_endpoint.host = mapping.server AND pbs_endpoint.port = mapping.port)
-         AND pbs_datastore.inventory_state = 'active' AND pbs_datastore.allows_backup_writes = 1
-         AND pbs_capacity.semantics = 'datastore_filesystem' AND mapping.datastore = pbs_datastore.datastore_name
+         AND mapping.datastore = pbs_datastore.datastore_name
          AND ((target.pbs_namespace_id IS NULL AND mapping.namespace IS NULL)
            OR (target.pbs_namespace_id IS NOT NULL
              AND COALESCE(mapping.namespace, '') = pbs_namespace.namespace_path))
@@ -124,6 +121,7 @@ LEFT JOIN pve_nodes node ON node.id = placement.node_id
 LEFT JOIN pve_node_storage_state node_storage ON node_storage.node_id = placement.node_id
     AND node_storage.storage_id = target.storage_id
 LEFT JOIN pve_storage_pbs_mappings mapping ON mapping.storage_id = target.storage_id
+LEFT JOIN proxmox_connections pbs_connection ON pbs_connection.id = target.pbs_connection_id AND pbs_connection.product = 'pbs'
 LEFT JOIN pbs_datastores pbs_datastore ON pbs_datastore.connection_id = target.pbs_connection_id AND pbs_datastore.id = target.pbs_datastore_id
 LEFT JOIN pbs_namespaces pbs_namespace ON pbs_namespace.datastore_id = target.pbs_datastore_id AND pbs_namespace.id = target.pbs_namespace_id
 LEFT JOIN pbs_datastore_capacity_state pbs_capacity ON pbs_capacity.datastore_id = target.pbs_datastore_id
@@ -205,20 +203,26 @@ SQL, [
             null === ($row['is_template'] ?? null) ? null : $this->bool($row, 'is_template'),
             $this->date($row['inventory_observed_at'] ?? null) ?? throw new RuntimeException('Missing inventory timestamp.'),
             null === ($row['node_id'] ?? null) ? null : $binary($row['node_id']),
-            'online' === ($row['api_status'] ?? null) && 'active' === ($row['node_state'] ?? null),
+            BackupStartRules::nodeEligible('active' === ($row['node_state'] ?? null), 'online' === ($row['api_status'] ?? null)),
             $this->int($row['placement_revision'] ?? null), $this->date($row['placement_observed_at'] ?? null),
             $binary($row['policy_id'] ?? null), $this->int($row['policy_revision'] ?? null) ?? 0,
-            'enabled' === ($row['policy_status'] ?? null), $policyEvidence['compatible'], $policyEvidence['hash'],
+            'enabled' === ($row['policy_status'] ?? null),
+            $policyEvidence['notificationsConfigured'],
+            $policyEvidence['compatible'], $policyEvidence['hash'],
             $this->bool($row, 'selection_included'), $this->bool($row, 'explicitly_excluded'),
             $binary($row['target_id'] ?? null), $this->int($row['target_revision'] ?? null) ?? 0,
             'enabled' === ($row['target_status'] ?? null), $this->bool($row, 'target_node_allowed'),
-            !$this->bool($row, 'storage_disabled') && 'active' === ($row['storage_state'] ?? null)
-                && $this->bool($row, 'storage_enabled'),
+            BackupStartRules::storageEnabled($this->bool($row, 'supports_backup'), null === ($row['storage_disabled'] ?? null) ? null : $this->bool($row, 'storage_disabled'), 'active' === ($row['storage_state'] ?? null), $this->bool($row, 'storage_enabled')),
             $this->bool($row, 'storage_active'), $this->date($row['capacity_observed_at'] ?? null),
             $this->effectiveCapacity($row), $this->decimal($row['minimum_free_bytes'] ?? null),
             $this->bool($row, 'expected_backup_size_present'),
-            $this->bool($row, 'node_concurrency_available'), $this->bool($row, 'target_concurrency_available'),
-            $this->bool($row, 'pbs_mapping_valid'),
+            BackupStartRules::slotAvailable($this->int($row['node_slot_limit'] ?? null) ?? 1, $this->int($row['node_slots_used'] ?? null) ?? 0, 1, false),
+            BackupStartRules::slotAvailable($this->int($row['target_slot_limit'] ?? null) ?? $this->int($row['fixed_parallel_limit'] ?? null), $this->int($row['target_slots_used'] ?? null) ?? 0, $this->int($row['fixed_parallel_limit'] ?? null) ?? 0, false),
+            'pbs' !== ($row['target_storage_type'] ?? null) || BackupStartRules::pbsTargetEligible(
+                $this->bool($row, 'pbs_connection_enabled'), $this->bool($row, 'pbs_writes'),
+                'active' === ($row['pbs_state'] ?? null), 'datastore_filesystem' === ($row['pbs_capacity_semantics'] ?? null),
+                $this->bool($row, 'pbs_mapping_valid'), null !== $this->decimal($row['pbs_available_bytes'] ?? null),
+            ),
             'pbs' !== ($row['target_storage_type'] ?? null)
                 ? $this->date($row['inventory_observed_at'] ?? null)
                 : $this->date($row['pbs_observed_at'] ?? null),
@@ -260,12 +264,8 @@ SQL, [
     }
     /** @param array<string, mixed> $row */
     private function effectiveCapacity(array $row): ?UInt64Decimal {
-        $pve = $this->decimal($row['available_bytes'] ?? null);
-        if (null === $pve) return null;
-        if ('pbs' !== ($row['target_storage_type'] ?? null)) return $pve;
-        if (null === ($row['pbs_available_bytes'] ?? null)) return null;
-        $pbs = $this->decimal($row['pbs_available_bytes']);
-        return null !== $pbs && $pbs->lessThanOrEqual($pve) ? $pbs : $pve;
+        return BackupStartRules::effectiveCapacity($this->decimal($row['available_bytes'] ?? null),
+            'pbs' === ($row['target_storage_type'] ?? null), $this->decimal($row['pbs_available_bytes'] ?? null));
     }
     private function date(mixed $value): ?DateTimeImmutable {
         if (!is_string($value)) return null;
@@ -273,13 +273,15 @@ SQL, [
         return false === $date ? null : $date;
     }
     /** @param array<string, mixed> $row
-     *  @return array{hash: string, compatible: bool, json: ?string}
+     *  @return array{hash: string, compatible: bool, notificationsConfigured: bool, json: ?string}
      */
     private function resolvedPolicyEvidence(array $row): array {
-        $policyRetention = $this->retention($row, '');
+        $defaults = (new BackupDefaultsMapper())->fromRow($row);
+        $policyRetention = $this->retention($row, '') ?? $defaults->retention;
         $guestRetention = $this->retention($row, 'guest_');
         $retention = $guestRetention ?? $policyRetention ?? throw new RuntimeException('An enabled policy lacks retention.');
         $pveMajor = $this->int($row['pve_major'] ?? null) ?? 0;
+        $failureRecipients = $this->failureRecipients($row['failure_notification_recipients_json'] ?? null);
         if ($pveMajor < 7 || $pveMajor > 9 || !$retention->supportsPveMajor($pveMajor)) {
             $evidence = json_encode([
                 'policy' => bin2hex($this->binary($row['policy_id'] ?? null)),
@@ -287,15 +289,23 @@ SQL, [
                 'pveMajor' => $pveMajor,
                 'retention' => $retention->signature(),
             ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-            return ['hash' => hash('sha256', "incompatible-policy-retention\0".$evidence, true), 'compatible' => false, 'json' => null];
+            return ['hash' => hash('sha256', "incompatible-policy-retention\0".$evidence, true), 'compatible' => false, 'notificationsConfigured' => BackupStartRules::notificationRecipientsConfigured($failureRecipients->addresses), 'json' => null];
+        }
+        if (!BackupStartRules::notificationRecipientsConfigured($failureRecipients->addresses)) {
+            $evidence = json_encode([
+                'policy' => bin2hex($this->binary($row['policy_id'] ?? null)),
+                'revision' => $this->int($row['policy_revision'] ?? null) ?? 0,
+                'pveMajor' => $pveMajor,
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            return ['hash' => hash('sha256', "incompatible-policy-notification\0".$evidence, true), 'compatible' => true, 'notificationsConfigured' => false, 'json' => null];
         }
         $resolved = new ResolvedBackupPolicy(
             new PolicyId($this->binary($row['policy_id'] ?? null)),
             new PolicyRevision($this->int($row['policy_revision'] ?? null) ?? 0),
             new BackupTargetId($this->binary($row['target_id'] ?? null)),
             $pveMajor,
-            BackupMode::from($this->text($row['guest_backup_mode'] ?? $row['backup_mode'] ?? null)),
-            Compression::from($this->text($row['guest_compression'] ?? $row['compression'] ?? null)),
+            BackupMode::from($this->text($row['guest_backup_mode'] ?? $row['backup_mode'] ?? $defaults->mode?->value)),
+            Compression::from($this->text($row['guest_compression'] ?? $row['compression'] ?? $defaults->compression?->value)),
             $retention,
             $this->bool($row, 'retention_execution_enabled') && 'pbs' !== ($row['target_storage_type'] ?? null)
                 ? $retention
@@ -303,12 +313,13 @@ SQL, [
             new PolicyPriority($this->int($row['policy_priority'] ?? null) ?? -1),
             new PolicyThresholds($this->int($row['maximum_age_seconds'] ?? null), $this->decimal($row['bytes_written_threshold'] ?? null)?->value, $this->int($row['cooldown_seconds'] ?? null)),
             Schedule::from($this->text($row['schedule'] ?? null)),
-            $this->failureRecipients($row['failure_notification_recipients_json'] ?? null),
+            $failureRecipients,
         );
         $json = $resolved->canonicalJson();
         return [
             'hash' => hash('sha256', $json, true),
             'compatible' => true,
+            'notificationsConfigured' => true,
             'json' => $json,
         ];
     }

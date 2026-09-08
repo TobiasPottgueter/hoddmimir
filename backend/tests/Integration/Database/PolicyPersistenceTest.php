@@ -193,6 +193,7 @@ final class PolicyPersistenceTest extends DatabaseTestCase
             'schedule' => 'collector_cycle',
             'keep_last' => 2,
             'retention_execution_enabled' => 1,
+            'failure_notification_recipients_json' => '["ops@example.test"]',
         ]));
         $this->connection()->update('pve_storages', ['storage_type' => 'pbs'], ['id' => $context['storage']]);
 

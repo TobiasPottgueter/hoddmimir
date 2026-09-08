@@ -8,10 +8,163 @@
   "servers": [{ "url": "/" }],
   "security": [{ "sessionCookie": [] }],
   "paths": {
+    "/api/v1/operations/pbs-tasks": {
+      "get": {
+        "operationId": "listPbsTasks",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9999999,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted collector observations; inspection freshness and truncation are explicit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PbsObservedTaskPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidQuery"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/PermissionDenied"
+          },
+          "503": {
+            "$ref": "#/components/responses/ReadModelUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/pbs-tasks/{id}": {
+      "get": {
+        "operationId": "getPbsTask",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted collector observations; inspection freshness and truncation are explicit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PbsObservedTaskDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidQuery"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/PermissionDenied"
+          },
+          "503": {
+            "$ref": "#/components/responses/ReadModelUnavailable"
+          },
+          "404": {
+            "description": "PBS task not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code"], "properties": {"code": {"const": "pbs_task_not_found"}}}}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/operations/queue/history": {
+      "get": {
+        "operationId": "getQueueHistory",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                24,
+                168,
+                720
+              ],
+              "default": 24
+            }
+          },
+          {
+            "name": "targetId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Priority-ordered backup request queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueMetricHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidQuery"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/PermissionDenied"
+          },
+          "503": {
+            "$ref": "#/components/responses/ReadModelUnavailable"
+          }
+        }
+      }
+    },
     "/api/v1/inventory/overview": {
       "get": {
         "operationId": "getInventoryOverview",
         "responses": {
+
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Current inventory counts and UTC freshness.",
             "content": {
@@ -36,6 +189,7 @@
           { "$ref": "#/components/parameters/GuestType" }
         ],
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "A bounded keyset page of inventory resources.",
             "content": {
@@ -245,6 +399,7 @@
           }
         },
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Authenticated local session.",
             "content": {
@@ -261,6 +416,7 @@
       "get": {
         "operationId": "getAuthSession",
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Current principal and derived CSRF token; never the session token.",
             "content": {
@@ -286,6 +442,7 @@
           }
         ],
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "204": { "description": "Session revoked." },
           "401": { "$ref": "#/components/responses/AuthenticationRequired" },
           "403": { "$ref": "#/components/responses/PermissionDenied" }
@@ -949,6 +1106,7 @@
       "get": {
         "operationId": "getCollectorStatus",
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Collector schedule and latest heartbeat without lease identity or credentials.",
             "content": {
@@ -968,6 +1126,7 @@
           { "$ref": "#/components/parameters/Cursor" }
         ],
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Latest bounded keyset page of inventory-sync runs.",
             "content": {
@@ -989,6 +1148,7 @@
           { "$ref": "#/components/parameters/Cursor" }
         ],
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Bounded keyset page of parent and PBS-content scope results for one inventory-sync run.",
             "content": {
@@ -1005,6 +1165,7 @@
       "get": {
         "operationId": "getAdministrationHealth",
         "responses": {
+          "503": { "$ref": "#/components/responses/MaintenanceUnavailable" },
           "200": {
             "description": "Authenticated safe readiness projection for administration.",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdministrationHealthReport" } } }
@@ -1611,6 +1772,11 @@
       }
     },
     "responses": {
+      "MaintenanceUnavailable": {
+        "description": "Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.",
+        "headers": { "Retry-After": { "schema": { "type": "string" } } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MaintenanceError" } } }
+      },
       "AuthenticationRequired": {
         "description": "A valid local web session is required.",
         "content": {
@@ -1640,7 +1806,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ReadModelUnavailableError"
+              "oneOf": [{ "$ref": "#/components/schemas/ReadModelUnavailableError" }, { "$ref": "#/components/schemas/MaintenanceError" }]
             }
           }
         }
@@ -1688,7 +1854,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ConfigurationUnavailableError"
+              "oneOf": [{ "$ref": "#/components/schemas/ConfigurationUnavailableError" }, { "$ref": "#/components/schemas/MaintenanceError" }]
             }
           }
         }
@@ -1713,7 +1879,7 @@
         "description": "The read-only onboarding verification or atomic local persistence is temporarily unavailable.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/OnboardingUnavailableError" }
+            "schema": { "oneOf": [{ "$ref": "#/components/schemas/OnboardingUnavailableError" }, { "$ref": "#/components/schemas/MaintenanceError" }] }
           }
         }
       },
@@ -1732,13 +1898,339 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/SecurityCommandUnavailableError"
+              "oneOf": [{ "$ref": "#/components/schemas/SecurityCommandUnavailableError" }, { "$ref": "#/components/schemas/MaintenanceError" }]
             }
           }
         }
       }
     },
     "schemas": {
+      "PbsObservedTask": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "connectionId",
+          "workerType",
+          "workerId",
+          "lifecycle",
+          "remoteStatus",
+          "startedAt",
+          "lastSeenAt",
+          "inspectedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connectionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workerType": {
+            "type": "string"
+          },
+          "workerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "running",
+              "stopped",
+              "unknown"
+            ]
+          },
+          "remoteStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "inspectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "PbsObservedTaskPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/PbsObservedTask"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PbsObservedTaskDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "connectionId",
+          "workerType",
+          "workerId",
+          "lifecycle",
+          "remoteStatus",
+          "startedAt",
+          "lastSeenAt",
+          "inspectedAt",
+          "upid",
+          "inspection"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connectionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workerType": {
+            "type": "string"
+          },
+          "workerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "running",
+              "stopped",
+              "unknown"
+            ]
+          },
+          "remoteStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "inspectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "upid": {
+            "type": "string"
+          },
+          "inspection": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "exitStatus",
+              "endTime",
+              "lines",
+              "truncated",
+              "statusFailure",
+              "logFailure"
+            ],
+            "properties": {
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "running",
+                  "stopped",
+                  null
+                ]
+              },
+              "exitStatus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "endTime": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "lines": {
+                "type": "array",
+                "maxItems": 500,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "number",
+                    "text"
+                  ],
+                  "properties": {
+                    "number": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "statusFailure": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logFailure": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "QueueMetricPoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observedAt",
+          "samples",
+          "waitingAverage",
+          "waitingPeak",
+          "activePeak",
+          "unresolvedPeak",
+          "oldestWaitSeconds"
+        ],
+        "properties": {
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "samples": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "waitingAverage": {
+            "type": "number",
+            "minimum": 0
+          },
+          "waitingPeak": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "activePeak": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unresolvedPeak": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "oldestWaitSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "QueueMetricHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bucketSeconds",
+          "retentionDays",
+          "items"
+        ],
+        "properties": {
+          "bucketSeconds": {
+            "type": "integer",
+            "enum": [
+              120,
+              900,
+              3600
+            ]
+          },
+          "retentionDays": {
+            "type": "integer",
+            "enum": [
+              30
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 721,
+            "items": {
+              "$ref": "#/components/schemas/QueueMetricPoint"
+            }
+          }
+        }
+      },
+      "MaintenanceError": {
+        "type": "object", "additionalProperties": false, "required": ["error"],
+        "properties": { "error": {
+          "type": "object", "additionalProperties": false, "required": ["code", "message"],
+          "properties": {
+            "code": { "const": "maintenance" },
+            "message": { "const": "Hoddmímir wird gewartet." }
+          }
+        } }
+      },
       "BackupRequestState": { "type": "string", "enum": ["pending", "retry_wait", "leased", "starting", "running", "reconcile_required", "succeeded", "failed", "cancelled", "unknown"] },
       "BackupRunState": { "type": "string", "enum": ["awaiting_submission", "reconcile_required", "running", "cancel_requested", "succeeded", "failed", "cancelled", "unknown"] },
       "ManualBackupRequest": { "type": "object", "additionalProperties": false, "required": ["guestId", "policyId", "expectedRevision"], "properties": { "guestId": { "$ref": "#/components/schemas/CanonicalUuid" }, "policyId": { "$ref": "#/components/schemas/CanonicalUuid" }, "expectedRevision": { "type": "integer", "minimum": 1 } } },
@@ -1754,7 +2246,7 @@
       "BackupLogPage": { "type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/BackupLogEntry" } }, "page": { "$ref": "#/components/schemas/PageMetadata" } } },
       "NotificationStateCounts": { "type": "object", "additionalProperties": false, "required": ["pending", "claimed", "sent"], "properties": { "pending": { "type": "integer", "minimum": 0 }, "claimed": { "type": "integer", "minimum": 0 }, "sent": { "type": "integer", "minimum": 0 } } },
       "BackupNotificationHealth": { "type": "object", "additionalProperties": false, "required": ["byState", "oldestUnsentAt", "lastErrorCode", "nextDeliveryAttemptAt"], "properties": { "byState": { "$ref": "#/components/schemas/NotificationStateCounts" }, "oldestUnsentAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] }, "lastErrorCode": { "type": ["string", "null"], "maxLength": 64 }, "nextDeliveryAttemptAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] } } },
-      "BackupNotification": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "state", "attempt", "deliveryAttempts", "guestName", "guestType", "vmid", "node", "targetLabel", "problemCode", "detailCode", "occurredAt", "nextRetryAt", "consecutiveFailures", "lastErrorCode", "createdAt", "sentAt"], "properties": { "id": { "$ref": "#/components/schemas/CanonicalUuid" }, "kind": { "type": "string", "enum": ["failure", "attention_required", "recovery"] }, "state": { "type": "string", "enum": ["pending", "claimed", "sent"] }, "attempt": { "type": "integer", "minimum": 1 }, "deliveryAttempts": { "type": "integer", "minimum": 0 }, "guestName": { "type": "string", "minLength": 1 }, "guestType": { "type": "string", "enum": ["qemu", "lxc"] }, "vmid": { "type": "integer", "minimum": 0 }, "node": { "type": "string", "minLength": 1 }, "targetLabel": { "type": "string", "minLength": 1 }, "problemCode": { "type": "string", "minLength": 1, "maxLength": 64 }, "detailCode": { "type": ["string", "null"], "maxLength": 64 }, "occurredAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "nextRetryAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] }, "consecutiveFailures": { "type": "integer", "minimum": 1 }, "lastErrorCode": { "type": ["string", "null"], "maxLength": 64 }, "createdAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "sentAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] } } },
+      "BackupNotification": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "state", "attempt", "checkNumber", "deliveryAttempts", "guestName", "guestType", "vmid", "node", "targetLabel", "problemCode", "detailCode", "occurredAt", "nextRetryAt", "consecutiveFailures", "lastErrorCode", "createdAt", "sentAt"], "properties": { "id": { "$ref": "#/components/schemas/CanonicalUuid" }, "kind": { "type": "string", "enum": ["failure", "attention_required", "recovery"] }, "state": { "type": "string", "enum": ["pending", "claimed", "sent"] }, "attempt": { "type": ["integer", "null"], "minimum": 1 }, "checkNumber": { "type": "integer", "minimum": 1 }, "deliveryAttempts": { "type": "integer", "minimum": 0 }, "guestName": { "type": "string", "minLength": 1 }, "guestType": { "type": "string", "enum": ["qemu", "lxc"] }, "vmid": { "type": "integer", "minimum": 0 }, "node": { "type": "string", "minLength": 1 }, "targetLabel": { "type": "string", "minLength": 1 }, "problemCode": { "type": "string", "minLength": 1, "maxLength": 64 }, "detailCode": { "type": ["string", "null"], "maxLength": 64 }, "occurredAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "nextRetryAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] }, "consecutiveFailures": { "type": "integer", "minimum": 1 }, "lastErrorCode": { "type": ["string", "null"], "maxLength": 64 }, "createdAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "sentAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] } } },
       "BackupNotificationPage": { "type": "object", "additionalProperties": false, "required": ["items", "page"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/BackupNotification" } }, "page": { "$ref": "#/components/schemas/PageMetadata" } } },
       "OperationsWorkerHealth": { "type": "object", "additionalProperties": false, "required": ["status", "heartbeatAt", "expiresAt", "fresh", "nextActionAt", "buildVersion", "currentActivity"], "properties": { "status": { "type": "string", "enum": ["starting", "ready", "busy", "degraded", "stopping"] }, "heartbeatAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "expiresAt": { "$ref": "#/components/schemas/UtcTimestamp" }, "fresh": { "type": "boolean" }, "nextActionAt": { "oneOf": [{ "$ref": "#/components/schemas/UtcTimestamp" }, { "type": "null" }] }, "buildVersion": { "type": "string", "minLength": 1, "maxLength": 64 }, "currentActivity": { "type": ["string", "null"], "maxLength": 190 } } },
       "OperationsWorkers": { "type": "object", "additionalProperties": false, "required": ["collector", "backup"], "properties": { "collector": { "oneOf": [{ "$ref": "#/components/schemas/OperationsWorkerHealth" }, { "type": "null" }] }, "backup": { "oneOf": [{ "$ref": "#/components/schemas/OperationsWorkerHealth" }, { "type": "null" }] } } },
@@ -2405,6 +2897,16 @@
           "allowedNodeIds"
         ],
         "properties": {
+          "defaultBackupMode": {"oneOf": [{"type": "string", "enum": ["snapshot", "suspend", "stop"]}, {"type": "null"}]},
+          "defaultCompression": {"oneOf": [{"type": "string", "enum": ["0", "gzip", "lzo", "zstd"]}, {"type": "null"}]},
+          "defaultLegacyMaxfiles": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepAll": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+          "defaultKeepLast": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepHourly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepDaily": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepWeekly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepMonthly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepYearly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
           "expectedRevision": { "type": "integer", "minimum": 0 },
           "displayName": { "type": "string", "minLength": 1, "maxLength": 190 },
           "connectionId": { "$ref": "#/components/schemas/CanonicalUuid" },
@@ -2573,6 +3075,7 @@
             "type": "array",
             "maxItems": 32,
             "uniqueItems": true,
+            "description": "Drafts may be saved without recipients, but at least one recipient is required before a policy can be enabled or execute a backup.",
             "items": { "type": "string", "format": "email", "maxLength": 254 }
           }
         }
@@ -3592,6 +4095,16 @@
           "blockers"
         ],
         "properties": {
+          "defaultBackupMode": {"oneOf": [{"type": "string", "enum": ["snapshot", "suspend", "stop"]}, {"type": "null"}]},
+          "defaultCompression": {"oneOf": [{"type": "string", "enum": ["0", "gzip", "lzo", "zstd"]}, {"type": "null"}]},
+          "defaultLegacyMaxfiles": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepAll": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+          "defaultKeepLast": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepHourly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepDaily": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepWeekly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepMonthly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+          "defaultKeepYearly": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
           "id": { "$ref": "#/components/schemas/CanonicalUuid" },
           "revision": { "type": "integer", "minimum": 1 },
           "enabled": { "type": "boolean" },
@@ -3696,6 +4209,7 @@
           "priority_unconfigured",
           "thresholds_unconfigured",
           "schedule_unconfigured",
+          "failure_notification_recipients_unconfigured",
           "retention_incompatible"
         ]
       },
@@ -3760,6 +4274,9 @@
           "blockers"
         ],
         "properties": {
+          "effectiveMode": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "effectiveCompression": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "effectiveRetention": {"oneOf": [{"$ref": "#/components/schemas/PolicyRetention"}, {"type": "null"}]},
           "id": { "$ref": "#/components/schemas/CanonicalUuid" },
           "revision": { "type": "integer", "minimum": 1 },
           "status": { "$ref": "#/components/schemas/PolicyStatus" },
@@ -3942,6 +4459,7 @@
           "node_enabled",
           "guest_enabled",
           "policy_enabled",
+          "policy_failure_notification_configured",
           "policy_retention_compatible",
           "target_enabled",
           "explicit_exclusion_absent",
@@ -3997,6 +4515,7 @@
           "concurrency_limit_reached",
           "invalid_mapping",
           "incompatible",
+          "unconfigured",
           "active_request_exists",
           "higher_ranked_candidate"
         ]

@@ -125,6 +125,7 @@ final class OnboardProxmoxConnectionTest extends TestCase
                 new OnboardingPermission('/storage', 'Datastore.Audit', true, true),
             ]),
             new OnboardingIdentityEvidence(OnboardingCredentialKind::Backup, OnboardingProduct::Pve, 8, 4, '8.4.1', [
+                new OnboardingPermission('/nodes', 'Sys.Audit', true, true),
                 new OnboardingPermission('/vms', 'VM.Backup', true, true), new OnboardingPermission('/vms', 'Datastore.AllocateSpace', true, true),
                 new OnboardingPermission('/storage', 'VM.Backup', true, true), new OnboardingPermission('/storage', 'Datastore.AllocateSpace', true, true),
             ]),

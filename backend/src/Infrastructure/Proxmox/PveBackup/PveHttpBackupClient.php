@@ -94,6 +94,20 @@ final readonly class PveHttpBackupClient implements PveBackupClient
     public function taskPage(string $node, PveTaskQuery $query): PveTaskPage
     {
         try {
+            // A successful task response without Sys.Audit may silently contain only our own tasks.
+            $path = '/nodes/'.$node;
+            $matrix = $this->transport->get(['access', 'permissions'], ['path' => $path]);
+            if ($matrix instanceof \stdClass) {
+                $matrix = get_object_vars($matrix);
+            }
+            $permissions = is_array($matrix) ? ($matrix[$path] ?? null) : null;
+            if ($permissions instanceof \stdClass) {
+                $permissions = get_object_vars($permissions);
+            }
+            // Values describe propagation; both 0 and 1 grant the privilege at this exact path.
+            if (!is_array($permissions) || !\in_array($permissions['Sys.Audit'] ?? null, [0, 1], true)) {
+                throw PveBackupApiFailure::for(PveBackupApiFailureCode::PermissionDenied);
+            }
             return $this->taskPageReader->read(
                 $node,
                 $query,

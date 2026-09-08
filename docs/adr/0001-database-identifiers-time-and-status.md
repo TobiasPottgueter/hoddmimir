@@ -1,5 +1,10 @@
 # ADR 0001: Datenbank-IDs, Zeitwerte und Statusrepräsentation
 
+## Ergänzung vom 7. September 2026
+
+Die Regeln zu verpflichtendem Expand/Contract und ausschließlich anwendungsseitigem Rollback werden für den neuen Wartungsupgradepfad durch [ADR 0006](0006-maintenance-upgrade-database-restore.md) ersetzt. Dieser Pfad ist als Wartungsprotokoll 1 implementiert; seine Live-Abnahme steht aus. Die folgenden Rollback-Regeln beschreiben den verbleibenden Image-Recovery-Pfad, der bei bestehenden Installationen keine Migrationen mehr zulässt. Identitäts-/UTC-Regeln bleiben unverändert.
+
+
 - Status: akzeptiert
 - Datum: 10. Juli 2026
 

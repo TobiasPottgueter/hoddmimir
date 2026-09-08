@@ -8,6 +8,8 @@ use InvalidArgumentException;
 
 final readonly class BuildPveVzdumpPayload
 {
+    private const array LEGACY_SENDMAIL_NOTIFICATION_MAJORS = [8 => true, 9 => true];
+
     /** @return array<string, string|int> */
     public function build(PveVersion $version, PveBackupSubmission $submission): array
     {
@@ -28,10 +30,11 @@ final readonly class BuildPveVzdumpPayload
         if (null !== $submission->legacyMaxFiles) {
             $payload['maxfiles'] = $submission->legacyMaxFiles;
         }
-        if (null !== $submission->failureNotificationRecipients) {
-            $payload['mailto'] = $submission->failureNotificationRecipients->parameterValue();
-            $payload['mailnotification'] = 'failure';
+        if (isset(self::LEGACY_SENDMAIL_NOTIFICATION_MAJORS[$version->major])) {
+            $payload['notification-mode'] = 'legacy-sendmail';
         }
+        $payload['mailto'] = $submission->failureNotificationRecipients->parameterValue();
+        $payload['mailnotification'] = 'failure';
 
         return $payload;
     }

@@ -10,6 +10,7 @@ use App\Application\Configuration\Policy\PolicyActivationEvidence;
 use App\Domain\Policy\BackupMode;
 use App\Domain\Policy\BackupPolicy;
 use App\Domain\Policy\Compression;
+use App\Domain\Policy\FailureNotificationRecipients;
 use App\Domain\Policy\PolicyId;
 use App\Domain\Policy\PolicyPriority;
 use App\Domain\Policy\PolicyRevision;
@@ -105,12 +106,14 @@ final class PolicyActivationAssessorTest extends TestCase
             PolicyActivationBlockerCode::PriorityUnconfigured,
             PolicyActivationBlockerCode::ThresholdsUnconfigured,
             PolicyActivationBlockerCode::ScheduleUnconfigured,
+            PolicyActivationBlockerCode::FailureNotificationRecipientsUnconfigured,
         ], $assessment->blockers);
 
         $legacy = BackupPolicy::draft(
             new PolicyId(str_repeat('l', 16)), new PolicyRevision(1), new BackupTargetId(str_repeat('t', 16)),
             BackupMode::Snapshot, Compression::Zstd, RetentionPolicy::legacyMaxFiles(2),
             new PolicyPriority(1), new PolicyThresholds(60, null, null), Schedule::CollectorCycle,
+            new FailureNotificationRecipients(['ops@example.test']),
         );
         self::assertSame(
             [PolicyActivationBlockerCode::RetentionIncompatible],
@@ -148,6 +151,7 @@ final class PolicyActivationAssessorTest extends TestCase
             PolicyActivationBlockerCode::PriorityUnconfigured,
             PolicyActivationBlockerCode::ThresholdsUnconfigured,
             PolicyActivationBlockerCode::ScheduleUnconfigured,
+            PolicyActivationBlockerCode::FailureNotificationRecipientsUnconfigured,
         ], $assessment->blockers);
     }
 
@@ -158,6 +162,7 @@ final class PolicyActivationAssessorTest extends TestCase
             BackupMode::Snapshot, Compression::Zstd,
             RetentionPolicy::prune(null, 2, null, null, null, null, null),
             new PolicyPriority(1), new PolicyThresholds(60, null, null), Schedule::CollectorCycle,
+            new FailureNotificationRecipients(['ops@example.test']),
         );
     }
 

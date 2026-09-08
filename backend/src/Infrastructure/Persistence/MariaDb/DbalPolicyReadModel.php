@@ -95,6 +95,7 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             SELECT policy.*, connection.display_name AS connection_name,
                    COALESCE(cluster.external_name, connection.display_name) AS cluster_name,
                    target.display_name AS target_name,
+                   target.default_backup_mode, target.default_compression, target.default_legacy_maxfiles, target.default_keep_all, target.default_keep_last, target.default_keep_hourly, target.default_keep_daily, target.default_keep_weekly, target.default_keep_monthly, target.default_keep_yearly,
                    storage.storage_type AS target_storage_type
             FROM backup_policies AS policy
             JOIN proxmox_connections AS connection ON connection.id = policy.connection_id
@@ -243,9 +244,14 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             $this->domainThresholds($row),
             null === ($row['schedule'] ?? null) ? null : Schedule::from($this->text($row, 'schedule')),
             new FailureNotificationRecipients($this->failureRecipients($row['failure_notification_recipients_json'] ?? null)),
+            (new BackupDefaultsMapper())->fromRow($row),
         );
         $assessment = $this->assessor->assess($domainPolicy, $evidence, $now, $this->freshness->maximumAgeSeconds);
 
+        $defaultRetentionRow = [];
+        foreach (BackupDefaultsMapper::FIELDS as $column) {
+            $defaultRetentionRow[substr($column, 8)] = $row[$column] ?? null;
+        }
         return new ConfiguredPolicy(
             $this->uuid($row, 'id'),
             $domainPolicy->revision->value,
@@ -269,6 +275,9 @@ final readonly class DbalPolicyReadModel implements PolicyReadModel
             $this->nullableDate($row['disabled_at'] ?? null),
             $assessment->blockers,
             $domainPolicy->failureNotificationRecipients->addresses,
+            $domainPolicy->effectiveMode()?->value,
+            $domainPolicy->effectiveCompression()?->value,
+            $retention ?? $this->retention($defaultRetentionRow),
         );
     }
 

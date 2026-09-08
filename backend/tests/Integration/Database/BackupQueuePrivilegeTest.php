@@ -72,7 +72,15 @@ final class BackupQueuePrivilegeTest extends DatabaseTestCase
                     )));
                 }
 
-                if (in_array($table, ['backup_requests', 'backup_request_events', 'backup_node_slots', 'backup_target_slots'], true)) {
+                if ('backup_problem_states' === $table) {
+                    self::assertSame([], $collector->fetchAllAssociative('SELECT * FROM backup_problem_states LIMIT 0'));
+                    self::assertSame(0, $collector->executeStatement('UPDATE backup_problem_states SET obligation_id=obligation_id WHERE 1=0'));
+                    self::assertSame(0, $collector->executeStatement('DELETE FROM backup_problem_states WHERE 1=0'));
+                } elseif ('backup_notification_outbox' === $table) {
+                    self::assertSame([], $collector->fetchAllAssociative('SELECT * FROM backup_notification_outbox LIMIT 0'));
+                    $this->assertDenied(static fn () => $collector->executeStatement('UPDATE backup_notification_outbox SET state=state WHERE 1=0'));
+                    $this->assertDenied(static fn () => $collector->executeStatement('DELETE FROM backup_notification_outbox WHERE 1=0'));
+                } elseif (in_array($table, ['backup_requests', 'backup_request_events', 'backup_node_slots', 'backup_target_slots'], true)) {
                     self::assertSame([], $collector->fetchAllAssociative(sprintf('SELECT * FROM %s LIMIT 0', $table)));
                     $this->assertDenied(static fn () => $collector->executeStatement(sprintf(
                         'UPDATE %s SET %s = %s WHERE 1 = 0',

@@ -278,6 +278,39 @@ final class DbalMonitoringRunStoreTest extends DatabaseTestCase
         self::assertNotSame($before['config_hash'], $after['config_hash']);
     }
 
+    public function testPbsInspectionsPersistWithFenceAndReadWithoutCredentials(): void
+    {
+        $this->switchToPbs();
+        $run = self::id('pbs-inspection');
+        $this->begin($run, MonitoringRunKind::ObservedTasks);
+        $task = $this->pbsTask(true, false, 'localhost', null, null);
+        $inspection = new \App\Application\Proxmox\Pbs\PbsTaskInspection($task->upid, 'running', null, null,
+            [['number' => 1, 'text' => 'password=[REDACTED]']], true, null, null);
+        $this->store->apply($this->lease, $this->pbsCommit($run, MonitoringRunKind::ObservedTasks,
+            [$this->pbsTaskScope(PbsTaskFilterFamily::Backup, false)], tasks: [$task], inspections: [$inspection]));
+        $reader = new \App\Infrastructure\Persistence\MariaDb\DbalPbsTaskReadModel($this->connection());
+        $page = $reader->tasks(null, 0);
+        self::assertSame(1, $page['total']);
+        $id = $page['items'][0]['id']; self::assertIsString($id);
+        $detail = $reader->detail(new \App\Application\Inventory\ReadModel\ReadModelIdentifier($id));
+        self::assertNotNull($detail);
+        self::assertSame($task->upid->value, $detail['upid']);
+        self::assertIsArray($detail['inspection']);
+        self::assertSame([['number' => 1, 'text' => 'password=[REDACTED]']], $detail['inspection']['lines']);
+        self::assertTrue($detail['inspection']['truncated']);
+        self::assertSame('2026-07-11T21:00:00.000000Z', $detail['inspectedAt']);
+        self::assertSame([], $reader->tasks(null, 50)['items']);
+        $missing = new \App\Application\Inventory\ReadModel\ReadModelIdentifier('00000000-0000-0000-0000-000000000000');
+        self::assertSame(0, $reader->tasks($missing, 0)['total']);
+        self::assertNull($reader->detail($missing));
+        $this->rotateParent('pbs-inspection-preserve');
+        $next = self::id('pbs-inspection-no-refetch');
+        $this->begin($next, MonitoringRunKind::ObservedTasks);
+        $this->store->apply($this->lease, $this->pbsCommit($next, MonitoringRunKind::ObservedTasks,
+            [$this->pbsTaskScope(PbsTaskFilterFamily::Backup, false)], tasks: [$task]));
+        self::assertSame($detail, $reader->detail(new \App\Application\Inventory\ReadModel\ReadModelIdentifier($id)));
+    }
+
     public function testPbsTaskProjectionMergesPassProvenanceReportedNodeAndTerminalStateMonotonically(): void
     {
         $this->switchToPbs();
@@ -533,6 +566,7 @@ final class DbalMonitoringRunStoreTest extends DatabaseTestCase
      * @param list<MonitoringScopeResult> $scopes
      * @param list<PbsJobObservation>     $jobs
      * @param list<PbsTaskObservation>    $tasks
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $inspections
      */
     private function pbsCommit(
         InventoryIdentifier $run,
@@ -540,6 +574,7 @@ final class DbalMonitoringRunStoreTest extends DatabaseTestCase
         array $scopes,
         array $jobs = [],
         array $tasks = [],
+        array $inspections = [],
     ): MonitoringCommit {
         return new MonitoringCommit(
             $run,
@@ -556,6 +591,7 @@ final class DbalMonitoringRunStoreTest extends DatabaseTestCase
             $jobs,
             $tasks,
             new DateTimeImmutable('2026-07-11T21:00:00Z'),
+            $inspections,
         );
     }
 

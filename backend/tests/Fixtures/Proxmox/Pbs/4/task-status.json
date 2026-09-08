@@ -1,0 +1,16 @@
+{
+  "data": {
+    "upid": "UPID:pbs:00000001:00000002:00000003:65000000:verify:store:collector@pbs!audit:",
+    "node": "localhost",
+    "pid": 1,
+    "pstart": 2,
+    "starttime": 1694498816,
+    "type": "verify",
+    "id": "store",
+    "user": "collector@pbs",
+    "tokenid": "audit",
+    "status": "stopped",
+    "exitstatus": "OK",
+    "endtime": 1694498826
+  }
+}

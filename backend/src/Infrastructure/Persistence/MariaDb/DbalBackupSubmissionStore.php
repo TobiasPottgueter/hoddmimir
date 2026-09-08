@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Persistence\MariaDb;
 
+use App\Domain\Scheduler\BackupStartRules;
 use App\Application\Backup\Execution\BackupSubmissionTransaction;
 use App\Application\Backup\Execution\DefinitiveBackupFailureNotice;
 use App\Application\Backup\Execution\ExistingSubmissionStatus;
@@ -20,7 +21,6 @@ use App\Application\Proxmox\Pve\PveGuestType;
 use App\Application\Proxmox\Pve\PvePruneBackups;
 use App\Application\Proxmox\Pve\PveUpid;
 use App\Domain\Backup\BackupProblemCode;
-use DateInterval;
 use DateTimeImmutable;
 use DateTimeZone;
 use Doctrine\DBAL\Connection;
@@ -53,6 +53,43 @@ final readonly class DbalBackupSubmissionStore implements BackupSubmissionTransa
             : ExistingSubmissionStatus::RecoveryRequired;
     }
 
+    public function taskInspectionNodes(SubmitClaimedBackupCommand $command): array
+    {
+        return $this->inspectionNodes($this->connection, $command->requestId);
+    }
+
+    /** @return list<string> */
+    private function inspectionNodes(Connection $db, string $requestId): array
+    {
+        $nodes = $db->fetchFirstColumn(<<<'SQL'
+SELECT node.node_name FROM backup_requests request
+JOIN guest_placements placement ON placement.guest_id=request.guest_id
+JOIN pve_nodes node ON node.id=placement.node_id
+WHERE request.id=:request
+UNION
+SELECT run.submission_node FROM backup_requests request
+JOIN backup_requests predecessor ON predecessor.guest_id=request.guest_id
+JOIN backup_runs run ON run.request_id=predecessor.id
+WHERE request.id=:request AND run.state='unknown' AND run.submission_provenance='ambiguous'
+  AND NOT EXISTS (SELECT 1 FROM backup_requests completed
+    JOIN backup_runs success ON success.request_id=completed.id
+    WHERE completed.guest_id=request.guest_id AND success.state='succeeded'
+      AND success.started_at > run.started_at)
+SQL, ['request' => $requestId], ['request' => ParameterType::BINARY]);
+        return array_map(fn (mixed $node): string => $this->text($node), $nodes);
+    }
+
+    public function deferRemoteTaskCheck(SubmitClaimedBackupCommand $command, string $blocker): void
+    {
+        $this->connection->transactional(function (Connection $db) use ($command, $blocker): void {
+            $row = $db->fetchAssociative('SELECT * FROM backup_requests WHERE id=:id FOR UPDATE',
+                ['id' => $command->requestId], ['id' => ParameterType::BINARY]);
+            if (false !== $row && $this->authority($row, $command)) {
+                $this->deferBlockedClaim($db, $command, $blocker);
+            }
+        });
+    }
+
     public function prepareAfterFullRevalidation(SubmitClaimedBackupCommand $command): SubmissionPreparation
     {
         return $this->connection->transactional(function (Connection $db) use ($command): SubmissionPreparation {
@@ -65,6 +102,7 @@ SELECT request.*, connection.enabled AS connection_enabled,
        placement.observed_at AS placement_seen,
        node.node_name, node.api_status, node.inventory_state AS node_state, node.last_seen_at AS node_seen,
        policy.status AS policy_status, policy.revision AS current_policy_revision,
+       policy.failure_notification_recipients_json AS current_failure_notification_recipients_json,
        target.status AS target_status, target.revision AS current_target_revision,
        target.display_name AS target_label, target.minimum_free_bytes, target.fixed_parallel_limit,
        target.pbs_connection_id,
@@ -115,7 +153,7 @@ SELECT request.*, connection.enabled AS connection_enabled,
        NOT EXISTS(SELECT 1 FROM backup_requests active_request
          WHERE active_request.guest_id = request.guest_id AND active_request.id <> request.id
            AND active_request.state IN ('leased', 'starting', 'running', 'reconcile_required')) AS active_request_absent,
-       credential.principal AS submission_user
+       CONCAT(credential.principal, '!', credential.token_name) AS submission_user
 FROM backup_requests request
 JOIN proxmox_connections connection ON connection.id = request.connection_id
 JOIN pve_clusters cluster ON cluster.connection_id = request.connection_id AND cluster.id = request.cluster_id
@@ -152,6 +190,11 @@ SQL, ['request' => $command->requestId], ['request' => ParameterType::BINARY]);
             if (null !== $resourceBlocker) {
                 $this->deferBlockedClaim($db, $command, $resourceBlocker);
                 return new SubmissionPreparation(SubmissionPreparationStatus::Blocked, $resourceBlocker);
+            }
+            if (null === $command->taskEvidence
+                || !$command->taskEvidence->covers($this->inspectionNodes($db, $command->requestId), $command->now)) {
+                $this->deferBlockedClaim($db, $command, 'remote_tasks_stale');
+                return new SubmissionPreparation(SubmissionPreparationStatus::Blocked, 'remote_tasks_stale');
             }
             $payload = $this->payload($row);
             $windowStart = $command->now->modify('-30 seconds');
@@ -318,36 +361,44 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
     /** @param array<string,mixed> $row */
     private function blocker(array $row, DateTimeImmutable $now): ?string
     {
-        if (1 !== $this->integer($row['connection_enabled'] ?? null) || 'active' !== ($row['cluster_state'] ?? null)
-            || 'active' !== ($row['guest_state'] ?? null) || 0 !== $this->integer($row['is_template'] ?? null)
-            || 'online' !== ($row['api_status'] ?? null) || 'active' !== ($row['node_state'] ?? null)
-            || 'enabled' !== ($row['policy_status'] ?? null) || 'enabled' !== ($row['target_status'] ?? null)
-            || 1 !== $this->integer($row['supports_backup'] ?? null)
-            || 0 !== $this->integer($row['storage_disabled'] ?? null)
-            || 'active' !== ($row['storage_state'] ?? null) || 1 !== $this->integer($row['storage_enabled'] ?? null)
-            || 1 !== $this->integer($row['storage_active'] ?? null) || 1 !== $this->integer($row['executor_authorized'] ?? null)
-            || !is_string($row['allowed_node_id'] ?? null)
-            || 1 !== $this->integer($row['selection_included'] ?? null)
-            || 0 !== $this->integer($row['selection_excluded'] ?? null)
-            || 1 !== $this->integer($row['active_request_absent'] ?? null)
-            || null === $this->decimal($row['minimum_free_bytes'] ?? null)
-            || null === $this->decimal($row['available_bytes'] ?? null)) return 'eligibility_changed';
-        if (!hash_equals($this->binary($row['node_id'] ?? null), $this->binary($row['current_node_id'] ?? null))
-            || $this->integer($row['placement_revision'] ?? null) !== $this->integer($row['current_placement_revision'] ?? null)
-            || $this->integer($row['policy_revision'] ?? null) !== $this->integer($row['current_policy_revision'] ?? null)
-            || $this->integer($row['target_revision'] ?? null) !== $this->integer($row['current_target_revision'] ?? null)) return 'snapshot_revision_changed';
-        $retentionBlocker = $this->retentionCompatibilityBlocker($row);
-        if (null !== $retentionBlocker) return $retentionBlocker;
+        if (!BackupStartRules::resourcesEligible(new \App\Domain\Scheduler\BackupResourceEvidence(
+            1 === $this->integer($row['connection_enabled'] ?? null),
+            'active' === ($row['cluster_state'] ?? null),
+            'active' === ($row['guest_state'] ?? null),
+            null === ($row['is_template'] ?? null) ? null : 0 !== $this->integer($row['is_template']),
+            'active' === ($row['node_state'] ?? null),
+            'online' === ($row['api_status'] ?? null),
+            'enabled' === ($row['policy_status'] ?? null),
+            'enabled' === ($row['target_status'] ?? null),
+            1 === $this->integer($row['supports_backup'] ?? null),
+            null === ($row['storage_disabled'] ?? null) ? null : 0 !== $this->integer($row['storage_disabled']),
+            'active' === ($row['storage_state'] ?? null),
+            1 === $this->integer($row['storage_enabled'] ?? null),
+            1 === $this->integer($row['storage_active'] ?? null),
+            1 === $this->integer($row['executor_authorized'] ?? null),
+            is_string($row['allowed_node_id'] ?? null),
+            1 === $this->integer($row['selection_included'] ?? null),
+            0 !== $this->integer($row['selection_excluded'] ?? null),
+            1 === $this->integer($row['active_request_absent'] ?? null),
+            null !== $this->decimal($row['minimum_free_bytes'] ?? null) && null !== $this->decimal($row['available_bytes'] ?? null),
+        ))) return 'eligibility_changed';
+        if (!BackupStartRules::snapshotMatches(
+            $this->binary($row['node_id'] ?? null), $this->integer($row['placement_revision'] ?? null),
+            $this->integer($row['policy_revision'] ?? null), $this->integer($row['target_revision'] ?? null),
+            $this->binary($row['current_node_id'] ?? null), $this->integer($row['current_placement_revision'] ?? null),
+            $this->integer($row['current_policy_revision'] ?? null), $this->integer($row['current_target_revision'] ?? null),
+        )) return 'snapshot_revision_changed';
+        $policyBlocker = $this->policyExecutionBlocker($row);
+        if (null !== $policyBlocker) return $policyBlocker;
         foreach (['cluster_seen','guest_seen','placement_seen','node_seen','storage_seen','capacity_seen','executor_seen'] as $field) {
             if (!$this->freshAt($row[$field] ?? null, $now)) return $field.'_stale';
         }
         if ('pbs' === ($row['target_storage_type'] ?? null)
-            && (!$this->enabledFlag($row['pbs_connection_enabled'] ?? null)
-                || !$this->enabledFlag($row['pbs_writes'] ?? null)
-                || 'active' !== ($row['pbs_state'] ?? null)
-                || 'datastore_filesystem' !== ($row['pbs_capacity_semantics'] ?? null)
-                || !$this->enabledFlag($row['pbs_mapping_valid'] ?? null)
-                || null === $this->decimal($row['pbs_available_bytes'] ?? null)
+            && (!BackupStartRules::pbsTargetEligible(
+                $this->enabledFlag($row['pbs_connection_enabled'] ?? null), $this->enabledFlag($row['pbs_writes'] ?? null),
+                'active' === ($row['pbs_state'] ?? null), 'datastore_filesystem' === ($row['pbs_capacity_semantics'] ?? null),
+                $this->enabledFlag($row['pbs_mapping_valid'] ?? null), null !== $this->decimal($row['pbs_available_bytes'] ?? null),
+            )
                 || !$this->freshAt($row['pbs_capacity_seen'] ?? null, $now)
                 || !$this->freshAt($row['pbs_mapping_seen'] ?? null, $now)
                 || !$this->freshAt($row['pbs_inventory_seen'] ?? null, $now))) {
@@ -362,7 +413,7 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
     }
 
     /** @param array<string,mixed> $row */
-    private function retentionCompatibilityBlocker(array $row): ?string
+    private function policyExecutionBlocker(array $row): ?string
     {
         $pveMajor = $row['current_pve_major'] ?? null;
         if ((!is_int($pveMajor) && !is_string($pveMajor)) || !ctype_digit((string) $pveMajor)
@@ -381,12 +432,29 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
             return 'policy_snapshot_invalid';
         }
         if (!is_array($policy)) return 'policy_snapshot_invalid';
+        if (!$this->hasFailureRecipients($policy['failureNotificationRecipients'] ?? null)
+            || !$this->hasFailureRecipientsJson($row['current_failure_notification_recipients_json'] ?? null)) {
+            return 'failure_notification_recipients_unconfigured';
+        }
         if (9 === (int) $pveMajor
             && ($this->legacyRetention($policy['desiredRetention'] ?? null)
                 || $this->legacyRetention($policy['approvedDeletionRetention'] ?? null))) {
             return 'retention_incompatible';
         }
         return null;
+    }
+
+    private function hasFailureRecipientsJson(mixed $json): bool
+    {
+        if (!is_string($json)) return false;
+        try { $recipients = json_decode($json, true, 8, JSON_THROW_ON_ERROR); }
+        catch (JsonException) { return false; }
+        return $this->hasFailureRecipients($recipients);
+    }
+
+    private function hasFailureRecipients(mixed $recipients): bool
+    {
+        return BackupStartRules::notificationRecipientsConfigured($recipients);
     }
 
     private function legacyRetention(mixed $retention): bool
@@ -401,11 +469,8 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
         $target = $db->fetchAssociative('SELECT slot_limit, slots_used FROM backup_target_slots WHERE target_id=:id FOR UPDATE', ['id' => $this->binary($row['target_id'] ?? null)], ['id' => ParameterType::BINARY]);
         $reservation = $db->fetchAssociative('SELECT target_id,node_id,reserved_bytes,released_at FROM backup_capacity_reservations WHERE request_id=:id FOR UPDATE', ['id' => $this->binary($row['id'] ?? null)], ['id' => ParameterType::BINARY]);
         if (false === $node || false === $target || false === $reservation
-            || $this->integer($node['slots_used'] ?? null) < 1
-            || $this->integer($node['slots_used'] ?? null) > $this->integer($node['slot_limit'] ?? null)
-            || $this->integer($target['slots_used'] ?? null) < 1
-            || $this->integer($target['slots_used'] ?? null) > $this->integer($target['slot_limit'] ?? null)
-            || $this->integer($target['slot_limit'] ?? null) !== $this->integer($row['fixed_parallel_limit'] ?? null)
+            || !BackupStartRules::slotAvailable($this->integer($node['slot_limit'] ?? null), $this->integer($node['slots_used'] ?? null), 1, true)
+            || !BackupStartRules::slotAvailable($this->integer($target['slot_limit'] ?? null), $this->integer($target['slots_used'] ?? null), $this->integer($row['fixed_parallel_limit'] ?? null), true)
             || null !== ($reservation['released_at'] ?? null)
             || !is_string($reservation['target_id'] ?? null) || !hash_equals($this->binary($row['target_id'] ?? null), $reservation['target_id'])
             || !is_string($reservation['node_id'] ?? null) || !hash_equals($this->binary($row['node_id'] ?? null), $reservation['node_id'])
@@ -413,27 +478,30 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
             return 'claim_resources_inconsistent';
         }
         $reserved = $this->decimal($db->fetchOne('SELECT COALESCE(SUM(reserved_bytes),0) FROM backup_capacity_reservations WHERE target_id=:target AND released_at IS NULL', ['target' => $this->binary($row['target_id'] ?? null)]));
-        $available = $this->decimal($row['available_bytes'] ?? null);
-        if ('pbs' === ($row['target_storage_type'] ?? null)) {
-            $pbs = $this->decimal($row['pbs_available_bytes'] ?? null);
-            if (null === $pbs) return 'pbs_evidence_invalid';
-            if (null === $available || 1 === $this->integer($db->fetchOne('SELECT CAST(:pbs AS DECIMAL(65,0)) < CAST(:pve AS DECIMAL(65,0))', ['pbs' => $pbs, 'pve' => $available]))) {
-                $available = $pbs;
-            }
-        }
-        $minimum = $this->decimal($row['minimum_free_bytes'] ?? null);
-        if (null === $reserved || null === $available || null === $minimum
-            || 1 !== $this->integer($db->fetchOne('SELECT CAST(:available AS DECIMAL(65,0)) >= CAST(:reserved AS DECIMAL(65,0)) + CAST(:minimum AS DECIMAL(65,0))', ['available' => $available, 'reserved' => $reserved, 'minimum' => $minimum]))) {
+        $available = BackupStartRules::effectiveCapacity(
+            $this->capacityDecimal($row['available_bytes'] ?? null), 'pbs' === ($row['target_storage_type'] ?? null),
+            $this->capacityDecimal($row['pbs_available_bytes'] ?? null),
+        );
+        if (!BackupStartRules::capacityAvailable($available, $this->capacityDecimal($row['minimum_free_bytes'] ?? null),
+            $this->capacityDecimal($reserved), new \App\Domain\Shared\UInt64Decimal('0'))) {
             return 'capacity_unavailable';
         }
         return null;
+    }
+
+    private function capacityDecimal(mixed $value): ?\App\Domain\Shared\UInt64Decimal
+    {
+        $decimal = $this->decimal($value);
+        if (null === $decimal) return null;
+        try { return new \App\Domain\Shared\UInt64Decimal($decimal); }
+        catch (\InvalidArgumentException) { return null; }
     }
 
     private function freshAt(mixed $value, DateTimeImmutable $now): bool
     {
         if (!is_string($value)) return false;
         try { $seen = $this->date($value); } catch (RuntimeException) { return false; }
-        return $seen <= $now && $now <= $seen->add(new DateInterval('PT'.$this->freshnessSeconds.'S'));
+        return (new \App\Domain\Scheduler\EvidenceFreshnessPolicy($this->freshnessSeconds))->isFresh($now, $seen);
     }
 
     /** @param array<string,mixed> $row */
@@ -466,16 +534,15 @@ SQL, ['retry' => $retry, 'next' => self::format($next), 'failed' => self::format
                 $this->nullableInteger($values, 'keep-yearly'),
             );
         }
-        $recipients = null;
-        if (is_array($policy['failureNotificationRecipients'] ?? null) && [] !== $policy['failureNotificationRecipients']) {
-            $addresses = array_values($policy['failureNotificationRecipients']);
-            if (array_filter($addresses, static fn (mixed $address): bool => !is_string($address)) !== []) {
-                throw new RuntimeException('Invalid failure notification recipients.');
-            }
-            /** @var list<string> $addresses */
-            $recipients = new PveBackupFailureRecipients($addresses);
+        $addresses = is_array($policy['failureNotificationRecipients'] ?? null)
+            ? array_values($policy['failureNotificationRecipients'])
+            : [];
+        if ([] === $addresses || array_filter($addresses, static fn (mixed $address): bool => !is_string($address)) !== []) {
+            throw new RuntimeException('Invalid failure notification recipients.');
         }
-        return new PveBackupSubmission($this->text($row['node_name'] ?? null), $this->integer($row['vmid'] ?? null), PveGuestType::from($this->text($row['guest_type'] ?? null)), $this->text($row['storage_name'] ?? null), PveBackupMode::from($this->text($policy['mode'] ?? null)), PveBackupCompression::from($this->text($policy['compression'] ?? null)), $prune, $legacy, $recipients);
+        /** @var list<string> $addresses */
+        $recipients = new PveBackupFailureRecipients($addresses);
+        return new PveBackupSubmission($this->text($row['node_name'] ?? null), $this->integer($row['vmid'] ?? null), PveGuestType::from($this->text($row['guest_type'] ?? null)), $this->text($row['storage_name'] ?? null), PveBackupMode::from($this->text($policy['mode'] ?? null)), PveBackupCompression::from($this->text($policy['compression'] ?? null)), $recipients, $prune, $legacy);
     }
 
     private function release(Connection $db, SubmitClaimedBackupCommand $command, DateTimeImmutable $at): void

@@ -99,7 +99,7 @@ const modeOptions: Array<{
   label: string;
   value: PolicyCommandRequest["backupMode"];
 }> = [
-  { label: "Nicht festgelegt", value: null },
+  { label: "Vom Backupziel übernehmen", value: null },
   { label: "Snapshot", value: "snapshot" },
   { label: "Suspend", value: "suspend" },
   { label: "Stop", value: "stop" },
@@ -108,7 +108,7 @@ const compressionOptions: Array<{
   label: string;
   value: PolicyCommandRequest["compression"];
 }> = [
-  { label: "Nicht festgelegt", value: null },
+  { label: "Vom Backupziel übernehmen", value: null },
   { label: "Keine", value: "0" },
   { label: "Gzip", value: "gzip" },
   { label: "LZO", value: "lzo" },
@@ -200,7 +200,18 @@ function submit(): void {
       cooldownSeconds: nullable(cooldownSeconds.value),
       schedule: "collector_cycle",
       legacyMaxfiles: legacyMaxfiles.value,
-      keepAll: keepAll.value,
+      keepAll: keepAll.value
+        ? true
+        : [
+              keepLast.value,
+              keepHourly.value,
+              keepDaily.value,
+              keepWeekly.value,
+              keepMonthly.value,
+              keepYearly.value,
+            ].some((value) => value !== null)
+          ? false
+          : null,
       keepLast: keepLast.value,
       keepHourly: keepHourly.value,
       keepDaily: keepDaily.value,
@@ -282,7 +293,8 @@ function submit(): void {
           rows="3"
           placeholder="backup@example.org, platform@example.org"
         /><small
-          >Komma oder Zeilenumbruch; leer deaktiviert PVE-Fehlermails.</small
+          >Komma oder Zeilenumbruch; mindestens ein Empfänger ist zur
+          Aktivierung erforderlich.</small
         ></label
       >
       <label

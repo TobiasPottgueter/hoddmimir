@@ -19,6 +19,7 @@ enum GateDetailCode: string
     case ConcurrencyLimitReached = 'concurrency_limit_reached';
     case InvalidMapping = 'invalid_mapping';
     case Incompatible = 'incompatible';
+    case Unconfigured = 'unconfigured';
     case ActiveRequestExists = 'active_request_exists';
     case HigherRankedCandidate = 'higher_ranked_candidate';
 }

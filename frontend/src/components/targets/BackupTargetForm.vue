@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
+import Checkbox from "primevue/checkbox";
 import InputNumber from "primevue/inputnumber";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
@@ -29,6 +30,30 @@ const selectedCandidateId = ref("");
 const minimumFreeBytes = ref("");
 const fixedParallelLimit = ref<number | null>(null);
 const selectedAllowedNodeIds = ref<string[]>([]);
+const defaultBackupMode = ref<TargetCommandRequest["defaultBackupMode"]>(null);
+const defaultCompression =
+  ref<TargetCommandRequest["defaultCompression"]>(null);
+const defaultKeepAll = ref(false);
+const defaultLegacyMaxfiles = ref<number | null>(null);
+const defaultKeepLast = ref<number | null>(null);
+const defaultKeepHourly = ref<number | null>(null);
+const defaultKeepDaily = ref<number | null>(null);
+const defaultKeepWeekly = ref<number | null>(null);
+const defaultKeepMonthly = ref<number | null>(null);
+const defaultKeepYearly = ref<number | null>(null);
+const modeOptions = [
+  { label: "Keine Vorgabe", value: null },
+  { label: "Snapshot", value: "snapshot" },
+  { label: "Suspend", value: "suspend" },
+  { label: "Stop", value: "stop" },
+];
+const compressionOptions = [
+  { label: "Keine Vorgabe", value: null },
+  { label: "Keine Kompression", value: "0" },
+  { label: "Gzip", value: "gzip" },
+  { label: "LZO", value: "lzo" },
+  { label: "Zstandard", value: "zstd" },
+];
 const validationError = ref<string | null>(null);
 
 const candidateOptions = computed(() => {
@@ -88,6 +113,16 @@ watch(
       target?.allowedNodes.map((node) => node.id) ??
       candidate?.nodes.map((node) => node.nodeId) ??
       [];
+    defaultBackupMode.value = target?.defaultBackupMode ?? null;
+    defaultCompression.value = target?.defaultCompression ?? null;
+    defaultKeepAll.value = target?.defaultKeepAll ?? false;
+    defaultLegacyMaxfiles.value = target?.defaultLegacyMaxfiles ?? null;
+    defaultKeepLast.value = target?.defaultKeepLast ?? null;
+    defaultKeepHourly.value = target?.defaultKeepHourly ?? null;
+    defaultKeepDaily.value = target?.defaultKeepDaily ?? null;
+    defaultKeepWeekly.value = target?.defaultKeepWeekly ?? null;
+    defaultKeepMonthly.value = target?.defaultKeepMonthly ?? null;
+    defaultKeepYearly.value = target?.defaultKeepYearly ?? null;
     validationError.value = null;
   },
   { immediate: true },
@@ -127,6 +162,16 @@ function submit(): void {
       pbsNamespaceId:
         candidate?.pbs?.pbsNamespaceId ?? target?.pbsNamespaceId ?? null,
       allowedNodeIds: selectedAllowedNodeIds.value,
+      defaultBackupMode: defaultBackupMode.value ?? null,
+      defaultCompression: defaultCompression.value ?? null,
+      defaultKeepAll: defaultKeepAll.value ? true : null,
+      defaultLegacyMaxfiles: defaultLegacyMaxfiles.value,
+      defaultKeepLast: defaultKeepLast.value,
+      defaultKeepHourly: defaultKeepHourly.value,
+      defaultKeepDaily: defaultKeepDaily.value,
+      defaultKeepWeekly: defaultKeepWeekly.value,
+      defaultKeepMonthly: defaultKeepMonthly.value,
+      defaultKeepYearly: defaultKeepYearly.value,
     },
     target?.id ?? null,
   );
@@ -176,6 +221,69 @@ function submit(): void {
         <strong>PBS-Zuordnung aus Collector-Evidenz</strong>
         <p>{{ pbsSummary }}</p>
       </div>
+      <div class="configuration-form__wide">
+        <strong>Backup-Vorgaben</strong>
+        <p>
+          Policies übernehmen nicht gesetzte Werte von diesem Ziel. Gastwerte
+          haben Vorrang. Vor Änderungen an diesen Vorgaben müssen die
+          zugehörigen Policies deaktiviert werden.
+        </p>
+      </div>
+      <label
+        ><span>Vorgabe Backup-Modus</span
+        ><Select
+          v-model="defaultBackupMode"
+          :options="modeOptions"
+          option-label="label"
+          option-value="value"
+      /></label>
+      <label
+        ><span>Vorgabe Kompression</span
+        ><Select
+          v-model="defaultCompression"
+          :options="compressionOptions"
+          option-label="label"
+          option-value="value"
+      /></label>
+      <label
+        ><span>Vorgabe Legacy maxfiles</span
+        ><InputNumber v-model="defaultLegacyMaxfiles" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Letzte behalten</span
+        ><InputNumber v-model="defaultKeepLast" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Stündlich behalten</span
+        ><InputNumber v-model="defaultKeepHourly" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Täglich behalten</span
+        ><InputNumber v-model="defaultKeepDaily" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Wöchentlich behalten</span
+        ><InputNumber v-model="defaultKeepWeekly" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Monatlich behalten</span
+        ><InputNumber v-model="defaultKeepMonthly" :min="1" :max="1000000"
+      /></label>
+      <label
+        ><span>Vorgabe Jährlich behalten</span
+        ><InputNumber v-model="defaultKeepYearly" :min="1" :max="1000000"
+      /></label>
+      <label class="configuration-form__check"
+        ><Checkbox v-model="defaultKeepAll" binary /><span
+          >Vorgabe: alle Backups behalten</span
+        ></label
+      >
+      <p class="configuration-form__wide">
+        Leere Retention-Felder geben keine Aufbewahrung vor. Legacy maxfiles,
+        gezählte Regeln und „alle behalten“ sind alternative Einstellungen. Die
+        Freigabe zur Retention-Ausführung erfolgt weiterhin separat in der
+        Policy; PBS-Pruning bleibt bei PBS.
+      </p>
     </div>
     <div class="configuration-form__actions">
       <Button

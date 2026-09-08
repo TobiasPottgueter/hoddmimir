@@ -586,19 +586,52 @@ final class CollectorRuntimeLoopTest extends TestCase
         self::assertInstanceOf(CollectorRuntimeLoop::class, $maximum);
     }
 
-    /**
-     * @param list<ReadinessCheckResult> $readiness
-     */
+    public function testMaintenancePreventsClaimingAndPreservesTheContinuousProcess(): void
+    {
+        foreach ([true, false] as $once) {
+            $gate = $this->createStub(\App\Application\Maintenance\MaintenanceAccess::class);
+            $gate->method('acquire')->willReturn(null);
+            $schedule = new RuntimeScheduleStore([]);
+            $result = $this->loop($schedule, new RuntimeStopRequested([false, true]), new RuntimeCycleRunner([]), maintenance: $gate)->run($this->worker(), $once);
+            self::assertSame($once ? CollectorWorkerRunCode::NoCycleDue : CollectorWorkerRunCode::CollectorStopped, $result->code);
+            self::assertSame([], $schedule->claimTokens);
+        }
+    }
+
+    public function testIdleAndUnavailableReadinessReleaseMaintenancePermitBeforeWaiting(): void
+    {
+        foreach ([true, false] as $ready) {
+            $permit = $this->createMock(\App\Application\Maintenance\MaintenancePermit::class);
+            $released = false;
+            $permit->expects(self::once())->method('release')->willReturnCallback(static function () use (&$released): void { $released = true; });
+            $gate = $this->createMock(\App\Application\Maintenance\MaintenanceAccess::class);
+            $gate->expects(self::exactly(2))->method('acquire')->willReturnOnConsecutiveCalls($permit, null);
+            $waiter = $this->createMock(CollectorRuntimeWaiter::class);
+            $waiter->expects(self::once())->method('wait')->with(30)->willReturnCallback(static function () use (&$released): void { self::assertTrue($released, 'Idle sleep must not hold the maintenance lock.'); });
+            $result = $this->loop(
+                new RuntimeScheduleStore([$this->waiting('+120 seconds')]),
+                new RuntimeStopRequested($ready ? [false, false, true] : [false, true]),
+                new RuntimeCycleRunner([]),
+                waiter: $waiter,
+                readiness: [$ready ? ReadinessCheckResult::ready('database_schema') : ReadinessCheckResult::unavailable('database_schema', 'check_failed')],
+                maintenance: $gate,
+            )->run($this->worker(), false);
+            self::assertSame(CollectorWorkerRunCode::CollectorStopped, $result->code);
+        }
+    }
+
+    /** @param list<ReadinessCheckResult> $readiness */
     private function loop(
         RuntimeScheduleStore $schedule,
         RuntimeStopRequested $stop,
         RuntimeCycleRunner $runner,
         ?RuntimeTokenFactory $tokens = null,
-        ?RuntimeWaiter $waiter = null,
+        ?CollectorRuntimeWaiter $waiter = null,
         array $readiness = [],
         ?RuntimeHeartbeatStore $heartbeats = null,
         int $gridWidth = 120,
         ?\Throwable $clockFailure = null,
+        ?\App\Application\Maintenance\MaintenanceAccess $maintenance = null,
     ): CollectorRuntimeLoop {
         return new CollectorRuntimeLoop(
             new CollectorCycleCoordinator(
@@ -619,6 +652,7 @@ final class CollectorRuntimeLoopTest extends TestCase
             $stop,
             $waiter ?? new RuntimeWaiter(),
             $gridWidth,
+            $maintenance ?? new \App\Application\Maintenance\UnrestrictedMaintenanceAccess(),
         );
     }
 

@@ -15,9 +15,9 @@ final readonly class PveBackupSubmission
         public string $storage,
         public PveBackupMode $mode,
         public PveBackupCompression $compression,
+        public PveBackupFailureRecipients $failureNotificationRecipients,
         public ?PvePruneBackups $pruneBackups = null,
         public ?int $legacyMaxFiles = null,
-        public ?PveBackupFailureRecipients $failureNotificationRecipients = null,
     ) {
         if (!PveTaskNodeNameValidator::isValid($node)) {
             throw new InvalidArgumentException('The PVE backup node is invalid.');

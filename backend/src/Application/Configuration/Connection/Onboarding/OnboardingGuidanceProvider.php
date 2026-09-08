@@ -28,7 +28,8 @@ final readonly class OnboardingGuidanceProvider
             $this->write('pve-create-scan-token', 'pveum user token add hoddmimir@pve scan --privsep 1', 'Nur bei fehlendem Scanner-Token ausführen; das Secret wird genau einmal ausgegeben.'),
             $this->write('pve-create-backup-token', 'pveum user token add hoddmimir@pve backup --privsep 1', 'Nur bei fehlendem Backup-Token ausführen; das Secret wird genau einmal ausgegeben.'),
             $this->write('pve-token-scan-acl', "pveum acl modify / --tokens 'hoddmimir@pve!scan' --roles HoddmimirScan --propagate 1", 'Scanner-Token ausschließlich propagiert auf HoddmimirScan begrenzen.'),
-            $this->write('pve-token-backup-acl', "pveum acl modify / --tokens 'hoddmimir@pve!backup' --roles HoddmimirBackup --propagate 1", 'Backup-Token ausschließlich propagiert auf HoddmimirBackup begrenzen.'),
+            $this->write('pve-token-backup-acl', "pveum acl modify / --tokens 'hoddmimir@pve!backup' --roles HoddmimirBackup --propagate 1", 'Backup-Schreibrechte propagiert auf HoddmimirBackup begrenzen; Task-Leserechte folgen separat.'),
+            $this->write('pve-token-task-read-acl', "pveum acl modify /nodes --tokens 'hoddmimir@pve!backup' --roles HoddmimirScan --propagate 1", 'Nur falls dem Backup-Token die effektive Task-Sicht fehlt: vorhandene Scanner-Rolle auf /nodes ergänzen. Bereits über / geerbtes Sys.Audit genügt; dann diesen Schritt auslassen.'),
         ], [
             'Jeden Befehl einzeln und bewusst als Proxmox-Administrator auf genau einem Cluster-Knoten ausführen.',
             'Token-Secrets nur aus dem unmittelbaren Erzeugungsresultat übernehmen; sie können später nicht erneut gelesen werden.',

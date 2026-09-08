@@ -6,6 +6,7 @@ namespace App\Application\Target\ReadModel;
 
 use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use App\Domain\Shared\UInt64Decimal;
+use App\Domain\Policy\BackupDefaults;
 use App\Domain\Target\TargetActivationBlocker;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -43,6 +44,7 @@ final readonly class ConfiguredBackupTarget
         public ?string $disabledAt,
         array $allowedNodes,
         array $blockers,
+        public BackupDefaults $defaults = new BackupDefaults(),
     ) {
         foreach ([$id, $connectionId, $clusterId, $storageId, $pbsConnectionId, $pbsDatastoreId, $pbsNamespaceId] as $identifier) {
             if (null !== $identifier) {
@@ -111,6 +113,16 @@ final readonly class ConfiguredBackupTarget
             'pbsConnectionId' => $this->pbsConnectionId,
             'pbsDatastoreId' => $this->pbsDatastoreId,
             'pbsNamespaceId' => $this->pbsNamespaceId,
+            'defaultBackupMode' => $this->defaults->mode?->value,
+            'defaultCompression' => $this->defaults->compression?->value,
+            'defaultLegacyMaxfiles' => $this->defaults->retention?->legacyMaxFiles,
+            'defaultKeepAll' => $this->defaults->retention?->keepAll,
+            'defaultKeepLast' => $this->defaults->retention?->keepLast,
+            'defaultKeepHourly' => $this->defaults->retention?->keepHourly,
+            'defaultKeepDaily' => $this->defaults->retention?->keepDaily,
+            'defaultKeepWeekly' => $this->defaults->retention?->keepWeekly,
+            'defaultKeepMonthly' => $this->defaults->retention?->keepMonthly,
+            'defaultKeepYearly' => $this->defaults->retention?->keepYearly,
             'disabledAt' => $this->disabledAt,
             'allowedNodes' => \array_map(
                 static fn (ConfiguredBackupTargetAllowedNode $node): array => $node->toArray(),

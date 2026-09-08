@@ -35,13 +35,19 @@ MariaDB-Konfigurations-Read und der produktive GET-only-Core-Reader sind in
 lokalen Unit-, Contract- und MariaDB-Tests ersetzen weiterhin keinen echten
 TLS-Handshake.
 
-Lokale Integrations- und Live-Tests für System-CA, Custom-CA sowie korrekten
-und falschen SHA-256-Zertifikatsfingerprint bleiben deshalb ein Phase-2- und
-Release-Gate. `NativeHttpClient` ist aktuell mit 30 Sekunden Inaktivitätslimit
-und 30 Sekunden Gesamtdauer konfiguriert. Ein separater Connect-Richtwert von
-5 Sekunden bleibt offen, weil der Native-Transport dafür derzeit keine
-portable, getrennte Option bereitstellt. Diese Punkte gelten ausdrücklich
-nicht als durch die Optionstests erledigt.
+Die gemeinsamen PVE-/PBS-Factories verwenden Symfony 7.4 mit cURL.
+`ProxmoxConnectionHttpClient` begrenzt DNS-, TCP- und TLS-Verbindungsaufbau
+über eine monotone Fünf-Sekunden-Frist und die öffentliche Stream-API mit
+100-ms-Polling. Normale Reads behalten 30 Sekunden, Startrequests 60 Sekunden
+als Inaktivitäts-/Gesamtbudget. Ein cURL-Prerequisite-Callback prüft einen
+konfigurierten exakten Leaf-Pin nach TLS und vor jedem HTTP-Header; ein
+Mismatch liefert ausdrücklich `CURL_PREREQFUNC_ABORT`. Frische Verbindungen,
+deaktivierter TLS-Session-Cache, HTTP/1.1 und verbotene Redirects verhindern
+implizite POST-Wiederholungen. Der vollständige TLS-Handshake liefert für jeden
+Request eigene Leaf-Evidenz, auch bei wiederholten Reads desselben Clients.
+Reale lokale TLS-Tests prüfen falsche Pins ohne Headerübertragung, einen
+hängenden Handshake und eine erlaubte Antwort nach sechs Sekunden. Die
+aktuellen DEV-Abnahmen sind separat im Auditbericht dokumentiert.
 
 ## Offizielle Quellen und gepinnter Schema-Stand
 
@@ -163,7 +169,7 @@ Pinning gilt im eigenen Transport:
 - Eingaben dürfen als 32 Doppelhex-Oktette mit Doppelpunkten oder als 64
   Hex-Zeichen normalisiert werden; intern werden exakt 32 Bytes
   verglichen. Groß-/Kleinschreibung und Doppelpunkte sind nur Darstellung.
-- Der TLS-Handshake überträgt bei einer Abweichung keine HTTP- und damit keine
+- Die Prüfung nach TLS und vor dem HTTP-Request überträgt bei einer Abweichung keine
   Authentifizierungsheader. Es gibt keinen stillen Fallback, kein TOFU und
   keinen globalen `insecure`-Modus. Eine Abweichung ist ein harter
   Verbindungsfehler.

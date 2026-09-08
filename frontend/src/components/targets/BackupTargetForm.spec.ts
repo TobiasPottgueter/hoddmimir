@@ -33,6 +33,39 @@ const target = {
 } satisfies ConfiguredBackupTarget;
 
 describe("BackupTargetForm", () => {
+  it("übernimmt und löscht Zielvorgaben explizit", async () => {
+    const wrapper = mount(BackupTargetForm, {
+      props: {
+        target: {
+          ...target,
+          defaultBackupMode: "stop",
+          defaultCompression: "gzip",
+          defaultKeepLast: 7,
+        },
+        candidate: null,
+        candidates: [],
+        pending: false,
+      },
+      global: { plugins: [PrimeVue] },
+    });
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")?.[0]?.[0]).toMatchObject({
+      defaultBackupMode: "stop",
+      defaultCompression: "gzip",
+      defaultKeepLast: 7,
+      defaultKeepAll: null,
+    });
+    const selects = wrapper.findAllComponents({ name: "Select" });
+    selects[1]!.vm.$emit("update:modelValue", null);
+    selects[2]!.vm.$emit("update:modelValue", null);
+    await wrapper.get("form").trigger("submit");
+    expect(wrapper.emitted("submit")?.[1]?.[0]).toMatchObject({
+      defaultBackupMode: null,
+      defaultCompression: null,
+      defaultKeepLast: 7,
+    });
+  });
+
   it("erzeugt einen vollständigen revisionierten Update-Request", async () => {
     const wrapper = mount(BackupTargetForm, {
       props: { target, candidate: null, candidates: [], pending: false },

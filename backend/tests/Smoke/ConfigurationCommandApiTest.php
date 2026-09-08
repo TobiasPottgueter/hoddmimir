@@ -70,6 +70,23 @@ final class ConfigurationCommandApiTest extends WebTestCase
         $this->csrf = rtrim(strtr(base64_encode(str_repeat("\x03", 32)), '+/', '-_'), '=');
     }
 
+    public function testTargetDefaultsAreOptionalAndCarriedIntoTheRevisionedCommand(): void
+    {
+        $this->request('POST', '/api/v1/backup-targets', $this->targetBody() + [
+            'defaultBackupMode' => 'snapshot', 'defaultCompression' => 'zstd', 'defaultKeepDaily' => 7,
+        ]);
+        self::assertResponseIsSuccessful();
+        $command = $this->store->lastCommand;
+        self::assertNotNull($command);
+        self::assertSame('snapshot', $command->payload['defaultBackupMode']);
+        self::assertSame(7, $command->payload['defaultKeepDaily']);
+        $this->request('POST', '/api/v1/backup-targets', $this->targetBody());
+        self::assertResponseIsSuccessful();
+        $command = $this->store->lastCommand;
+        self::assertNotNull($command);
+        self::assertArrayNotHasKey('defaultBackupMode', $command->payload);
+    }
+
     public function testCsrfIdempotencyClosedBodyAndTypedOutcomes(): void
     {
         $this->client->jsonRequest('POST', '/api/v1/backup-targets', $this->targetBody());
@@ -168,6 +185,7 @@ final class CommandAuthenticator implements HttpRequestAuthenticator
 
 final class CommandStoreFake implements TargetCommandRepository, PolicyCommandRepository, SelectionCommandRepository
 {
+    public ?ConfigurationCommand $lastCommand = null;
     public ConfigurationCommandResult $result; public ?BackupTarget $target; public ?BackupPolicy $policy; public bool $fail=false; public int $records=0;
     public function __construct()
     {
@@ -177,7 +195,7 @@ final class CommandStoreFake implements TargetCommandRepository, PolicyCommandRe
     }
     public function find(BackupTargetId $id): ?BackupTarget{return $this->target;}
     public function findPolicy(PolicyId $id): ?BackupPolicy{return $this->policy;}
-    public function execute(ConfigurationCommand $command,AuthenticatedPrincipal $principal): ConfigurationCommandResult{if($this->fail)throw new RuntimeException('database secret');return $this->result;}
+    public function execute(ConfigurationCommand $command,AuthenticatedPrincipal $principal): ConfigurationCommandResult{$this->lastCommand=$command;if($this->fail)throw new RuntimeException('database secret');return $this->result;}
     public function record(ConfigurationCommand $command,AuthenticatedPrincipal $principal,ConfigurationCommandResult $result): ConfigurationCommandResult{++$this->records;return $result;}
 }
 

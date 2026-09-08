@@ -1,0 +1,74 @@
+{
+  "auditDate": "2026-09-07",
+  "source": {
+    "legacyCommit": "b0bbb7e441e96d410b1be6209542dd7deb6a407b",
+    "legacyBranch": "master",
+    "v2Commit": "bd6a915cc50b8b8b29aec86c7d57953427ef1d04",
+    "v2Branch": "codex/policies-shadow-mode",
+    "historicalLabCandidate": "a6b4d4f6b7562f45363606258cfe490abac8f75c",
+    "v2SourceManifestSha256": "84ca841c5744fb33872a1a5a55f34ed89a8b1396cbe03dddda50ad0ce5ea61c4",
+    "manifestAlgorithm": "sorted unique git ls-files --cached --others --exclude-standard; exclude this audit directory; SHA256(path UTF8 + NUL + SHA256(file bytes) binary) concatenated for regular files",
+    "preExistingChangedFiles": 66,
+    "preExistingModifiedFiles": 60,
+    "preExistingUntrackedFiles": 6
+  },
+  "currentChecks": {
+    "phpUnitContract": {
+      "tests": 2562,
+      "assertions": 11536,
+      "skipped": 4,
+      "failures": 0
+    },
+    "phpstan": {
+      "level": "max",
+      "result": "passed"
+    },
+    "frontendUnitComponent": {
+      "files": 61,
+      "tests": 290,
+      "result": "passed"
+    },
+    "frontendTypecheck": "passed",
+    "frontendLint": "passed",
+    "frontendFormat": "passed",
+    "frontendApiGeneratedCheck": {
+      "result": "failed",
+      "diff": "BackupNotification.attempt needs number | null; checkNumber:number missing"
+    },
+    "pythonSchemaSupplyPublication": {
+      "tests": 57,
+      "result": "passed"
+    },
+    "mariaDbIntegration": {
+      "version": "11.4.12",
+      "tests": 296,
+      "assertions": 7295,
+      "failures": 1,
+      "failure": "BackupQueuePrivilegeTest::testRuntimeUsersHaveOnlyTheirQueueResponsibilities"
+    },
+    "focusedReproductions": {
+      "mariaDb": {
+        "tests": 2,
+        "assertions": 44,
+        "observations": [
+          "Unknown request permits next automatic request through submission preparation",
+          "Previous notification insert rejects new obligation_id without default"
+        ]
+      },
+      "unit": {
+        "tests": 1,
+        "assertions": 3,
+        "observation": "More than one day old write counter still promotes bytes_written"
+      }
+    }
+  },
+  "executionLimits": [
+    "No legacy scripts executed",
+    "No production or Proxmox database queried",
+    "No PVE/PBS write or backup submitted",
+    "No external notifications sent",
+    "No full coverage, mutation, browser, release or production acceptance rerun",
+    "Existing backend vendor and test-image frontend dependencies used; not a fresh dependency install",
+    "Historical CI and live claims read from repository documents, not independently reverified"
+  ]
+}

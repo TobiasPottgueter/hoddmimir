@@ -33,6 +33,7 @@ final class ClosedDecisionTypesTest extends TestCase
             'node_enabled',
             'guest_enabled',
             'policy_enabled',
+            'policy_failure_notification_configured',
             'policy_retention_compatible',
             'target_enabled',
             'explicit_exclusion_absent',
@@ -61,8 +62,8 @@ final class ClosedDecisionTypesTest extends TestCase
         self::assertSame([
             'passed', 'disabled', 'explicitly_excluded', 'archived', 'missing', 'stale',
             'not_allowed', 'inactive', 'unauthorized', 'insufficient_free_space',
-            'concurrency_limit_reached', 'invalid_mapping', 'incompatible', 'active_request_exists',
-            'higher_ranked_candidate',
+            'concurrency_limit_reached', 'invalid_mapping', 'incompatible', 'unconfigured',
+            'active_request_exists', 'higher_ranked_candidate',
         ], array_column(GateDetailCode::cases(), 'value'));
     }
 

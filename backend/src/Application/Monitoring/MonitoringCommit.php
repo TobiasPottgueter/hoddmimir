@@ -32,6 +32,7 @@ final readonly class MonitoringCommit
      * @param list<PveBackupTask>         $pveTasks
      * @param list<PbsJobObservation>     $pbsJobs
      * @param list<PbsTaskObservation>    $pbsTasks
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $pbsInspections
      */
     public function __construct(
         public InventoryIdentifier $runId,
@@ -48,6 +49,7 @@ final readonly class MonitoringCommit
         array $pbsJobs,
         array $pbsTasks,
         DateTimeImmutable $observedAt,
+        public array $pbsInspections = [],
     ) {
         if ($this->expectedConnectionRevision < 1
             || $this->binding->product !== $this->product
@@ -78,6 +80,14 @@ final readonly class MonitoringCommit
         $this->pbsJobs = $this->uniquePbsJobs($pbsJobs);
         $this->pbsTasks = $this->uniquePbsTasks($pbsTasks);
         $this->assertPayloadMatchesHeader();
+        $inspected = [];
+        $knownTasks = array_column(array_column($this->pbsTasks, 'upid'), 'value');
+        foreach ($pbsInspections as $inspection) {
+            if (!\in_array($inspection->upid->value, $knownTasks, true) || isset($inspected[$inspection->upid->value])) {
+                throw new InvalidArgumentException('PBS inspection must belong to one observed task.');
+            }
+            $inspected[$inspection->upid->value] = true;
+        }
         $this->observedAt = $observedAt->setTimezone(new DateTimeZone('UTC'));
     }
 

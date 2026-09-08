@@ -76,6 +76,43 @@ final class DbalPolicyReadModelTest extends TestCase
         self::assertTrue($page->items[0]->toArray()['canEnable']);
     }
 
+    public function testTargetDefaultsResolveActivationAndExposeEffectiveValues(): void
+    {
+        $row = $this->policyRow('Inherited');
+        $row['target_id'] = str_repeat("\x04", 16);
+        $row['target_name'] = 'Target';
+        $row['policy_priority'] = '500';
+        $row['schedule'] = 'collector_cycle';
+        $row['default_backup_mode'] = 'stop';
+        $row['default_compression'] = 'gzip';
+        $row['default_keep_last'] = '7';
+        $database = $this->createMock(Connection::class);
+        $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
+        $data = $this->model($database)->policies(new PolicyListQuery(new PageRequest(1)))->items[0]->toArray();
+        self::assertSame([], $data['blockers']);
+        self::assertTrue($data['canEnable']);
+        self::assertNull($data['mode']);
+        self::assertSame('stop', $data['effectiveMode']);
+        self::assertSame('gzip', $data['effectiveCompression']);
+        self::assertIsArray($data['effectiveRetention']);
+        self::assertSame(7, $data['effectiveRetention']['keepLast']);
+    }
+
+    public function testEmptyFailureRecipientsAreProjectedAsAnActivationBlocker(): void
+    {
+        $row = $this->policyRow('No mail recipient');
+        $row['failure_notification_recipients_json'] = '[]';
+        $database = $this->createMock(Connection::class);
+        $database->expects(self::once())->method('fetchAllAssociative')->willReturn([$row]);
+
+        $item = $this->model($database)
+            ->policies(new PolicyListQuery(new PageRequest(1)))->items[0]->toArray();
+
+        self::assertFalse($item['canEnable']);
+        self::assertIsArray($item['blockers']);
+        self::assertContains('failure_notification_recipients_unconfigured', $item['blockers']);
+    }
+
     public function testSelectionProjectionMapsAssignmentsAndGuestOverridesWithCursor(): void
     {
         $assignment = $this->selectionRow('assignment', str_repeat("\x05", 16));

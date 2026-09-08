@@ -44,8 +44,7 @@ final readonly class EvidenceFreshnessPolicy
         $utc = new DateTimeZone('UTC');
         $now = $now->setTimezone($utc);
         $observedAt = $observedAt->setTimezone($utc);
-        $expiresAt = $observedAt->add(new DateInterval('PT'.$this->maximumAgeSeconds.'S'));
-        $fresh = $observedAt <= $now && $now <= $expiresAt;
+        $fresh = $this->isFresh($now, $observedAt);
 
         return new GateResult(
             $code,
@@ -55,5 +54,11 @@ final readonly class EvidenceFreshnessPolicy
             $observedAt,
             $fresh ? GateDetailCode::Passed : GateDetailCode::Stale,
         );
+    }
+
+    public function isFresh(DateTimeImmutable $now, ?DateTimeImmutable $observedAt): bool
+    {
+        return null !== $observedAt && $observedAt <= $now
+            && $now <= $observedAt->add(new DateInterval('PT'.$this->maximumAgeSeconds.'S'));
     }
 }

@@ -44,5 +44,14 @@ The harness itself needs only Python 3.11 or newer. The test suite additionally
 uses the local `openssl` command to create short-lived certificates in a
 temporary directory.
 
+For ADR 0005's absent-task case, `--fault-timing before-upstream` requires
+`--activation-ack DROP_VZDUMP_BEFORE_UPSTREAM` and permits only `post-vzdump`.
+It consumes the bounded fault count after receiving the request body and closes
+the client connection without contacting PVE. Reads and subsequent attempts
+are forwarded normally with verified upstream TLS. Response holds cannot be
+combined with this mode. A dropped attempt has `received=1`,
+`faultsInjected=1`, `upstreamResponses=0`, and `responsesForwarded=0`.
+The default `after-upstream` mode and its acknowledgement remain unchanged.
+
 Operational use is documented in
 [`docs/phase-7-fault-injection-runbook.md`](../../docs/phase-7-fault-injection-runbook.md).

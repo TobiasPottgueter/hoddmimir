@@ -22,9 +22,12 @@ final readonly class MatrixNotificationFormatter
 
         if (BackupNotificationKind::Failure === $notification->kind) {
             $retry = $notification->nextRetryAt ?? throw new \LogicException('A failure notification lost its retry time.');
+            $headline = null === $notification->attempt
+                ? \sprintf('Backupstart blockiert – Prüfversuch Nr. %d', $notification->checkNumber)
+                : \sprintf('Backup fehlgeschlagen – Versuch Nr. %d', $notification->attempt);
 
             return \implode("\n", [
-                \sprintf('Backup fehlgeschlagen – Versuch Nr. %d', $notification->attempt),
+                $headline,
                 ...$common,
                 'Fehler: '.$notification->problemCode->value
                     .(null === $notification->detailCode ? '' : ' / '.$notification->detailCode),
@@ -34,8 +37,9 @@ final readonly class MatrixNotificationFormatter
         }
 
         if (BackupNotificationKind::AttentionRequired === $notification->kind) {
+            $attempt = $notification->attempt ?? $notification->checkNumber;
             return \implode("\n", [
-                \sprintf('Backupzustand unklar – Versuch Nr. %d erfordert Prüfung', $notification->attempt),
+                \sprintf('Backupzustand unklar – Versuch Nr. %d erfordert Prüfung', $attempt),
                 ...$common,
                 'Problem: '.$notification->problemCode->value
                     .(null === $notification->detailCode ? '' : ' / '.$notification->detailCode),

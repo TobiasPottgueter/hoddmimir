@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Proxmox\Pbs;
 
-use Symfony\Component\HttpClient\NativeHttpClient;
+use Symfony\Component\HttpClient\CurlHttpClient;
+use App\Infrastructure\Proxmox\ProxmoxConnectionHttpClient;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final readonly class PbsNativeHttpClientFactory implements PbsHttpClientFactory
@@ -13,7 +14,10 @@ final readonly class PbsNativeHttpClientFactory implements PbsHttpClientFactory
 
     public function create(PbsTlsConfiguration $tls): HttpClientInterface
     {
-        return new NativeHttpClient($this->options($tls));
+        $options = $this->options($tls);
+        $fingerprint = $tls->certificateFingerprint?->sha256;
+        unset($options['peer_fingerprint']);
+        return new ProxmoxConnectionHttpClient(new CurlHttpClient($options), $fingerprint);
     }
 
     /** @return array<string, mixed> */
@@ -37,7 +41,7 @@ final readonly class PbsNativeHttpClientFactory implements PbsHttpClientFactory
         /** @var PbsCertificateFingerprint $pin */
         $pin = $tls->certificateFingerprint;
         // The exact leaf pin is the exclusive trust anchor in this mode. A
-        // mismatch aborts the TLS handshake before any HTTP header is sent.
+        // mismatch aborts the request after TLS and before any HTTP header is sent.
         return array_replace($options, [
             'verify_peer' => false,
             'verify_host' => false,

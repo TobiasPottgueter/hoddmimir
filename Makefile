@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help secrets production-secrets production-secrets-test lab-inventory lab-secrets lab-secrets-test lab-deploy lab-verify lab-down lab-scale app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test fault-harness-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test ping bootstrap deploy verify
+.PHONY: help secrets production-secrets production-secrets-test lab-inventory lab-secrets lab-secrets-test lab-deploy lab-verify lab-down lab-scale app-secret-staging-test config build up down logs ps migration-wrapper-test migrate backend-test mariadb-bootstrap-test backend-integration-wrapper-test backend-integration backend-coverage-wrapper-test backend-coverage mutation-image mutation-config mutation-critical mutation-global mutation frontend-test e2e-wrapper-test e2e api-schema-drift-test fault-harness-test supply-chain-contract-test secret-scan container-images container-security supply-chain test smoke clean inventory lint syntax deployment-test maintenance-db-test ping bootstrap deploy verify
 
 ANSIBLE_DIRECTORY := deployment/ansible
 ANSIBLE_TOOL_PATH := $(CURDIR)/$(ANSIBLE_DIRECTORY)/.venv/bin
@@ -166,8 +166,16 @@ syntax: ## Check all Ansible playbooks without remote access
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-down.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible-playbook --inventory $(ANSIBLE_LAB_EXAMPLE_INVENTORY) playbooks/lab-scale.yml --syntax-check $(ANSIBLE_LAB_LOCAL_VAULT_ARGS)
 
+maintenance-db-test: ## Verify logical backup and restore in isolated real MariaDB containers
+	HODDMIMIR_MARIADB_TEST_IMAGE="$$(sed -n 's/^ARG MARIADB_IMAGE=//p' docker/mariadb/Dockerfile)" python3 -m unittest discover -s deployment/ansible/tests -p 'test_maintenance_database.py' -v
+
+.PHONY: maintenance-runtime-test
+maintenance-runtime-test: ## Rehearse full application upgrade and crash recovery in a disposable local stack
+	@test -n "$$HODDMIMIR_MAINTENANCE_RUNTIME_IMAGES" || { echo 'Supply the local acceptance image-reference JSON path.' >&2; exit 2; }
+	PATH="$(ANSIBLE_TOOL_PATH):$$PATH" python3 -m unittest discover -s deployment/ansible/tests -p 'test_maintenance_runtime.py' -v
+
 deployment-test: production-secrets-test lab-secrets-test ## Run isolated deployment contract and rollback tests
-	cd $(ANSIBLE_DIRECTORY) && python3 -m unittest discover -s tests -p 'test_*.py' -v
+	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ping: inventory ## Test Ansible connectivity to the configured deployment host
 	cd $(ANSIBLE_DIRECTORY) && PATH="$(ANSIBLE_TOOL_PATH):$$PATH" ansible --inventory $(ANSIBLE_PRODUCTION_INVENTORY) hoddmimir_hosts --module-name ansible.builtin.ping $(ANSIBLE_VAULT_ARGS)

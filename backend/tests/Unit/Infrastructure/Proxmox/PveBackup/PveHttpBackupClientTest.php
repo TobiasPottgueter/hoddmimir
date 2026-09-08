@@ -8,6 +8,7 @@ use App\Application\Proxmox\Pve\BuildPveVzdumpPayload;
 use App\Application\Proxmox\Pve\PveBackupApiFailure;
 use App\Application\Proxmox\Pve\PveBackupApiFailureCode;
 use App\Application\Proxmox\Pve\PveBackupCompression;
+use App\Application\Proxmox\Pve\PveBackupFailureRecipients;
 use App\Application\Proxmox\Pve\PveBackupMode;
 use App\Application\Proxmox\Pve\PveBackupSubmission;
 use App\Application\Proxmox\Pve\PveBackupSubmissionStatus;
@@ -133,6 +134,20 @@ final class PveHttpBackupClientTest extends TestCase
         );
     }
 
+    public function testTaskListRequiresNodeAuditAndAcceptsNonPropagatingGrant(): void
+    {
+        $transport = new RecordingBackupTransport(reads: [[]]);
+        foreach ([null, false, '1', 2] as $permission) {
+            $transport->taskPermission = $permission;
+            $this->assertFailure(PveBackupApiFailureCode::PermissionDenied,
+                fn () => $this->client($transport)->taskPage('pve-a', PveTaskQuery::active()));
+        }
+        self::assertSame([], $transport->getPaths);
+        $transport->taskPermission = 0;
+        self::assertTrue($this->client($transport)->taskPage('pve-a', PveTaskQuery::active())->isComplete());
+        self::assertSame(5, $transport->permissionReads);
+    }
+
     public function testTaskPageUsesTypedQueryAndMapsReaderFailure(): void
     {
         $upid = $this->upid();
@@ -152,6 +167,22 @@ final class PveHttpBackupClientTest extends TestCase
             PveBackupApiFailureCode::InvalidResponse,
             fn () => $this->client(new RecordingBackupTransport(reads: ['bad']))->taskPage('pve-a', $query),
         );
+    }
+
+    public function testTaskPermissionsAcceptJsonObjectsAndRejectMalformedMatrices(): void
+    {
+        $transport = new RecordingBackupTransport(reads: [[], []]);
+        foreach ([(object) ['/nodes/pve-a' => (object) ['Sys.Audit' => 1]],
+            ['/nodes/pve-a' => (object) ['Sys.Audit' => 0]]] as $matrix) {
+            $transport->permissionMatrix = $matrix;
+            self::assertTrue($this->client($transport)->taskPage('pve-a', PveTaskQuery::active())->isComplete());
+        }
+        foreach ([false, [], ['/nodes/pve-a' => false], (object) []] as $matrix) {
+            $transport->permissionMatrix = $matrix;
+            $this->assertFailure(PveBackupApiFailureCode::PermissionDenied,
+                fn () => $this->client($transport)->taskPage('pve-a', PveTaskQuery::active()));
+        }
+        self::assertCount(2, $transport->getPaths);
     }
 
     public function testLogReaderRejectsNonListsOversizeRowsMalformedRowsEntriesAndOrdering(): void
@@ -233,6 +264,7 @@ final class PveHttpBackupClientTest extends TestCase
             'backup-store',
             PveBackupMode::Snapshot,
             PveBackupCompression::Zstd,
+            new PveBackupFailureRecipients(['ops@example.invalid']),
         );
     }
 
@@ -257,6 +289,9 @@ final class RecordingBackupTransport implements PveBackupApiTransport
 {
     /** @var list<mixed> */
     private array $reads;
+    public mixed $taskPermission = 1;
+    public mixed $permissionMatrix = null;
+    public int $permissionReads = 0;
 
     /** @var list<PveBackupWriteTransportResult> */
     private array $writes;
@@ -288,6 +323,10 @@ final class RecordingBackupTransport implements PveBackupApiTransport
 
     public function get(array $pathSegments, array $query = []): mixed
     {
+        if (['access', 'permissions'] === $pathSegments) {
+            ++$this->permissionReads;
+            return $this->permissionMatrix ?? [(string) $query['path'] => ['Sys.Audit' => $this->taskPermission]];
+        }
         $this->getPaths[] = $pathSegments;
         $this->getQueries[] = $query;
         return array_shift($this->reads);

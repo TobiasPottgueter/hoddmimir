@@ -154,6 +154,23 @@ class FaultProxyTest(unittest.TestCase):
             for forbidden in ("lab-node-a", secret_header, "HEADER_SECRET_SENTINEL", "BODY_SECRET_SENTINEL"):
                 self.assertNotIn(forbidden, metrics_text + stdout.getvalue() + stderr.getvalue())
 
+    def test_pre_upstream_drop_never_submits_and_next_attempt_is_forwarded(self) -> None:
+        with self.running_proxy((PROXY.FaultRoute.POST_VZDUMP,), fault_count=1, fault_timing="before-upstream") as running:
+            self.assertEqual(200, self.request(running.port, "GET", "/api2/json/nodes/lab/tasks")[0])
+            self.upstream.state["requests"].clear()
+            with self.assertRaises((http.client.RemoteDisconnected, ConnectionResetError, ssl.SSLError, OSError)):
+                self.request(running.port, "POST", "/api2/json/nodes/lab/vzdump", body=b"vmid=101&PRIVATE_SENTINEL=1")
+            self.assertEqual([], self.upstream.state["requests"])
+            counters=json.loads(running.metrics.read_text())["counters"]["POST /nodes/{node}/vzdump"]
+            self.assertEqual(1,counters["received"])
+            self.assertEqual(1,counters["faultsInjected"])
+            self.assertEqual(0,counters["upstreamResponses"])
+            self.assertEqual(0,counters["responsesForwarded"])
+            self.assertEqual(200,self.request(running.port,"POST","/api2/json/nodes/lab/vzdump",body=b"vmid=101")[0])
+            self.assertEqual(1,len(self.upstream.state["requests"]))
+            self.wait_for_counter(running.metrics,"POST /nodes/{node}/vzdump","responsesForwarded",1)
+            self.assertNotIn("PRIVATE_SENTINEL",running.metrics.read_text())
+
     def test_task_stop_matches_canonical_pve_and_explicit_stop_suffix_only(self) -> None:
         with self.running_proxy((PROXY.FaultRoute.DELETE_TASK_STOP,), fault_count=2) as running:
             for path in (
@@ -739,6 +756,19 @@ class FaultProxyTest(unittest.TestCase):
             with self.subTest(arguments=arguments), self.assertRaises(PROXY.ConfigurationError):
                 PROXY.ProxyConfiguration.from_arguments(parser.parse_args(arguments))
 
+        before = base + ["--fault-timing", "before-upstream"]
+        with self.assertRaises(PROXY.ConfigurationError):
+            PROXY.ProxyConfiguration.from_arguments(parser.parse_args(before))
+        before = self.replace_argument(before, "--activation-ack", PROXY.PRE_UPSTREAM_ACTIVATION_ACK)
+        self.assertEqual("before-upstream",PROXY.ProxyConfiguration.from_arguments(parser.parse_args(before)).fault_timing)
+        for invalid in [
+            self.replace_argument(before,"--fault-route","delete-task-stop"),
+            before+["--hold-route","post-vzdump"],
+            self.replace_argument(base,"--activation-ack",PROXY.PRE_UPSTREAM_ACTIVATION_ACK),
+        ]:
+            with self.subTest(arguments=invalid), self.assertRaises(PROXY.ConfigurationError):
+                PROXY.ProxyConfiguration.from_arguments(parser.parse_args(invalid))
+
         self.proxy_key.chmod(0o644)
         try:
             with self.assertRaises(PROXY.ConfigurationError):
@@ -820,6 +850,7 @@ class FaultProxyTest(unittest.TestCase):
         upstream_ca: Path | None = None,
         hold_routes: tuple[object, ...] = (),
         hold_max_seconds: float = 2.0,
+        fault_timing: str = "after-upstream",
     ):
         metrics = self.case_directory / "metrics.json"
         control = (
@@ -841,6 +872,7 @@ class FaultProxyTest(unittest.TestCase):
             hold_routes=hold_routes,
             hold_max_seconds=hold_max_seconds,
             hold_control_directory=control if hold_routes else None,
+            fault_timing=fault_timing,
         )
         owner_patch = mock.patch.object(PROXY, "HOLD_REQUIRED_UID", os.geteuid())
         owner_patch.start()

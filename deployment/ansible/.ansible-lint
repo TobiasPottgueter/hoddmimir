@@ -7,3 +7,5 @@ exclude_paths:
   - .venv/
   - inventories/production/hosts.yml
   - inventories/production/group_vars/hoddmimir_hosts/vault.yml
+  - inventories/lab/hosts.yml
+  - inventories/lab/group_vars/hoddmimir_hosts/vault.yml

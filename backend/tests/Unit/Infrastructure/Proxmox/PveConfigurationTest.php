@@ -33,7 +33,7 @@ use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Symfony\Component\HttpClient\NativeHttpClient;
+use App\Infrastructure\Proxmox\ProxmoxConnectionHttpClient;
 
 final class PveConfigurationTest extends TestCase
 {
@@ -145,7 +145,7 @@ final class PveConfigurationTest extends TestCase
         self::assertSame(30.0, $fingerprintOptions['max_duration']);
         self::assertArrayNotHasKey('cafile', $fingerprintOptions);
         self::assertSame(['sha256' => str_repeat('ab', 32)], $fingerprintOptions['peer_fingerprint']);
-        self::assertInstanceOf(NativeHttpClient::class, $factory->create(PveTlsConfiguration::systemCa()));
+        self::assertInstanceOf(ProxmoxConnectionHttpClient::class, $factory->create(PveTlsConfiguration::systemCa()));
     }
 
     public function testCustomCaValidationAndAtomicRootOnlyMaterialization(): void

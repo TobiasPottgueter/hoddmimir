@@ -301,7 +301,9 @@ SQL, ['id' => $binary], ['id' => ParameterType::BINARY]);
             if (!is_array($payload)) throw new RuntimeException('Invalid notification payload.');
             return [
                 'id'=>$this->uuid($row['id'] ?? null),'kind'=>$this->text($row['notification_kind'] ?? null),
-                'state'=>$this->text($row['state'] ?? null),'attempt'=>$this->integer($row['attempt'] ?? null),
+                'state'=>$this->text($row['state'] ?? null),
+                'attempt'=>null === ($row['attempt'] ?? null) ? null : $this->integer($row['attempt']),
+                'checkNumber'=>$this->integer($row['check_number'] ?? null),
                 'deliveryAttempts'=>$this->integer($row['delivery_attempts'] ?? null),
                 'guestName'=>$this->text($payload['guestName'] ?? null),'guestType'=>$this->text($payload['guestType'] ?? null),
                 'vmid'=>$this->integer($payload['vmid'] ?? null),'node'=>$this->text($payload['node'] ?? null),

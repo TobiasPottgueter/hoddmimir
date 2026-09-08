@@ -33,6 +33,35 @@ const policy = {
 } satisfies ConfiguredPolicy;
 
 describe("ConfiguredPolicyCard", () => {
+  it("zeigt wirksame Zielvorgaben mit ihrer Herkunft", () => {
+    const wrapper = mount(ConfiguredPolicyCard, {
+      props: {
+        policy: {
+          ...policy,
+          mode: null,
+          compression: null,
+          effectiveMode: "stop",
+          effectiveCompression: "gzip",
+          effectiveRetention: {
+            legacyMaxFiles: null,
+            keepAll: true,
+            keepLast: null,
+            keepHourly: null,
+            keepDaily: null,
+            keepWeekly: null,
+            keepMonthly: null,
+            keepYearly: null,
+          },
+        },
+        selected: false,
+      },
+      global: { plugins: [PrimeVue] },
+    });
+    expect(wrapper.text()).toContain("stop / gzip");
+    expect(wrapper.text()).toContain("mit Zielvorgaben");
+    expect(wrapper.text()).toContain("vom Backupziel");
+  });
+
   it("zeigt den vollständigen Read-only-Vertrag und öffnet nur die Auswahl", async () => {
     const wrapper = mount(ConfiguredPolicyCard, {
       props: { policy, selected: false },
@@ -58,5 +87,22 @@ describe("ConfiguredPolicyCard", () => {
     await buttons[2]?.trigger("click");
     expect(wrapper.emitted("edit")?.[0]).toEqual([manageable]);
     expect(wrapper.emitted("toggle")?.[0]).toEqual([manageable]);
+  });
+
+  it("zeigt eine fehlende Pflichtkonfiguration für PVE-Fehlermails eindeutig", () => {
+    const wrapper = mount(ConfiguredPolicyCard, {
+      props: {
+        policy: {
+          ...policy,
+          failureNotificationRecipients: [],
+          blockers: ["failure_notification_recipients_unconfigured"],
+        },
+        selected: false,
+      },
+      global: { plugins: [PrimeVue] },
+    });
+
+    expect(wrapper.text()).toContain("Nicht konfiguriert");
+    expect(wrapper.text()).toContain("PVE-Fehlermails");
   });
 });

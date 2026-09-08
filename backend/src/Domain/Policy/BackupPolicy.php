@@ -21,6 +21,7 @@ final readonly class BackupPolicy
         public ?PolicyThresholds $thresholds,
         public ?Schedule $schedule,
         public FailureNotificationRecipients $failureNotificationRecipients,
+        public BackupDefaults $targetDefaults,
     ) {
     }
 
@@ -35,6 +36,7 @@ final readonly class BackupPolicy
         ?PolicyThresholds $thresholds,
         ?Schedule $schedule,
         ?FailureNotificationRecipients $failureNotificationRecipients = null,
+        ?BackupDefaults $targetDefaults = null,
     ): self {
         return new self(
             $id,
@@ -48,6 +50,7 @@ final readonly class BackupPolicy
             $thresholds,
             $schedule,
             $failureNotificationRecipients ?? new FailureNotificationRecipients([]),
+            $targetDefaults ?? new BackupDefaults(),
         );
     }
 
@@ -63,8 +66,9 @@ final readonly class BackupPolicy
         ?PolicyThresholds $thresholds,
         ?Schedule $schedule,
         ?FailureNotificationRecipients $failureNotificationRecipients = null,
+        ?BackupDefaults $targetDefaults = null,
     ): self {
-        return new self($id, $revision, $status, $targetId, $mode, $compression, $retention, $priority, $thresholds, $schedule, $failureNotificationRecipients ?? new FailureNotificationRecipients([]));
+        return new self($id, $revision, $status, $targetId, $mode, $compression, $retention, $priority, $thresholds, $schedule, $failureNotificationRecipients ?? new FailureNotificationRecipients([]), $targetDefaults ?? new BackupDefaults());
     }
 
     public function activate(int $pveMajor): self
@@ -90,6 +94,7 @@ final readonly class BackupPolicy
             $this->thresholds,
             $this->schedule,
             $this->failureNotificationRecipients,
+            $this->targetDefaults,
         );
     }
 
@@ -111,7 +116,23 @@ final readonly class BackupPolicy
             $this->thresholds,
             $this->schedule,
             $this->failureNotificationRecipients,
+            $this->targetDefaults,
         );
+    }
+
+    public function effectiveMode(): ?BackupMode
+    {
+        return $this->mode ?? $this->targetDefaults->mode;
+    }
+
+    public function effectiveCompression(): ?Compression
+    {
+        return $this->compression ?? $this->targetDefaults->compression;
+    }
+
+    public function effectiveRetention(): ?RetentionPolicy
+    {
+        return $this->retention ?? $this->targetDefaults->retention;
     }
 
     /** @return list<PolicyActivationBlocker> */
@@ -121,13 +142,13 @@ final readonly class BackupPolicy
         if (null === $this->targetId) {
             $blockers[] = PolicyActivationBlocker::TargetUnconfigured;
         }
-        if (null === $this->mode) {
+        if (null === $this->effectiveMode()) {
             $blockers[] = PolicyActivationBlocker::ModeUnconfigured;
         }
-        if (null === $this->compression) {
+        if (null === $this->effectiveCompression()) {
             $blockers[] = PolicyActivationBlocker::CompressionUnconfigured;
         }
-        if (null === $this->retention) {
+        if (null === $this->effectiveRetention()) {
             $blockers[] = PolicyActivationBlocker::RetentionUnconfigured;
         }
         if (null === $this->priority) {
@@ -139,6 +160,9 @@ final readonly class BackupPolicy
         if (null === $this->schedule) {
             $blockers[] = PolicyActivationBlocker::ScheduleUnconfigured;
         }
+        if ([] === $this->failureNotificationRecipients->addresses) {
+            $blockers[] = PolicyActivationBlocker::FailureNotificationRecipientsUnconfigured;
+        }
 
         return $blockers;
     }
@@ -149,7 +173,7 @@ final readonly class BackupPolicy
         $blockers = $this->configurationBlockers();
         if ($pveMajor < 7 || $pveMajor > 9) {
             $blockers[] = PolicyActivationBlocker::UnsupportedPveMajor;
-        } elseif (null !== $this->retention && !$this->retention->supportsPveMajor($pveMajor)) {
+        } elseif (null !== $this->effectiveRetention() && !$this->effectiveRetention()->supportsPveMajor($pveMajor)) {
             $blockers[] = PolicyActivationBlocker::RetentionIncompatible;
         }
 

@@ -71,6 +71,7 @@ import type {
   GetBackupRunErrors,
   GetBackupRunResponses,
   GetCollectorStatusData,
+  GetCollectorStatusErrors,
   GetCollectorStatusResponses,
   GetConnectionData,
   GetConnectionErrors,
@@ -79,10 +80,17 @@ import type {
   GetConnectionOnboardingGuidanceResponses,
   GetConnectionResponses,
   GetInventoryOverviewData,
+  GetInventoryOverviewErrors,
   GetInventoryOverviewResponses,
   GetOperationsDashboardData,
   GetOperationsDashboardErrors,
   GetOperationsDashboardResponses,
+  GetPbsTaskData,
+  GetPbsTaskErrors,
+  GetPbsTaskResponses,
+  GetQueueHistoryData,
+  GetQueueHistoryErrors,
+  GetQueueHistoryResponses,
   GetShadowDecisionData,
   GetShadowDecisionErrors,
   GetShadowDecisionResponses,
@@ -134,6 +142,9 @@ import type {
   ListInventoryResourcesData,
   ListInventoryResourcesErrors,
   ListInventoryResourcesResponses,
+  ListPbsTasksData,
+  ListPbsTasksErrors,
+  ListPbsTasksResponses,
   ListPoliciesData,
   ListPoliciesErrors,
   ListPoliciesResponses,
@@ -202,12 +213,77 @@ export type Options<
   meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
 
+export const listPbsTasks = <ThrowOnError extends boolean = false>(
+  options?: Options<ListPbsTasksData, ThrowOnError>,
+): RequestResult<ListPbsTasksResponses, ListPbsTasksErrors, ThrowOnError> =>
+  (options?.client ?? client).get<
+    ListPbsTasksResponses,
+    ListPbsTasksErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "hoddmimir_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/api/v1/operations/pbs-tasks",
+    ...options,
+  });
+
+export const getPbsTask = <ThrowOnError extends boolean = false>(
+  options: Options<GetPbsTaskData, ThrowOnError>,
+): RequestResult<GetPbsTaskResponses, GetPbsTaskErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetPbsTaskResponses,
+    GetPbsTaskErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "hoddmimir_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/api/v1/operations/pbs-tasks/{id}",
+    ...options,
+  });
+
+export const getQueueHistory = <ThrowOnError extends boolean = false>(
+  options?: Options<GetQueueHistoryData, ThrowOnError>,
+): RequestResult<
+  GetQueueHistoryResponses,
+  GetQueueHistoryErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    GetQueueHistoryResponses,
+    GetQueueHistoryErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "hoddmimir_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/api/v1/operations/queue/history",
+    ...options,
+  });
+
 export const getInventoryOverview = <ThrowOnError extends boolean = false>(
   options?: Options<GetInventoryOverviewData, ThrowOnError>,
-): RequestResult<GetInventoryOverviewResponses, unknown, ThrowOnError> =>
+): RequestResult<
+  GetInventoryOverviewResponses,
+  GetInventoryOverviewErrors,
+  ThrowOnError
+> =>
   (options?.client ?? client).get<
     GetInventoryOverviewResponses,
-    unknown,
+    GetInventoryOverviewErrors,
     ThrowOnError
   >({
     security: [
@@ -1046,10 +1122,14 @@ export const getBackupNotificationHealth = <
 
 export const getCollectorStatus = <ThrowOnError extends boolean = false>(
   options?: Options<GetCollectorStatusData, ThrowOnError>,
-): RequestResult<GetCollectorStatusResponses, unknown, ThrowOnError> =>
+): RequestResult<
+  GetCollectorStatusResponses,
+  GetCollectorStatusErrors,
+  ThrowOnError
+> =>
   (options?.client ?? client).get<
     GetCollectorStatusResponses,
-    unknown,
+    GetCollectorStatusErrors,
     ThrowOnError
   >({
     security: [

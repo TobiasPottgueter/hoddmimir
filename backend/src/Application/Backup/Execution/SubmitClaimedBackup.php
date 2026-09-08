@@ -17,6 +17,8 @@ final readonly class SubmitClaimedBackup
         private BackupSubmissionTransaction $transaction,
         private PveBackupClientProvider $clients,
         private ControlledRetryPolicy $retryPolicy,
+        private CheckBackupNodeTasks $nodeTasks,
+        private \App\Domain\Shared\Clock $clock,
     ) {
     }
 
@@ -27,6 +29,21 @@ final readonly class SubmitClaimedBackup
         }
         if (!$this->executionGate->enabled()) {
             return new SubmissionExecutionResult(SubmissionExecutionStatus::Disabled);
+        }
+        $nodes = $this->transaction->taskInspectionNodes($command);
+        $observedAt = $this->clock->now();
+        $blocker = $this->nodeTasks->blocker($command->requestId, $nodes);
+        $evidence = [] === $nodes ? null : new BackupNodeTaskEvidence($nodes, $observedAt);
+        $command = new SubmitClaimedBackupCommand(
+            $command->requestId, $command->runId, $command->claimToken, $command->claimFence,
+            $this->clock->now(), $evidence,
+        );
+        if (null === $blocker && (null === $evidence || !$evidence->covers($nodes, $command->now))) {
+            $blocker = 'remote_tasks_stale';
+        }
+        if (null !== $blocker) {
+            $this->transaction->deferRemoteTaskCheck($command, $blocker);
+            return new SubmissionExecutionResult(SubmissionExecutionStatus::Blocked, blockerCode: $blocker);
         }
         $preparation = $this->transaction->prepareAfterFullRevalidation($command);
         if (SubmissionPreparationStatus::Blocked === $preparation->status) {

@@ -29,14 +29,15 @@ function failContract(string $message): void
 /**
  * @param array<string, mixed> $schema
  * @param list<string> $required
+ * @param list<string> $optional
  */
-function assertClosedObject(array $schema, array $required, string $name): void
+function assertClosedObject(array $schema, array $required, string $name, array $optional = []): void
 {
     if ('object' !== ($schema['type'] ?? null)
         || false !== ($schema['additionalProperties'] ?? null)
         || $required !== ($schema['required'] ?? null)
         || !is_array($schema['properties'] ?? null)
-        || array_keys($schema['properties']) !== $required) {
+        || array_keys($schema['properties']) !== [...$optional, ...$required]) {
         failContract('OpenAPI schema '.$name.' drifted from its exact object shape.');
     }
 }
@@ -117,6 +118,9 @@ $expectedResponses = [
     '/api/v1/shadow/decisions/{id}' => '#/components/schemas/ShadowDecisionDetail',
     '/api/v1/operations/dashboard' => '#/components/schemas/OperationsDashboard',
     '/api/v1/operations/queue' => '#/components/schemas/BackupRequestPage',
+    '/api/v1/operations/pbs-tasks' => '#/components/schemas/PbsObservedTaskPage',
+    '/api/v1/operations/pbs-tasks/{id}' => '#/components/schemas/PbsObservedTaskDetail',
+    '/api/v1/operations/queue/history' => '#/components/schemas/QueueMetricHistory',
     '/api/v1/operations/requests/{id}/events' => '#/components/schemas/BackupEventPage',
     '/api/v1/operations/runs' => '#/components/schemas/BackupRunPage',
     '/api/v1/operations/runs/{id}' => '#/components/schemas/BackupRun',
@@ -222,6 +226,9 @@ foreach ($contract['paths'] as $route => $pathItem) {
         '/api/v1/shadow/decisions/{id}',
         '/api/v1/operations/dashboard',
         '/api/v1/operations/queue',
+        '/api/v1/operations/queue/history',
+        '/api/v1/operations/pbs-tasks',
+        '/api/v1/operations/pbs-tasks/{id}',
         '/api/v1/operations/requests/{id}/events',
         '/api/v1/operations/runs',
         '/api/v1/operations/runs/{id}',
@@ -475,7 +482,7 @@ $requiredObjects = [
         'scheduledAt', 'availableAt', 'createdAt', 'updatedAt', 'cancelRequestedAt', 'terminalCode',
     ],
     'BackupNotification' => [
-        'id', 'kind', 'state', 'attempt', 'deliveryAttempts', 'guestName', 'guestType', 'vmid',
+        'id', 'kind', 'state', 'attempt', 'checkNumber', 'deliveryAttempts', 'guestName', 'guestType', 'vmid',
         'node', 'targetLabel', 'problemCode', 'detailCode', 'occurredAt', 'nextRetryAt',
         'consecutiveFailures', 'lastErrorCode', 'createdAt', 'sentAt',
     ],
@@ -541,7 +548,12 @@ foreach ($requiredObjects as $name => $required) {
     if (!is_array($schema)) {
         failContract('OpenAPI is missing exact schema '.$name.'.');
     }
-    assertClosedObject($schema, $required, $name);
+    $optional = match ($name) {
+        'ConfiguredBackupTarget' => ['defaultBackupMode', 'defaultCompression', 'defaultLegacyMaxfiles', 'defaultKeepAll', 'defaultKeepLast', 'defaultKeepHourly', 'defaultKeepDaily', 'defaultKeepWeekly', 'defaultKeepMonthly', 'defaultKeepYearly'],
+        'ConfiguredPolicy' => ['effectiveMode', 'effectiveCompression', 'effectiveRetention'],
+        default => [],
+    };
+    assertClosedObject($schema, $required, $name, $optional);
 }
 $backupRun = $schemas['BackupRun'] ?? null;
 $backupRunProperties = is_array($backupRun) ? ($backupRun['properties'] ?? null) : null;

@@ -53,6 +53,15 @@
         mode: "0555"
       changed_when: false
 
+    - name: Stage maintenance deployment executor
+      ansible.builtin.copy:
+        src: maintenance_upgrade.py
+        dest: "{{ hoddmimir_deployment_staging.path }}/maintenance_upgrade.py"
+        owner: root
+        group: root
+        mode: "0555"
+      changed_when: false
+
     - name: Stage Docker secret files
       ansible.builtin.copy:
         content: "{{ item.value }}\n"
@@ -142,7 +151,10 @@
               '--database-bootstrap-script=' ~ hoddmimir_database_bootstrap_script,
               '--encryption-keyring-revision=' ~ (hoddmimir_encryption_keyring['revision'] | string),
               '--transaction-lock-file=' ~ hoddmimir_transaction_lock_file,
+              '--maintenance-directory=' ~ hoddmimir_maintenance_directory,
+              '--maintenance-timeout=' ~ (hoddmimir_maintenance_timeout_seconds | string),
             ]
+            + (hoddmimir_maintenance_external_schedulers_paused | bool | ternary(['--maintenance-external-schedulers-paused'], []))
             + (
               hoddmimir_expected_services
               | map('regex_replace', '^(.*)$', '--expected-service=\1')

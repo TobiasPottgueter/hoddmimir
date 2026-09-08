@@ -172,6 +172,36 @@ final class ConfigurationCommandRepositoryTest extends DatabaseTestCase
         self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
     }
 
+    public function testPolicyExecutionCannotBeEnabledOrKeptEnabledWithoutFailureMailRecipients(): void
+    {
+        $this->seedContext();
+        $repository = new DbalConfigurationCommandRepository($this->connection());
+        $principal = new AuthenticatedPrincipal(new UserId(self::USER), new NormalizedUsername('admin'), [Permission::BackupConfigurationManage]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetCreate, self::TARGET, 0, 'mail-target', random_bytes(16), $this->targetPayload('Mail target'),
+        ), $principal)->status);
+        $empty = array_replace($this->policyPayload('No mail'), ['failureNotificationRecipients' => []]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate, self::POLICY, 0, 'mail-policy', random_bytes(16), $empty,
+        ), $principal)->status, 'An incomplete draft remains editable.');
+
+        $blockedEnable = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyEnable, self::POLICY, 1, 'mail-enable', random_bytes(16),
+        ), $principal);
+        self::assertSame(['failure_notification_recipients_unconfigured'], $blockedEnable->blockers);
+
+        $this->connection()->update('backup_policies', ['status' => 'enabled'], ['id' => self::POLICY]);
+        $blockedUpdate = $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyUpdate, self::POLICY, 1, 'mail-update-empty', random_bytes(16), $empty,
+        ), $principal);
+        self::assertSame(['failure_notification_recipients_unconfigured'], $blockedUpdate->blockers);
+        self::assertSame(1, $this->connection()->fetchOne('SELECT revision FROM backup_policies WHERE id = ?', [self::POLICY]));
+
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyUpdate, self::POLICY, 1, 'mail-update-configured', random_bytes(16), $this->policyPayload('Mail configured'),
+        ), $principal)->status);
+    }
+
     public function testPveNinePolicyWritesRejectLegacyMaxfilesWithoutChangingRevision(): void
     {
         $this->seedContext();
@@ -364,6 +394,46 @@ final class ConfigurationCommandRepositoryTest extends DatabaseTestCase
         self::assertSame('active', $this->connection()->fetchOne('SELECT status FROM backup_policy_guest_overrides WHERE id = ?', [self::OVERRIDE]));
         $persistedKeepLast = $this->connection()->fetchOne('SELECT keep_last FROM backup_policy_guest_overrides WHERE id = ?', [self::OVERRIDE]);
         self::assertTrue(6 === $persistedKeepLast || '6' === $persistedKeepLast);
+    }
+
+    public function testInheritedDefaultsArePersistedAndGuardedAcrossConfigurationWrites(): void
+    {
+        $this->seedContext();
+        $repository = new DbalConfigurationCommandRepository($this->connection());
+        $principal = new AuthenticatedPrincipal(new UserId(self::USER), new NormalizedUsername('admin'), [Permission::BackupConfigurationManage]);
+        $targetPayload = $this->targetPayload('Defaults') + ['defaultBackupMode' => 'stop', 'defaultCompression' => 'gzip', 'defaultKeepLast' => 5];
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetCreate, self::TARGET, 0, 'defaults-target', random_bytes(16), $targetPayload,
+        ), $principal)->status);
+        $policyPayload = array_replace($this->policyPayload('Inherited'), ['backupMode' => null, 'compression' => null, 'keepAll' => null, 'keepLast' => null]);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyCreate, self::POLICY, 0, 'defaults-policy', random_bytes(16), $policyPayload,
+        ), $principal)->status);
+        $policy = $repository->findPolicy(new \App\Domain\Policy\PolicyId(self::POLICY));
+        self::assertNotNull($policy);
+        self::assertSame([], $policy->configurationBlockers());
+        self::assertNull($policy->mode);
+        self::assertSame(\App\Domain\Policy\BackupMode::Stop, $policy->effectiveMode());
+        self::assertSame(5, $policy->effectiveRetention()?->keepLast);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyEnable, self::POLICY, 1, 'defaults-enable', random_bytes(16),
+        ), $principal)->status);
+        self::assertSame(ConfigurationCommandStatus::Blocked, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetUpdate, self::TARGET, 1, 'defaults-guard', random_bytes(16), array_replace($targetPayload, ['defaultKeepLast' => null]),
+        ), $principal)->status);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetUpdate, self::TARGET, 1, 'defaults-omitted', random_bytes(16), $this->targetPayload('Renamed'),
+        ), $principal)->status);
+        self::assertSame(5, $repository->find(new \App\Domain\Target\BackupTargetId(self::TARGET))?->defaults->retention?->keepLast);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyDisable, self::POLICY, 2, 'defaults-disable', random_bytes(16),
+        ), $principal)->status);
+        self::assertSame(ConfigurationCommandStatus::Applied, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::TargetUpdate, self::TARGET, 2, 'defaults-remove', random_bytes(16), array_replace($targetPayload, ['defaultKeepLast' => null]),
+        ), $principal)->status);
+        self::assertSame(ConfigurationCommandStatus::Blocked, $repository->execute(new ConfigurationCommand(
+            ConfigurationCommandType::PolicyEnable, self::POLICY, 3, 'defaults-missing', random_bytes(16),
+        ), $principal)->status);
     }
 
     /** @return array<string, mixed> */

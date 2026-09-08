@@ -34,6 +34,7 @@ final class WebInventoryDatabasePrivilegeTest extends DatabaseTestCase
                 'SELECT id, connection_id, node_name FROM pbs_servers LIMIT 0',
                 'SELECT server_id, observed_at, uptime_seconds FROM pbs_server_status LIMIT 0',
                 'SELECT id, server_id, datastore_name FROM pbs_datastores LIMIT 0',
+                'SELECT id, inspection_json, inspected_at FROM pbs_observed_tasks LIMIT 0',
                 'SELECT datastore_id, semantics, total_bytes FROM pbs_datastore_capacity_state LIMIT 0',
                 'SELECT id, parent_run_id, applied_at FROM pbs_content_runs LIMIT 0',
                 'SELECT content_run_id, scope_type, error_code FROM pbs_content_scope_results LIMIT 0',

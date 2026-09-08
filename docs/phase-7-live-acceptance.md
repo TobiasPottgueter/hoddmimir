@@ -1,385 +1,294 @@
 # Phase 7: Live- und Parallelbetriebsabnahme
 
-Stand: 15. Juli 2026
+## Vertragsnachtrag vom 7. September 2026
 
-Status: **begonnen, nicht abgeschlossen.** Neben dem historischen
-Host-Bootstrap ist inzwischen ein vom Produktionsstack isolierter
-Vier-Service-Labstack gesund ausgerollt. Die freigegebene Labinfrastruktur
-wurde read-only inventarisiert: drei PVE-Cluster der Major-Versionen 7, 8 und 9
-mit insgesamt neun Nodes und 18 Wegwerfgästen sowie je ein PBS-3- und
-PBS-4-System. Ein ausschließlich lesender Onboarding-Preflight hat die
-vorbereiteten Identitäten, Rollen/ACLs, Produkt-Majors und versionsabhängigen
-Revoke-Kommandos für alle fünf Installationen sowie elf gepinnte
-TLS-Zertifikate bestätigt.
+Neue verbindliche Zielverträge: [automatische Wiederfreigabe](adr/0005-automatic-backup-recovery.md) und [Wartungsupgrade mit DB-Restore](adr/0006-maintenance-upgrade-database-restore.md). Beide sind implementiert. Die Wartungs-/Upgrade-/Restore-Fälle wurden am 8. September gegen echte Dev-Systeme [erneut abgenommen](audits/2026-09-07/08-dev-maintenance-acceptance.md); die automatische Wiederfreigabe samt Backupmatrix, Fehler/Retry/Abbruch und fremder Taskbelegung wurde auf der bestehenden DEV [ebenfalls abgenommen](audits/2026-09-07/10-existing-dev-upgrade-and-backup-acceptance.md). Abschließende Veröffentlichungsgates und Registry-Pins stehen noch aus. Die nachstehenden historischen Kandidatennachweise bleiben unverändert; sie belegen die neuen Verträge nicht.
 
-Es wurden weiterhin **keine Laufzeit-Tokens erzeugt oder an Hoddmímir
-übergeben, keine Verbindung aktiviert, kein automatischer Hoddmímir-Scan und
-kein Backupstart oder anderer Fault-/Mutationsfall ausgeführt**. Ein realer
-Matrix-Webhook ist ebenfalls noch nicht abgenommen. Die automatische Promotion
-geeigneter Shadow-Entscheidungen in die Queue ist lokal integriert und mit
-Unit- sowie MariaDB-Tests belegt, aber noch kein veröffentlichter oder im Lab
-ausgerollter Bestandteil eines finalen Kandidaten.
+
+Stand: 19. Juli 2026
+
+Status: **begonnen, nicht abgeschlossen.** Der isolierte Vier-Service-Labstack
+ist gesund, und die neue V2-Konfiguration ist inzwischen weitgehend aufgebaut:
+acht Laufzeit-Tokens versorgen fünf aktivierte PVE-/PBS-Verbindungen mit elf
+gepinnten Endpunkten. Drei PVE-Cluster der Major-Versionen 7, 8 und 9, PBS 3
+und PBS 4 sowie sechs Backupziele mit sechs Policies sind angebunden. Die
+Backupausführung bleibt deaktiviert.
+
+Der Abschlusskandidat ist Git-SHA `a6b4d4f`. Seine vollständige CI mit 37
+grünen Jobs, die ausschließliche AMD64-Veröffentlichung, der digest-gepinnte
+Lab-Deploy und die abschließende Drei-Zyklen-Evidenz sind belegt. Offen bleiben
+die repräsentativen realen Backup-/Fehlerfälle einschließlich ihrer
+Matrix-Problem- und Entwarnungszustellung. Eine benigne Matrix-Zustellprobe
+bei weiterhin deaktivierter Backupausführung ist belegt.
 
 Dieser fortschreibbare Evidenzbericht konkretisiert Phase 7 aus dem
 [`rewrite-plan.md`](rewrite-plan.md). Die lokale Implementierung und ihre
 Quality Gates sind getrennt im
-[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md) dokumentiert.
-Ein Punkt gilt hier erst als belegt, wenn die genannte reale Evidenz vorliegt;
-Planung, Fixtures, Mocks und lokale Tests ersetzen keinen Live-Nachweis.
+[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md) dokumentiert. Ein
+Punkt gilt hier erst als belegt, wenn die genannte reale Evidenz auf dem
+unveränderlichen Abschlusskandidaten vorliegt. Automatisierte Tests belegen
+Verträge und seltene Fehlerpfade, ersetzen aber nicht die hier ausdrücklich
+geforderten repräsentativen Live-Nachweise.
+
+## Verbindlicher Abschlussumfang
+
+Phase 7 bleibt bewusst auf den kleinsten belastbaren Live-Nachweis begrenzt:
+
+1. Kandidat `a6b4d4f` besteht die vollständigen Gates, wird ausschließlich für
+   `linux/amd64` veröffentlicht und digest-gepinnt im isolierten Lab ausgerollt.
+2. Die positive API-Matrix gegen PVE 7, 8 und 9 sowie PBS 3 und 4 ist mit den
+   vorgesehenen TLS-Pins und Laufzeitrechten erfolgreich.
+3. Drei aufeinanderfolgende automatische Collector-/Shadow-Zyklen laufen im
+   120-Sekunden-Raster stabil, idempotent und ohne Backupstart.
+4. Die sechs Ziele und sechs Policies werden aus dem neuen V2-Inventar
+   ausgewertet und erzeugen erklärbare, stabile Shadow-Entscheidungen.
+5. Je PVE-Major wird mindestens ein QEMU- und ein LXC-Backup erfolgreich
+   ausgeführt.
+6. Ein repräsentativer definitiver Fehler mit dauerhaftem Retry, ein Cancel
+   und die dazugehörige Matrix-Problem-/Statuszustellung werden korreliert
+   nachgewiesen.
+
+Die vollständige kombinatorische Security- und Chaosmatrix gehört in Phase 8.
+Ihre deterministischen Verträge bleiben bis dahin durch Unit-, Contract-,
+MariaDB-, Concurrency- und Fault-Harness-Tests abgesichert.
 
 ## Kandidat und Geltungsbereich
 
 - Branch des aktuellen Audits: `codex/policies-shadow-mode`;
-- ein finaler, unveränderlicher Phase-7-Kandidat ist noch nicht festgelegt;
-- bereits ausgerollte Zwischenstände belegen Deployment- und
-  Isolationsverträge, ersetzen aber weder die Freigabe des finalen Kandidaten
-  noch dessen vollständige Quality Gates;
-- die lokal integrierte Automatic-Shadow-Promotion bleibt bis zu vollständiger
-  CI und erneutem Deployment als Release-/Live-Nachweis ausdrücklich offen;
-- die Backupausführung des produktionsnahen Stacks bleibt bis zur ausdrücklich
-  getrennten Phase-8-Freigabe deaktiviert.
+- unveränderliche Kandidaten-SHA: `a6b4d4f`;
+- vollständige CI, finale AMD64-Artefakte und Registry-/Plattformdigests:
+  **belegt**;
+- Deployment dieses Kandidaten und erneute read-only Live-Abnahme: **belegt**;
+- Backupausführung im aktuell laufenden Labstack: **deaktiviert**;
+- produktive Backupausführung und Produktionsfreigabe: ausschließlich Phase 8.
 
-Jede Änderung an Source, Dependencies, Containern, Migrationen, Tests oder
-Deploymentvertrag benötigt vor der weiteren Live-Abnahme einen neuen
-unveränderlichen Kandidaten und die Wiederholung der jeweils betroffenen Gates.
+Jede weitere Änderung an Source, Dependencies, Containern, Migrationen oder
+Deploymentvertrag erzeugt einen neuen Kandidaten und macht nur die davon
+betroffenen Nachweise erneut erforderlich. Unveränderte vollständige Gates
+werden nicht allein wegen einer unabhängigen Dokumentationsänderung wiederholt.
 
 ## Aktueller Evidenzstand
 
-| Bereich                              | Verbindliche Evidenz                                                             | Aktueller Stand       |
-| ------------------------------------ | -------------------------------------------------------------------------------- | --------------------- |
-| Finaler Kandidat                     | unveränderliche Git-SHA, Gates und finale AMD64-Artefakte                        | offen                 |
-| Lokale Phase-6-Gates                 | Coverage, Mutation, MariaDB, Frontend, Browser, Supply Chain und Container-Smoke | getrennt lokal belegt |
-| Deployment-Host-Bootstrap            | Alpine, Python, Docker, Compose und OpenRC auf dem Zielhost                      | belegt                |
-| Isolierter Labstack                  | getrennte Laufzeitgrenzen und genau vier gesunde Services                        | **belegt**            |
-| Read-only Labgrundlage               | PVE 7/8/9, PBS 3/4, drei Cluster, neun Nodes und 18 Gäste                        | **belegt**            |
-| Read-only Onboarding-Preflight       | 5/5 Produkt-/Identitäts-/Revoke-Prüfungen und 11/11 passende TLS-Pins            | **belegt**            |
-| Laufzeit-Tokens und V2-Onboarding    | getrennte Scan-/Backup-Tokens und fünf aktivierte Verbindungen                   | offen                 |
-| PVE-/PBS-API-Live-Matrix             | Hoddmímir-Reads inklusive TLS, ACL, Pagination, Failover und Fehlerfällen        | offen                 |
-| Automatischer Inventar-Sync          | vollständiger autoritativer Scan im regulären Raster                             | offen                 |
-| Shadow-Parallelbetrieb und Promotion | Queue nur aus neuem Inventar und neuen Policies, ohne Backupstart                | offen                 |
-| Matrix-Zustellung                    | echter HTTPS-Webhook, Problemmeldung und Entwarnung                              | offen                 |
-| Isolierte Backup-Labmatrix           | QEMU/LXC je PVE-Major und definierte Fehler-/Race-Fälle                          | offen                 |
-| Produktions-Onboarding               | neue Produktionsverbindungen und Shadowbetrieb bei deaktivierter Ausführung      | offen                 |
-| Phase-7-Abschlussurteil              | alle Phase-7-Punkte belegt, Phase-8-Grenze intakt                                | offen                 |
+| Bereich | Verbindliche Evidenz | Aktueller Stand |
+| --- | --- | --- |
+| Abschlusskandidat | SHA `a6b4d4f`, 37/37 Gates, AMD64-Artefakte und Digests | **belegt** |
+| Deployment-Host | Alpine, Docker, Compose und OpenRC | **belegt** |
+| Isolierter Labstack | getrennte Grenzen und genau vier gesunde Services | **belegt** |
+| Labgrundlage | PVE 7/8/9, PBS 3/4, neun Nodes und 18 Gäste | **belegt** |
+| Laufzeitidentitäten | getrennte PVE-Scan-/Backup- sowie PBS-Scan-Tokens | **8 Tokens belegt** |
+| V2-Onboarding | fünf Verbindungen mit elf gepinnten Endpunkten | **belegt** |
+| Neue Konfiguration | sechs aktivierte Ziele und sechs aktivierte Policies | **belegt** |
+| Positive API-Matrix | erfolgreiche PVE-/PBS-Reads auf dem Abschlusskandidaten | **belegt** |
+| Collector/Shadow | drei stabile automatische Zyklen auf dem Abschlusskandidaten | **belegt** |
+| Matrix-Grundzustellung | echter HTTPS-Webhook und benigne Zustellprobe bei deaktivierter Backupausführung | **belegt** |
+| Backup-Labmatrix | QEMU/LXC je PVE-Major sowie Error/Retry/Cancel einschließlich Problem- und Entwarnungszustellung | offen |
+| Produktionsaktivierung | explizite Phase-8-Freigabe | nicht Teil von Phase 7 |
 
-## Belegter Bootstrap des Deployment-Hosts
+## Belegte Labgrundlage
 
 Der für Hoddmímir vorgesehene Alpine-Host wird in getrackter Evidenz nur als
-`deployment-host.example.invalid` bezeichnet und wurde am 13. Juli 2026
-erfolgreich mit der vorbereiteten Ansible-Automation gebootstrapped. Der reale
-Host/FQDN bleibt ausschließlich in der ignorierten lokalen
-Produktionskonfiguration.
+`deployment-host.example.invalid` bezeichnet. Reale Hosts, Endpunkte,
+Zertifikatspins, Tokens und Secrets bleiben ausschließlich in ignorierter
+lokaler Konfiguration.
 
-Belegte Laufzeitstände:
+Belegt sind:
 
-- Python `3.12.13`;
-- Docker Engine `29.5.2`;
-- Docker Compose `2.40.3`;
-- Docker ist als OpenRC-Service gestartet.
+- Python `3.12.13`, Docker Engine `29.5.2` und Docker Compose `2.40.3`;
+- ein vom produktionsnahen Stack durch Projekt, Pfad, Datenbank, Docker-Netz,
+  Port, Secrets, Volumes, Staging und Locks getrennter Labstack;
+- genau `mariadb`, `data-worker`, `backup-worker` und `webapp` als gesunde
+  Services;
+- PVE 7 mit drei Nodes, PVE 8 mit drei Nodes und PVE 9 mit drei Nodes;
+- je eine QEMU-VM und ein LXC-Container pro Node, insgesamt 18 Wegwerfgäste;
+- PBS 3 und PBS 4 mit den vorgesehenen Datastores;
+- elf von elf passende, lokal gespeicherte SHA-256-Leaf-Pins;
+- die vorgesehenen Identitäten, Rollen, ACLs und versionsabhängigen
+  Revoke-Kommandos für alle fünf Installationen.
 
-Dieser Nachweis belegt ausschließlich das Host-Fundament. Er ist kein
-Anwendungsdeploy. Die nachfolgend separat belegte Labinstallation entstand in
-einem späteren Schritt. Aus dem Bootstrap allein folgt weder eine
-Produktionsfreigabe noch eine Proxmox-Konfiguration.
+Der Labstack hat Host-Caddy und ACME-Zustand nicht verändert. Die
+Backupausführung ist weiterhin deaktiviert; aus dem gesunden Stack allein
+folgt keine Freigabe einer PVE-/PBS-Schreiboperation.
 
-## Belegter isolierter Labstack
+### Sanitisierter Nachweis der Lab-Secret-Rotation
 
-Der Phase-7-Labstack läuft auf demselben freigegebenen Alpine-Host, ist aber
-vom produktionsnahen Stack durch eigene Projekt-, Pfad-, Datenbank-,
-Docker-Netz-, Loopback-Port-, Secret-, Volume-, Staging- und Lock-Grenzen
-getrennt. Genau `mariadb`, `data-worker`, `backup-worker` und `webapp` laufen
-gesund. Der Lab-Deploy hat weder Host-Caddy noch ACME-Zustand verändert.
+Am 19. Juli 2026 wurden durch eine versehentliche Terminalausgabe
+ausschließlich die isolierten Labwerte für Anwendung, Verschlüsselungs-Keyring
+und MariaDB offengelegt. Der Labstack wurde daraufhin gestoppt, sein exaktes
+Datenbank-Volume sowie seine installierten Laufzeit-Secrets wurden entfernt
+und sämtliche betroffenen Werte neu erzeugt; der Lab-Vault wurde mit dem neuen
+Satz erneut verschlüsselt. Frischer Deploy, erneutes V2-Onboarding und die
+Wiederherstellung der sechs Ziele und Policies wurden erfolgreich verifiziert.
+Produktionswerte, PVE-/PBS-Token und die Matrix-Webhook-URL waren nicht Teil der
+Ausgabe. Abschlusskandidat und deaktivierte Backupausführung blieben
+unverändert.
 
-Die Lab-Backupausführung ist deaktiviert. Es ist kein echter Matrix-Webhook
-konfiguriert. Der gesunde Stack belegt daher den isolierten Deploymentvertrag,
-nicht aber Onboarding, Collector-Inventar, Queuepromotion oder eine
-PVE-/PBS-Schreiboperation.
+## Belegte V2-Konfiguration
 
-## Belegte read-only Labgrundlage
+Das frühere Preflight-Stadium ohne Tokens oder Verbindungen ist überholt. Im
+isolierten Lab sind jetzt neu erzeugt und ausschließlich laufzeitgebunden
+eingebunden:
 
-Die freigegebene Proxmox-Labumgebung wurde außerhalb der Hoddmímir-
-Laufzeit-Tokens ausschließlich lesend geprüft:
+- sechs PVE-Tokens: je PVE-Cluster ein Scan- und ein Backup-Token;
+- zwei PBS-Scan-Tokens: je PBS-Installation ein Token;
+- fünf aktivierte Verbindungen: PVE 7, PVE 8, PVE 9, PBS 3 und PBS 4;
+- elf zugeordnete und gepinnte Endpunkte;
+- sechs aktivierte Backupziele und sechs aktivierte Policies einschließlich
+  ihrer Auswahlregeln.
 
-- PVE 7: drei Nodes, `pve-manager 7.4-20`, `proxmox-ve 7.4-1`;
-- PVE 8: drei Nodes, `pve-manager 8.4.19`, `proxmox-ve 8.4.0`;
-- PVE 9: drei Nodes, `pve-manager 9.2.4`, `proxmox-ve 9.2.0`;
-- PBS 3: `proxmox-backup-server 3.4.8-3`;
-- PBS 4: `proxmox-backup-server 4.2.2-1`.
+Die drei Endpunkte eines PVE-Clusters verwenden bewusst gleichwertige
+Prioritäten; sie bilden eine gemeinsame Clusterverbindung und kein dreifaches
+Inventar. Die Konfigurationsprojektion ist nach wiederholtem Apply ein reiner
+No-op. Tokenwerte, Pins, Endpunkte und interne IDs werden nicht in Git oder
+diesen Bericht aufgenommen.
 
-Jede der drei PVE-Major-Linien bildet ein quorates Drei-Node-Cluster. Auf
-jedem der neun Nodes existiert genau eine laufende QEMU-VM und ein laufender
-LXC-Container als freigegebener Wegwerfgast; damit sind 18 Labgäste vorhanden.
-Dieser Topologienachweis ist noch kein erfolgreicher Hoddmímir-Inventarsync.
+Die sechs Lab-Policies verwenden Snapshot-Modus, Zstd und `keep-last=2` als
+Konfiguration, führen aber keine eigene PBS-Retention aus. Bei PBS-Zielen sind
+die PBS-Prune-Jobs alleinige Retention-Autorität; Hoddmímir sendet dort weder
+`maxfiles` noch `prune-backups`.
 
-Ein lokales, ignoriertes Preflight-Werkzeug hat danach ausschließlich lesend
-und ohne Secret-Ausgabe bestätigt:
+## Drei gezielte Kandidatenkorrekturen
 
-- die vorbereiteten Benutzer, Rollen und propagierten ACLs entsprechen auf
-  allen drei PVE-Clustern und beiden PBS-Installationen dem Onboardingvertrag;
-- die Produkt-Major-Version stimmt in 5 von 5 Installationen;
-- das korrekte versionsabhängige Revoke-Kommando ist in 5 von 5
-  Installationen anhand der jeweiligen CLI-Hilfe verfügbar;
-- elf von elf vom Deployment-Host beobachtete SHA-256-Leaf-Fingerprints
-  stimmen mit den ausschließlich lokal gespeicherten Pins überein.
+Die Live-Shadow-Läufe deckten drei konkrete Integrationsfehler auf. Sie sind
+gezielt im Abschlusskandidaten `a6b4d4f` behoben und fokussiert getestet:
 
-Die konkreten Endpunkte, Pins und lokalen Evidenzdateien bleiben ungetrackt.
-Der Preflight fordert ausdrücklich, dass die kanonischen Laufzeit-Tokens noch
-nicht existieren. Er belegt deshalb weder Token-Erzeugung noch eine
-Hoddmímir-API-Authentifizierung oder Verbindungspersistenz.
+1. Dem Collector fehlten ausschließlich die Leserechte auf
+   `backup_node_slots` und `backup_target_slots`. Eine neue symmetrische
+   Migration gewährt genau `SELECT` und nimmt beim Down-Pfad genau diese
+   Rechte wieder zurück. Die frische MariaDB-Migrationsprüfung ist grün.
+2. Die Root-Namespace-Zuordnung eines PBS-Ziels wurde im Shadow- und
+   Submission-Pfad als ungültig behandelt, weil die gespeicherte optionale
+   Mapping-Angabe `NULL`, der kanonische Root-Namespace aber `''` ist. Der
+   Vergleich normalisiert nun ausschließlich diesen Root-Fall mit
+   `COALESCE(..., '')`; Nicht-Root-Namespaces bleiben unverändert fail-closed.
+3. PVE 7, 8 und 9 liefern für QEMU und LXC die provisionierte Gastgröße als
+   `maxdisk`. Der Reader hatte diese Evidenz verworfen und die vorhandene
+   Datenbankspalte nicht befüllt. Der Wert wird nun typisiert bis in
+   `provisioned_size_bytes` geführt. Fehlen sowohl dieser Wert als auch eine
+   historische Backupgröße, bleibt die Entscheidung mit
+   `minimum_free_space/missing` blockiert, ohne den Collector-Zyklus oder
+   andere Gastentscheidungen zurückzurollen.
 
-## Noch offene Abnahmeblöcke
+Die Korrekturen erklären, warum frühere Zyklen trotz erfolgreicher Scans noch
+keinen stabilen Abschlussnachweis lieferten. Fokussierte Tests, Agentenreviews,
+finale CI, Veröffentlichung, Deployment und Live-Wiederholung sind grün.
 
-### 1. Releasekandidat und Registry
+## Offene Phase-7-Nachweise
 
-- [ ] Nach allen noch laufenden Repositoryänderungen eine finale
-      Kandidaten-SHA festlegen.
-- [ ] Alle vom geänderten Arbeitsstand betroffenen lokalen Quality Gates auf
-      exakt diesem Kandidaten wiederholen.
-- [ ] Worker, Web und das eigene MariaDB-Image ausschließlich für
-      `linux/amd64` in die freigegebene Registry veröffentlichen.
-- [ ] Die tatsächlichen Registry- und Plattformdigests,
-      Trivy-Ergebnisse und CycloneDX-SBOMs dem Kandidaten zuordnen.
-- [ ] Alle vier Produktionsimage-Referenzen auf die exportierten
-      `linux/amd64`-Plattformmanifeste pinnen: Data- und Backup-Worker verwenden
-      dieselbe Worker-Referenz, Web und das gescannte eigene MariaDB-Image ihre
-      jeweilige Referenz. Registry-Index- und lokale OCI-Archivprüfsummen sind
-      kein Ersatz für den Plattformdigest.
+### 1. Veröffentlichung und Deployment
 
-Externe Mutation: Registry-Push. Dafür werden Registry-Ziel, Authentifizierung
-und Veröffentlichungsfreigabe benötigt.
+- [x] Vollständige CI für exakt `a6b4d4f` mit 37/37 Jobs erfolgreich
+      abschließen.
+- [x] Worker, Web und eigenes MariaDB-Image ausschließlich als
+      `linux/amd64` veröffentlichen und Plattformdigests/SBOMs zuordnen.
+- [x] Den Kandidaten digest-gepinnt mit der vorbereiteten
+      Deployment-Transaktion im isolierten Lab ausrollen.
+- [x] Migrationen, vier gesunde Services, Health, Readiness, Heartbeats und
+      root-only Secretrechte erneut prüfen.
+- [x] `BACKUP_EXECUTION_ENABLED=false` nach dem Deploy nachweisen.
 
-### 2. Produktionsnaher Anwendungsdeploy
+### 2. Positive PVE-/PBS-Matrix und drei Shadow-Zyklen
 
-- [ ] Das ignorierte, verschlüsselte Ansible Vault mit getrennten
-      App-/MariaDB-Secrets und strukturiertem Encryption-Keyring bereitstellen.
-      Beim execution-deaktivierten Erstdeploy ist der dokumentierte
-      Matrix-Platzhalter zulässig; vor jedem Lab-Backup ist ein echter
-      HTTPS-Webhook zwingend.
-- [ ] Den digest-gepinnten Kandidaten mit der vorbereiteten
-      Deployment-Transaktion ausrollen.
-- [ ] Die leere V2-Datenbank und alle erwarteten Migrationen nachweisen; es
-      dürfen weder Legacy-Daten noch ein Legacy-Importer beteiligt sein.
-- [ ] Genau `mariadb`, `data-worker`, `backup-worker` und `webapp` als laufend
-      und gesund nachweisen.
-- [ ] `/api/health`, Schema-/Keyring-Readiness, Worker-Heartbeats sowie die
-      root-only Datei- und Secretrechte prüfen.
-- [ ] `BACKUP_EXECUTION_ENABLED=false` im ausgerollten Stack nachweisen.
-- [ ] Den öffentlichen Namen aus der ignorierten Produktionskonfiguration per
-      Host-Caddy auf den ausschließlich an `127.0.0.1:8080` gebundenen
-      WebApp-Port führen; Caddy bleibt ein OpenRC-Hostdienst und kein fünfter
-      Container.
-- [ ] Das Let's-Encrypt-Zertifikat per Hetzner-DNS-01 aus dem separaten
-      root-/ACME-lesbaren Tokenfile ausstellen, Caddy als non-root verifizieren
-      und den öffentlichen `/api/health`-Pfad mit System-CA-Prüfung abnehmen.
-- [ ] Den täglichen gesperrten Renewal-Pfad, laufendes OpenRC-`crond`, einen
-      idempotenten Nicht-Erneuerungslauf und den getesteten Rollback bei
-      Zertifikats-, Reload- oder HTTPS-Health-Fehler live belegen.
-
-Externe Mutation: Dateien, Docker-Images, Container, Volume und leere
-V2-Datenbank auf der bereits freigegebenen Deployment-VM. Der Deploy darf
-keine PVE-/PBS-Schreiboperation auslösen.
-
-### 3. Vollständige neue Konfiguration
-
-- [ ] V2-Administrator und Rollen neu einrichten und den zugehörigen
-      Audit-Nachweis sichern.
-- [x] Die versionsabhängigen Revoke-Kommandos anhand der realen CLI-Hilfe auf
-      PVE 7/8/9 und PBS 3/4 read-only validieren.
-- [x] Die vorbereiteten PVE-Benutzer, Gruppe, Rollen und propagierten ACLs auf
-      allen drei Clustern read-only gegen den geschlossenen Vertrag prüfen.
-- [x] Die vorbereiteten PBS-Benutzer und propagierten Audit-ACLs auf PBS 3 und
-      PBS 4 read-only gegen den geschlossenen Vertrag prüfen.
-- [ ] Die getrennten privilegiengetrennten PVE-Scan-/Backup-Tokens und die
-      PBS-Scan-Tokens erzeugen. Der erfolgreiche Preflight belegt bewusst ihre
-      Abwesenheit und hat keine Token-Mutation ausgeführt.
-- [ ] Ausschließlich die Laufzeit-Tokens über das verified-only Onboarding
-      eingeben; kein Administrator- oder Bootstrap-Token darf Hoddmímir
-      erreichen.
-- [ ] Nodes, QEMU-Gäste, LXC-Container, Backuplocations, PBS-Zuordnungen,
-      Mindestplatz, Parallelität, explizite Ausschlüsse und Policies vollständig
-      neu konfigurieren.
-
-Die Identitäts-/ACL-Grundlage ist vorhanden und read-only verifiziert. Die
-noch ausstehende Token-Erzeugung und jedes absichtliche ACL-/Token-Fehlerszenario
-sind externe Mutationen; Tokenwerte dürfen weder in Evidenz noch in Git
-gelangen.
-
-### 4. Read-only-Live-Matrix und Onboarding
-
-- [x] Die Produkt- und Patchversionen der bereitgestellten PVE-7/8/9- und
-      PBS-3/4-Systeme sanitisiert dokumentieren.
-- [x] Elf Endpunktzertifikate vom Deployment-Host lesen und die beobachteten
-      SHA-256-Leaf-Digests gegen elf lokale Pins vergleichen. Die Digestwerte
-      selbst bleiben ungetrackt.
-- [ ] System-CA, Custom-CA, korrekten SHA-256-Fingerprint und falschen
-      Fingerprint fail-closed prüfen; die Trust-Prüfung bleibt immer aktiv.
-      Bei falschem Pin darf kein Authorization-Header übertragen werden.
-- [ ] Produkt, Version, Scanner- und Executor-Rechte sowie fehlende,
-      zusätzliche oder nicht propagierte Rechte mit den geschlossenen
-      Allowlists abgleichen.
-- [ ] Version, Cluster/Server, Nodes, QEMU, LXC, Pools, Storages,
-      Datastores, Namespaces, Snapshots, Jobs und Tasks einschließlich realer
-      Pagination und ACL-Filter lesen.
-- [ ] Mehrere PVE-Endpunkte desselben Clusters ohne doppeltes Inventar sowie
-      Endpoint-Failover prüfen.
-- [ ] Teilfehler, nicht erreichbaren Node und Wiederkehr prüfen, ohne dass
-      unvollständige Reads falsche Abwesenheits- oder Archiventscheidungen
-      erzeugen.
-- [ ] Einen kontrollierten Placementwechsel prüfen; die Queue darf keine
-      veraltete Node-Zuordnung verwenden.
-
-Die normalen Remote-Aufrufe dieses Blocks sind read-only. Kontrollierte
-Node-/Netzstörungen und Gastmigrationen sind dagegen externe Mutationen und
-benötigen ausdrücklich freigegebene Lab-Systeme.
-
-### 5. Automatischer Inventar-Sync und Shadow-Parallelbetrieb
-
-- [x] Den Automatic-Shadow-Promotion-Fix integrieren und lokal mit Unit-, echter
-      MariaDB-, Fencing-, Rollback-, Concurrency- und Idempotenznachweisen
-      abnehmen.
-- [ ] Den integrierten Promotion-Pfad auf dem finalen Kandidaten durch die
-      vollständige CI und anschließend im isolierten Lab nachweisen.
-- [ ] Nach dem Onboarding den ersten vollständigen automatischen Scan am
-      nächsten regulären Rasterpunkt abwarten; kein manueller oder versteckter
-      Wizard-Scan ist zulässig.
-- [ ] Run-ID, Start/Ende, Autoritativstatus, Scope-Ergebnisse, Objektzahlen,
-      Teilfehler, letzter Erfolg und nächsten Lauf dokumentieren.
-- [ ] Wiederholte Scans als idempotent nachweisen und das startzeitbasierte
+- [x] Auf dem Abschlusskandidaten erfolgreiche authentifizierte Reads gegen
+      PVE 7, PVE 8, PVE 9, PBS 3 und PBS 4 nachweisen.
+- [x] Cluster/Server, Nodes, QEMU, LXC, Storages, Datastores, Namespaces,
+      Snapshots, Jobs und Tasks aus den fünf Verbindungen ohne Doppelbestand
+      inventarisieren.
+- [x] Drei aufeinanderfolgende automatische Zyklen auf dem startzeitbasierten
       120-Sekunden-Raster ohne Überlappung oder Catch-up-Burst beobachten.
-- [ ] PVE-Storage-/PBS-Kapazität sowie gast- und zielbezogene
-      Executor-Evidenz mit höchstens fünf Minuten Alter nachweisen.
-- [ ] Mindestens einen vollständigen Shadow-Zyklus bei deaktivierter
-      Backupausführung betreiben.
-- [ ] Nachweisen, dass die Queue ausschließlich aus dem neuen V2-Inventar und
-      den neuen Policies gebildet wird und jede Auswahl-, Placement-, Ziel-,
-      Freshness- und Prioritätsentscheidung erklärbar ist.
-- [ ] Bei mehreren geeigneten Policies je Gast genau einen stabil ausgewählten
-      Gewinner automatisch und idempotent promoten; bei deaktivierter
-      Ausführung darf dadurch kein PVE-Schreibaufruf entstehen.
-- [ ] Bei absichtlich veralteter Evidenz nachweisen, dass kein Start
-      zugelassen wird und frische Evidenz die Neubewertung auslöst.
-- [ ] Mehrere aufeinanderfolgende, kontrollierte Executor-Evidence-
-      Endpoint-Timeouts sanitisiert prüfen: die begrenzte synchrone
-      Verzögerung von bestehendem Task-Monitoring und Matrix-Zustellung
-      messen, bei deaktivierter Ausführung weiterhin null PVE-POST/DELETE
-      nachweisen und den Backup-Worker-Heartbeat bis zur anschließenden
-      Erholung beobachten. Einen getrennten Worker-/Lease-Ausfall so prüfen,
-      dass `degraded` beziehungsweise der gefencete Lease-Takeover und die
-      spätere Rückkehr zu `ready` ohne Doppelverarbeitung belegt sind.
+- [x] Frische Inventar-, Placement-, Kapazitäts- und Executor-Evidenz mit
+      höchstens fünf Minuten Alter sowie erfolgreiche Scope-Ergebnisse
+      nachweisen.
+- [x] Sechs Ziele/Policies stabil und idempotent auswerten; jede Auswahl-,
+      Placement-, Ziel-, Freshness- und Prioritätsentscheidung muss erklärbar
+      sein.
+- [x] Bei deaktivierter Ausführung weiterhin null Backup-Runs nachweisen.
 
-Dieser Block persistiert ausschließlich neue V2-Inventar-, Queue- und
-Auditdaten. Solange die Backupausführung deaktiviert bleibt, mutiert er PVE
-oder PBS nicht.
+### 3. Repräsentative Backup-, Fehler- und Matrix-Abnahme
 
-### 6. Isolierte Backup-Labmatrix
+Ein echter geheimer HTTPS-Matrix-Webhook liegt ausschließlich in der
+ignorierten Labkonfiguration vor. Eine über den laufenden Backup Worker mit
+den produktiven Adapterklassen gesendete benigne Probe wurde bei deaktivierter
+Backupausführung im vorgesehenen Kanal empfangen. Das technische
+Aktivierungs-Acknowledgement liegt ebenfalls vor und gilt ausschließlich für
+den isolierten Labstack. Der produktionsnahe Stack bleibt deaktiviert.
 
-Die drei Cluster mit ihren 18 Wegwerfgästen und die beiden PBS-Systeme sind als
-Entwicklungsumgebung für Backupstarts, Cancel und kontrollierte
-Fehlerinjektionen freigegeben. Diese Freigabe ist noch kein Ausführungsnachweis:
-Bis zum Stand dieses Berichts wurde keiner dieser Fälle gestartet. Vor dem
-ersten Lauf müssen der finale Kandidat, Laufzeit-Tokens, Hoddmímir-Onboarding,
-ein echter HTTPS-Matrix-Webhook und das technische Lab-Acknowledgement
-vorliegen. Die Lab-Ausführung bleibt vom produktionsnahen, weiterhin
-deaktivierten Stack getrennt.
-
-- [ ] Einen QEMU- und einen LXC-Gast je PVE-Major 7, 8 und 9 erfolgreich auf
-      lokalem Storage sichern.
-- [ ] Die offiziell zulässigen PVE-/PBS-Kombinationen zuerst aus den
-      offiziellen Kompatibilitätsangaben festhalten und anschließend mit
-      Snapshot-Nachweis testen.
-- [ ] Erfolg, definitiven Fehler, Cancel, Token-Revoke, fehlende Rechte,
-      Node-Ausfall und TLS-Fehler praktisch prüfen.
-- [ ] Einen Transportabbruch direkt nach dem `vzdump`-POST erzeugen und
-      belegen, dass Reconciliation niemals einen zweiten POST auslöst.
-- [ ] Zwei Backup Worker in einem isolierten Doppelclaim-Race betreiben und
-      exakt einen Remote-Submission-Dispatch nachweisen.
-- [ ] At-most-once-Cancel einschließlich des mehrdeutigen
-      `dispatch_unknown`-Pfads ohne zweiten DELETE prüfen.
-- [ ] Bei definitiven Fehlern Versuchszähler, dauerhafte Retry-Planung,
-      Matrix-Problemmeldung und eine spätere Entwarnung prüfen; ein
-      blockierendes Gate darf keinen PVE-Schreibaufruf erzeugen.
-- [ ] Hoddmímir-Run, sanitisierten UPID-Bezug, Remote-Task, Log,
-      Endzustand, Zielartefakt, Audit und Matrix-Outbox korrelieren.
+- [x] Benigne Matrix-Grundzustellung bei deaktivierter Backupausführung
+      nachweisen, ohne Webhook oder Kanal offenzulegen.
+- [ ] Je einen QEMU- und LXC-Gast auf PVE 7, 8 und 9 erfolgreich sichern.
+- [ ] Hoddmímir-Run, sanitisierten Remote-Taskbezug, Log, Endzustand,
+      Zielartefakt, Audit und Matrix-Outbox korrelieren.
+- [ ] Einen definitiven Fehler mit Versuchszähler und dauerhafter
+      Retry-Planung nachweisen; ein blockierendes Gate darf keinen Start
+      auslösen.
+- [ ] Einen kontrollierten Cancel mit genau einem Remote-Abbruch nachweisen.
+- [ ] Matrix-Problemmeldung beziehungsweise Status je Versuch und die spätere
+      Entwarnung erfolgreich zustellen.
 - [ ] Nachweisen, dass die V2-Historie ausschließlich mit diesen neuen
-      Lab-Läufen beginnt.
+      Labläufen beginnt.
 
-Externe Mutation: `vzdump`-POSTs, Cancel-DELETE, Backupdaten sowie
-kontrollierte ACL-, Token-, Node- und Transportfehler. Die Systeme und die
-fachliche Schreib-/Fault-Injection-Freigabe liegen vor; noch offen sind die
-technischen Voraussetzungen und der reale HTTPS-Matrix-Webhook. Eine
-löschwirksame Retention bleibt ohne ihre eigene ausdrückliche Genehmigung
-verboten. Selbst mit dieser Genehmigung darf sie nur auf Nicht-PBS-Zielen
-wirksam werden. Bei PBS-Zielen werden weder `maxfiles` noch `prune-backups`
-gesendet; dort bleiben die PBS-Prune-Jobs alleinige Retention-Autorität.
+Externe Mutationen dieses Blocks sind auf die ausdrücklich freigegebenen
+Wegwerfgäste begrenzt. Löschwirksame Retention bleibt ohne eigene Freigabe
+verboten.
 
-## Noch offene Inputs und technische Voraussetzungen
+## In Phase 8 verschobene Kombinations- und Chaosfälle
 
-Die unterstützten Lab-Systeme, Wegwerfgäste und die fachliche Erlaubnis für
-Backupstarts, Cancel und kontrollierte Fehlerinjektionen liegen inzwischen
-vor. Für die tatsächliche Ausführung bleiben dennoch offen:
+Die folgenden seltenen oder kombinatorischen Live-Fälle blockieren Phase 7
+nicht. Ihre fachlichen Verträge bleiben automatisiert getestet; praktische
+Security-, Betriebs- und Chaosabnahme folgt in Phase 8:
 
-1. ein finaler Kandidat mit grünen Gates und seinen unveränderlichen
-   `linux/amd64`-Releaseartefakten;
-2. ein gültiger geheimer HTTPS-Matrix-Webhook in der ignorierten
-   Labkonfiguration;
-3. die Erzeugung und ausschließlich laufzeitgebundene Übergabe der getrennten
-   Scan-/Backup-Tokens sowie das verified-only Hoddmímir-Onboarding;
-4. die neue Labkonfiguration für Ziele, Auswahl, Namespaces, Grenzwerte und
-   Policies;
-5. das technische Aktivierungs-Acknowledgement ausschließlich für den
-   isolierten Labstack.
+- vollständige System-/Custom-CA-/korrekter-Pin-/falscher-Pin-Matrix und alle
+  negativen ACL-Permutationen;
+- Endpoint-Failover unter Ausfall, Node-Ausfall und Wiederkehr sowie ein
+  kontrollierter Placementwechsel;
+- künstlich veraltete Evidenz, wiederholte Executor-Timeouts und getrennte
+  Worker-/Lease-Ausfälle;
+- Token-Revoke und absichtlich erzeugte TLS- oder Nodefehler;
+- Transportabbruch direkt nach dem `vzdump`-POST und die mehrdeutige
+  Reconciliation ohne zweiten POST;
+- isoliertes Doppelclaim-Race zweier Backup Worker;
+- mehrdeutiger Cancel-Transportfall ohne zweiten DELETE.
 
-Produktions-Tokens und Produktions-Onboarding bleiben unabhängig davon offen.
-Eine Empfängerentscheidung für optionale PVE-Fehler-E-Mails und jede
-löschwirksame Retention benötigen weiterhin eine getrennte Konfiguration
-beziehungsweise Freigabe.
+Auch in Phase 8 gilt unverändert: Ein `vzdump`-POST wird nach mehrdeutiger
+Antwort niemals automatisch wiederholt, und TLS-Verifikation bleibt immer
+aktiv.
 
-Secrets, Tokenwerte, Webhook-URLs, private CA-Schlüssel, interne
+## Noch offene Abnahmearbeiten
+
+Für den verbleibenden Phase-7-Abschluss fehlt kein externer
+Konfigurationseingang mehr. Webhook-Grundzustellung und technisches
+Aktivierungs-Acknowledgement sind belegt. Offen sind ausschließlich die
+repräsentativen QEMU-/LXC-, Error/Retry- und Cancel-Labläufe sowie die damit
+gekoppelte Problem- und Entwarnungszustellung.
+
+Tokens, Ziele und Policies sind nicht mehr offen. Produktions-Tokens,
+Produktions-Onboarding und jede produktive Backupaktivierung gehören in Phase
+8. Secrets, Tokenwerte, Webhook-URLs, private CA-Schlüssel, interne
 Inventardetails und vollständige UPIDs dürfen nicht in diesen Bericht oder Git
-geschrieben werden. Evidenz verwendet technische Aliasnamen, Patchversionen,
-Zeitstempel, Hoddmímir-IDs und sanitisierten beziehungsweise gehashten
-Remote-Bezug.
-
-## Strikte Abgrenzung zu Phase 8
-
-Phase 7 endet mit dem produktionsnahen Parallelbetrieb bei deaktivierter
-Produktionsausführung und einer getrennt freigegebenen isolierten
-Backup-Labmatrix. Die folgenden Arbeiten gehören ausdrücklich **nicht** zu
-dieser Phase:
-
-- produktive Aktivierung des neuen Backup Workers;
-- das vollständige Release- und Security-Gate als Produktionsfreigabe;
-- Backup und Restore der neuen MariaDB als Betriebsnachweis;
-- vollständige Runbooks für Deployment, Upgrade, Tokenwechsel, Incident und
-  Rollback;
-- Aktivierungs- und Rollback-Fenster;
-- praktische Deaktivierungsprobe von V2;
-- Gesamt-Rewrite-Definition-of-Done und Produktionsrelease.
-
-Die Zeichenfolge `ENABLE_PRODUCTION_BACKUPS` ist ein technisches Fail-closed-
-Gate, aber keine stellvertretende fachliche Freigabe. Sie darf auf dem
-produktionsnahen Phase-7-Stack nicht gesetzt werden. Falls ein isolierter
-Lab-Stack denselben technischen Guard für seine bewusst freigegebenen
-Backupstarts verwenden muss, ist diese Lab-Aktivierung getrennt zu
-dokumentieren und begründet keine Produktionsfreigabe.
+geschrieben werden.
 
 ## Fortschrittsprotokoll
 
-| Datum      | Kandidat      | Ereignis                                          | Ergebnis                                                                                                                     | Verbleibende Grenze                                              |
-| ---------- | ------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 13.07.2026 | `d88d38a`     | Alpine-Deployment-Host mit Ansible gebootstrapped | Python 3.12.13, Docker 29.5.2, Compose 2.40.3, Docker/OpenRC gestartet                                                       | kein Anwendungsdeploy, keine Live-Matrix, keine Backupausführung |
-| 15.07.2026 | Zwischenstand | Isolierten Labstack ausgerollt und verifiziert    | vier gesunde Services; getrennte Projekt-, Pfad-, DB-, Netz-, Port-, Secret-, Volume- und Lock-Grenzen; Backupausführung aus | finaler Kandidat, Onboarding und Backupstart offen               |
-| 15.07.2026 | Zwischenstand | Proxmox-Labgrundlage read-only inventarisiert     | PVE 7/8/9, PBS 3/4, neun Nodes und je QEMU/LXC pro Node                                                                      | noch kein Hoddmímir-Inventarsync                                 |
-| 15.07.2026 | Zwischenstand | Onboarding-Preflight read-only ausgeführt         | 5/5 Identitäts-/Versions-/Revoke-Prüfungen und 11/11 lokale TLS-Pins passend                                                 | keine Tokens erzeugt, kein Onboarding aktiviert                  |
+| Datum | Kandidat | Ereignis | Ergebnis | Verbleibende Grenze |
+| --- | --- | --- | --- | --- |
+| 13.07.2026 | `d88d38a` | Alpine-Host gebootstrapped | Docker, Compose und OpenRC bereit | kein Anwendungsdeploy |
+| 15.07.2026 | Zwischenstand | Isolierter Labstack ausgerollt | vier gesunde, getrennte Services | finaler Kandidat und Live-Abnahme offen |
+| 15.07.2026 | Zwischenstand | Labgrundlage geprüft | PVE 7/8/9, PBS 3/4, neun Nodes, 18 Gäste und 11 Pins | noch kein V2-Onboarding |
+| 19.07.2026 | Vorläufer `9a3f948` | V2-Onboarding und Konfiguration | 8 Tokens, 5 Verbindungen/11 Endpunkte, 6 Ziele/Policies | zwei Live-Integrationsfehler gefunden |
+| 19.07.2026 | `7347625` | Least-Privilege- und PBS-Root-Namespace-Hotfix | fokussierte Tests und Review grün | finale CI, Veröffentlichung, Deploy und Live-Wiederholung offen |
+| 19.07.2026 | `a6b4d4f` | PVE-Gastgrößenpfad und Missing-Size-Block | 37/37 CI-Jobs, AMD64-Publikation, Deploy und drei stabile Shadow-Zyklen grün | Matrix und repräsentative Backupfälle offen |
+| 19.07.2026 | `a6b4d4f` | Benigne Matrix-Zustellprobe bei deaktivierter Backupausführung | Zustellung im vorgesehenen Kanal extern bestätigt | Problem-/Entwarnungszustellung bleibt an die repräsentativen Backupläufe gekoppelt |
+| 19.07.2026 | `a6b4d4f` | Isolierte Lab-Secrets nach Terminalausgabe vollständig rotiert | frischer Vault, Deploy, Onboarding und Konfiguration verifiziert; keine Produktions-, Proxmox- oder Matrix-Werte betroffen | Kandidat und deaktivierte Backupausführung unverändert |
 
 ## Vorläufiges Urteil
 
-Phase 7 hat jetzt reale, aber klar begrenzte Evidenz: Host-Bootstrap,
-isolierter gesunder Labstack, read-only Labtopologie und der sichere
-Onboarding-Preflight sind belegt. Sie ist nicht abgeschlossen: finaler
-Kandidat und Gates, Laufzeit-Tokens, Hoddmímir-Onboarding, API-Live-Matrix,
-automatischer Inventar-Sync, finaler Release-/Live-Nachweis der automatischen
-Shadow-Queue-Promotion, Shadow-Parallelbetrieb, Matrix-Zustellung, die komplette isolierte
-Backup-/Fehler-Labmatrix und Produktions-Onboarding fehlen noch. Insbesondere
-wird weder ein Hoddmímir-Live-Scan noch eine Proxmox-Schreiboperation oder ein
-Backup-Erfolg behauptet.
+Phase 7 hat den finalen Release-, Deploy-, Onboarding-, Inventar- und
+Shadow-Nachweis bestanden. Kandidat `a6b4d4f` läuft mit fünf Verbindungen,
+elf Endpunkten, sechs Zielen/Policies und exakt 18 stabilen automatischen
+Queue-Einträgen für 18 Gäste; Folgezyklen sind reine Dedup-Projektionen und
+Backupausführung bleibt deaktiviert. Der Abschluss wird noch nicht behauptet,
+weil die repräsentativen QEMU-/LXC-, Error/Retry- und Cancel-Fälle
+einschließlich ihrer Matrix-Problem- und Entwarnungszustellung ausstehen. Die
+benigne Matrix-Grundzustellung ist bereits belegt.
+
+Die vollständige negative TLS-/ACL- und seltene Chaosmatrix ist bewusst Phase
+8 zugeordnet und hält den Phase-7-Abschluss nicht auf.

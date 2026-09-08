@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Target;
 
+use App\Domain\Policy\BackupDefaults;
 use DomainException;
 use DateTimeImmutable;
 
@@ -18,6 +19,7 @@ final readonly class BackupTarget
         public AllowedNodes $allowedNodes,
         public ?ConcurrencyPolicy $concurrency,
         public ?PbsTargetMapping $pbsMapping,
+        public BackupDefaults $defaults = new BackupDefaults(),
     ) {
     }
 
@@ -68,7 +70,7 @@ final readonly class BackupTarget
         }
 
         return new self($this->id, $this->revision->next(), TargetStatus::Enabled, $this->pbsStorage,
-            $this->minimumFree, $this->allowedNodes, $this->concurrency, $this->pbsMapping);
+            $this->minimumFree, $this->allowedNodes, $this->concurrency, $this->pbsMapping, $this->defaults);
     }
 
     public function disable(): self
@@ -78,7 +80,7 @@ final readonly class BackupTarget
         }
 
         return new self($this->id, $this->revision->next(), TargetStatus::Disabled, $this->pbsStorage,
-            $this->minimumFree, $this->allowedNodes, $this->concurrency, $this->pbsMapping);
+            $this->minimumFree, $this->allowedNodes, $this->concurrency, $this->pbsMapping, $this->defaults);
     }
 
     /** @return list<TargetActivationBlocker> */

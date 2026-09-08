@@ -30,6 +30,11 @@ final readonly class PbsHttpTasksAndJobsClient implements PbsMonitoringClient
         );
     }
 
+    public function inspect(\App\Application\Proxmox\Pbs\PbsUpid $upid): \App\Application\Proxmox\Pbs\PbsTaskInspection
+    {
+        return (new PbsTaskInspectionReader())->inspect($this->transport, $upid);
+    }
+
     public function pruneJobs(): PbsJobListSnapshot
     {
         return $this->jobReader->read(

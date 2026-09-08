@@ -111,8 +111,9 @@ final class DbalOperationsReadModelTest extends DatabaseTestCase
         ]);
         self::assertIsString($payload);
         $this->connection()->insert('backup_notification_outbox', [
-            'id'=>self::uuid('e0000000-0000-4000-8000-000000000002'),'root_request_id'=>$request,'request_id'=>$request,
-            'run_id'=>$run,'notification_kind'=>'failure','event_key'=>'qa.failure','attempt'=>1,'payload_json'=>$payload,
+            'id'=>self::uuid('e0000000-0000-4000-8000-000000000002'),'obligation_id'=>$request,
+            'occurrence_id'=>self::uuid('e0000000-0000-4000-8000-000000000002'),'root_request_id'=>$request,'request_id'=>$request,
+            'run_id'=>$run,'notification_kind'=>'failure','event_key'=>'qa.failure','attempt'=>1,'check_number'=>1,'payload_json'=>$payload,
             'state'=>'pending','delivery_attempts'=>2,'last_error_code'=>'transport',
             'available_at'=>'2026-07-13 00:00:02.000000','created_at'=>'2026-07-13 00:00:02.000000',
         ]);

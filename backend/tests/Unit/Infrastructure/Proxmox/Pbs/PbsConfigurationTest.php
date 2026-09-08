@@ -34,7 +34,7 @@ use App\Infrastructure\Proxmox\Pbs\PbsTokenAuthenticator;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Symfony\Component\HttpClient\NativeHttpClient;
+use App\Infrastructure\Proxmox\ProxmoxConnectionHttpClient;
 
 final class PbsConfigurationTest extends TestCase
 {
@@ -192,7 +192,7 @@ final class PbsConfigurationTest extends TestCase
         self::assertSame(['sha256' => str_repeat('ab', 32)], $fingerprintOptions['peer_fingerprint']);
         self::assertSame('/app/var/pbs-ca', $files->directory);
         self::assertSame(0700, $files->directoryMode); self::assertSame(0600, $files->fileMode);
-        self::assertInstanceOf(NativeHttpClient::class, $factory->create(PbsTlsConfiguration::systemCa()));
+        self::assertInstanceOf(ProxmoxConnectionHttpClient::class, $factory->create(PbsTlsConfiguration::systemCa()));
         foreach (['bad', str_repeat('g', 64)] as $value) { try { PbsCertificateFingerprint::fromSha256($value); self::fail('invalid pin'); } catch (InvalidArgumentException) {} }
         foreach (['bad', str_repeat('x', 262_145)] as $value) { try { PbsCustomCaCertificate::fromPem($value); self::fail('invalid ca'); } catch (InvalidArgumentException) {} }
         foreach (['relative', '/', '/tmp', '/app'] as $base) { try { new PbsCustomCaMaterializer($files, $base); self::fail('invalid directory'); } catch (InvalidArgumentException) {} }

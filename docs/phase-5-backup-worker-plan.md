@@ -13,6 +13,10 @@ Freshness-Regeln aus
 verbindlich. Der bestehende typisierte PVE-Schreibvertrag ist in
 [`pve-backup-write-contract.md`](pve-backup-write-contract.md) beschrieben.
 
+## Neue Vertragsentscheidung vom 7. September 2026
+
+[ADR 0005](adr/0005-automatic-backup-recovery.md) erlaubt einen neuen automatischen Versuch nach vollständiger frischer Taskklärung ohne eindeutige Zuordnung und Prüfung aller allgemeinen Startgates, ohne Sonderwartefrist. Dieser Vertrag ersetzt das ausnahmslose Wiederholungsverbot. Remote-Task-Gate und atomare Wiederfreigabe mit verknüpftem Folgeauftrag sind implementiert und durch Unit-/Contract- sowie MariaDB-Queue-Tests geprüft; Live-Abnahme und vollständige Release-Gates stehen noch aus. Historische Testergebnisse unten belegen ihn noch nicht.
+
 ## Lokaler Abschlussstand
 
 Der lokale Phase-5-Umfang ist implementiert:
@@ -134,8 +138,9 @@ an PVE übergeben wurde.
   identitätsgleicher Treffer übernimmt dessen UPID; mehrere oder unvollständige
   Treffer bleiben `unknown`/reconcile-pflichtig statt einen neuen POST
   auszulösen.
-- Selbst ein späterer Nachweis `proven_not_started` hebt das Retry-Verbot einer
-  mehrdeutigen Submission nicht auf.
+- Vollständige frische Taskklärung ohne eindeutige Zuordnung erlaubt die
+  Wiederfreigabe ohne Sonderwartefrist, unter Einhaltung aller Startgates.
+  Ein neuer Versuch folgt ausschließlich dem Klärungs-/Startvertrag in ADR 0005.
 
 ## Cancel
 
@@ -151,7 +156,8 @@ oder der Run nachvollziehbar `unknown` bleibt.
 
 ## Retry-Policy
 
-Mehrdeutige Submissions sind ausnahmslos nicht wiederholbar. Definitiv
+Mehrdeutige Submissions erhalten keinen blinden Retry. Ein neuer verknüpfter
+Versuch ist ausschließlich nach ADR 0005 automatisch zulässig. Definitiv
 fehlgeschlagene Starts oder Läufe beenden die Backup-Pflicht dagegen nicht:
 
 - kontrollierte Retries werden ohne feste maximale Versuchszahl fortgesetzt,
@@ -209,9 +215,17 @@ nicht in Prozessargumenten erscheint.
 Eine vollständige Matrix-Zusammenfassung nach jedem zweiminütigen
 Scheduler-Durchlauf ist nicht verpflichtend und standardmäßig deaktiviert.
 Fehlversuchs- und Entwarnungsmeldungen sind davon unabhängig und dürfen nicht
-unterdrückt werden. PVE-eigene Fehler-E-Mails werden über explizite
-Ausführungskonfiguration (`mailnotification=failure` plus konfigurierter
-Empfänger) gesteuert; Empfängeradressen werden nicht im Quellcode hinterlegt.
+unterdrückt werden. PVE-eigene Fehler-E-Mails sind für jeden ausführbaren
+Backupversuch verpflichtend: Eine Policy ohne mindestens einen konfigurierten
+Empfänger kann nicht aktiviert werden, erzeugt weder automatische noch
+manuelle Requests und wird spätestens unmittelbar vor dem PVE-Aufruf erneut
+fail-closed blockiert. Der Wire-Vertrag sendet bei konfigurierten Empfängern
+`mailto` und `mailnotification=failure`; PVE 8 und 9 erhalten zusätzlich stets
+`notification-mode=legacy-sendmail`, PVE 7 nicht. Damit löst ein tatsächlich
+gestarteter, terminal fehlgeschlagener `vzdump` eine PVE-Mail aus, ein Erfolg
+jedoch nicht. Gate-, Start- und Transportfehler bleiben ausschließlich über
+die Hoddmímir-/Matrix-Problemzustellung sichtbar.
+Empfängeradressen werden nicht im Quellcode hinterlegt.
 
 Sobald `BACKUP_EXECUTION_ENABLED=true` gilt, muss die Problemzustellung
 gleichzeitig aktiviert und mit einem gültigen HTTPS-Webhook-Secret
@@ -236,8 +250,10 @@ PVE-Aufruf synchron aus.
 - echte MariaDB-11.4-Tests für zwei parallele Worker, Lease-Ablauf, Fence,
   Slot-/Kapazitätsrace, idempotente Promotion, Logs und Least Privilege;
 - Contract-Fixtures für QEMU und LXC auf PVE 7, 8 und 9;
-- Tests, dass nach mehrdeutiger Submission und unklarer Stop-Antwort kein
-  zweiter Schreibaufruf entsteht;
+- Tests, dass nach mehrdeutiger Submission kein weiterer POST ohne die
+  Wiederfreigabe aus ADR 0005 entsteht; Folgezyklen und neue Request-IDs
+  dürfen die Sperre nicht umgehen. Unklare Stop-Antworten erlauben weiterhin
+  keinen zweiten DELETE;
 - OpenAPI-Driftprüfung und generierter TypeScript-Client;
 - Phase-6-Playwright-Flows für manuellen Request, Queue, Run, Log, Cancel und
   Worker-Warnzustand;

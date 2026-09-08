@@ -24,7 +24,7 @@ use RuntimeException;
 
 final readonly class DbalPbsEndpointReadConfigurationSource implements PbsEndpointReadConfigurationSource
 {
-    public function __construct(private Connection $connection)
+    public function __construct(private Connection $connection, private bool $includeDisabled = false)
     {
     }
 
@@ -38,7 +38,7 @@ final readonly class DbalPbsEndpointReadConfigurationSource implements PbsEndpoi
         }
 
         $row = $this->connection->fetchAssociative(
-            <<<'SQL'
+            str_replace('collector_credentials', $this->includeDisabled ? 'proxmox_credentials' : 'collector_credentials', <<<'SQL'
                 SELECT
                     c.product,
                     c.enabled AS connection_enabled,
@@ -57,23 +57,24 @@ final readonly class DbalPbsEndpointReadConfigurationSource implements PbsEndpoi
                 LEFT JOIN proxmox_connection_endpoints e
                     ON e.connection_id = c.id
                     AND e.id = :endpoint_id
-                    AND e.enabled = 1
+                    AND (e.enabled = 1 OR :include_disabled = 1)
                 LEFT JOIN collector_credentials cr
                     ON cr.connection_id = c.id
                     AND cr.purpose = 'collector'
                     AND cr.auth_scheme = 'api_token'
                 WHERE c.id = :connection_id
                 LIMIT 1
-                SQL,
+                SQL),
             [
                 'connection_id' => $connectionId->bytes,
                 'endpoint_id' => $endpointId->bytes,
+                'include_disabled' => (int) $this->includeDisabled,
             ],
         );
 
         if (false === $row
             || 'pbs' !== ($row['product'] ?? null)
-            || 1 !== $this->integer($row, 'connection_enabled')
+            || (!$this->includeDisabled && 1 !== $this->integer($row, 'connection_enabled'))
             || $expectedRevision !== $this->integer($row, 'connection_revision')) {
             throw ConnectionReadFailure::connectionChanged();
         }

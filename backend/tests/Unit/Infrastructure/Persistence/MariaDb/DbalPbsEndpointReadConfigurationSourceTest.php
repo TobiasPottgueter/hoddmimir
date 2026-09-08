@@ -36,7 +36,7 @@ final class DbalPbsEndpointReadConfigurationSourceTest extends TestCase
                     && str_contains($sql, 'e.enabled = 1')
                     && str_contains($sql, "cr.purpose = 'collector'")
                     && str_contains($sql, "cr.auth_scheme = 'api_token'")),
-                ['connection_id' => str_repeat('c', 16), 'endpoint_id' => str_repeat('e', 16)],
+                ['connection_id' => str_repeat('c', 16), 'endpoint_id' => str_repeat('e', 16), 'include_disabled' => 0],
             )
             ->willReturn($this->row(principal: 'svc@operations@pbs'));
 

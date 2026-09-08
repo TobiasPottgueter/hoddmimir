@@ -14,7 +14,8 @@ final readonly class BackupNotification
     public function __construct(
         public string $eventId,
         public BackupNotificationKind $kind,
-        public int $attempt,
+        public ?int $attempt,
+        public int $checkNumber,
         public string $guestName,
         public int $vmid,
         public PveGuestType $guestType,
@@ -28,7 +29,8 @@ final readonly class BackupNotification
         public int $consecutiveFailures,
     ) {
         if (16 !== \strlen($eventId)
-            || $attempt < 1
+            || (null !== $attempt && $attempt < 1)
+            || $checkNumber < 1
             || $vmid < 1
             || $vmid > 999_999_999
             || '' === \trim($guestName)
@@ -43,6 +45,13 @@ final readonly class BackupNotification
             || $openedAt > $occurredAt
             || (null !== $nextRetryAt && (0 !== $nextRetryAt->getOffset() || $nextRetryAt <= $occurredAt))
             || (null !== $detailCode && 1 !== \preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/D', $detailCode))
+            || (null === $attempt && !\in_array($problemCode, [
+                BackupProblemCode::CapacityBlocked,
+                BackupProblemCode::PermissionBlocked,
+                BackupProblemCode::EvidenceStale,
+                BackupProblemCode::PlacementChanged,
+                BackupProblemCode::ConfigurationBlocked,
+            ], true))
             || (BackupNotificationKind::Failure === $kind) !== (null !== $nextRetryAt)) {
             throw new InvalidArgumentException('The backup notification is invalid.');
         }

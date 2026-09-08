@@ -1,0 +1,103 @@
+--- backend/tests/Integration/Database/DbalBackupQueueStoreTest.php
++++ AuditBackupQueueStoreTest.php
+@@ -66,9 +66,55 @@
+ use DateTimeZone;
+ use App\Tests\Fakes\FrozenClock;
+ 
+-final class DbalBackupQueueStoreTest extends DatabaseTestCase
++final class AuditBackupQueueStoreTest extends DatabaseTestCase
+ {
+     private DateTimeImmutable $now;
++
++    public function testAuditUnknownAllowsAnotherAutomaticSubmission(): void
++    {
++        $this->testProvenAbsentAmbiguousSubmissionBecomesUnknownExactlyOnce();
++        $source = new DbalAutomaticShadowEvaluationSource($this->connection());
++        self::assertTrue($this->shadowCandidate($source)->activeRequestAbsent);
++        $nextAt = $this->now->modify('+120 seconds');
++        $cycleId = self::id('audit-next-cycle');
++        $cycle = $this->connection()->fetchAssociative('SELECT * FROM collector_cycles WHERE cycle_token=:id', ['id'=>self::id('cycle')]);
++        self::assertIsArray($cycle);
++        $this->connection()->update('collector_cycles', ['status'=>'succeeded','finished_at'=>self::format($this->now)], ['cycle_token'=>self::id('cycle')]);
++        $cycle['cycle_token']=$cycleId; $cycle['fencing_token']=2;
++        $cycle['scheduled_for']=self::format($nextAt); $cycle['started_at']=self::format($nextAt);
++        $cycle['heartbeat_at']=self::format($nextAt); $cycle['status']='running';
++        $this->connection()->insert('collector_cycles',$cycle);
++        $this->connection()->update('collector_schedule',['lease_token'=>$cycleId,'lease_fencing_token'=>2],['schedule_name'=>'inventory']);
++        $this->connection()->update('guests',['is_template'=>1],['id'=>self::id('guest-b')]);
++        $lease=new CollectorLease(new CollectorWorkerId(self::id('collector')),new CollectorCycleToken($cycleId),2,$this->now->modify('+1 hour'));
++        $evaluator=new \App\Application\Scheduler\Shadow\RunAutomaticShadowEvaluation(
++            $source,
++            new \App\Application\Scheduler\Shadow\PersistShadowEvaluation(new \App\Infrastructure\Persistence\MariaDb\DbalShadowEvaluationStore($this->connection())),
++            new \App\Domain\Scheduler\EligibilityEvaluator(),new EvidenceFreshnessPolicy(),
++            new \App\Domain\Scheduler\ReasonSelector(),new \App\Domain\Scheduler\PriorityResolver(),new FrozenClock($nextAt)
++        );
++        $evaluator->execute($lease);
++        self::assertSame('2',$this->numeric($this->connection()->fetchOne('SELECT COUNT(*) FROM backup_requests WHERE guest_id=:guest',['guest'=>self::id('guest')])));
++        $claim=$this->store()->claim(new ClaimNextBackupCommand(self::id('worker-a'),$nextAt));
++        self::assertNotNull($claim);
++        self::assertNotSame(self::id('request-a'),$claim->id);
++        $prepared=(new DbalBackupSubmissionStore($this->connection(),new DbalBackupProblemRecorder()))->prepareAfterFullRevalidation(new SubmitClaimedBackupCommand($claim->id,self::id('audit-second-run'),$claim->claimToken,$claim->claimFence,$nextAt));
++        self::assertSame(SubmissionPreparationStatus::PreparedNow,$prepared->status);
++        fwrite(STDOUT,"AUDIT: unknown/forbidden_ambiguous -> new automatic request -> claimed -> prepared for second POST\n");
++    }
++
++    public function testAuditPreviousWriterFailsOnMigratedSchema(): void
++    {
++        $this->testProvenAbsentAmbiguousSubmissionBecomesUnknownExactlyOnce();
++        try {
++            $this->connection()->executeStatement("INSERT INTO backup_problem_states (root_request_id,problem_code,consecutive_failures,opened_at,last_occurred_at,last_notified_at,revision) VALUES (:root,'submission_rejected',1,:at,:at,:at,1) ON DUPLICATE KEY UPDATE revision=revision+1", ['root'=>self::id('request-a'),'at'=>self::format($this->now)]);
++            self::fail('The old insert unexpectedly succeeded.');
++        } catch (\Doctrine\DBAL\Exception $error) {
++            self::assertStringContainsString('obligation_id',$error->getMessage());
++            fwrite(STDOUT,"AUDIT: previous writer rejected because obligation_id has no default\n");
++        }
++    }
++
+ 
+     protected function setUp(): void
+     {
+@@ -77,6 +123,7 @@
+         self::assertIsString($value);
+         $this->now = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s.u', $value, new DateTimeZone('UTC'))
+             ?: throw new \RuntimeException('Could not read MariaDB UTC time.');
++        $this->now=$this->now->modify("-120 seconds");
+         $this->seedFixture();
+     }
+ 
+@@ -202,7 +249,7 @@
+                 $this->now,
+             ));
+ 
+-            self::assertSame(SubmissionPreparationStatus::PreparedNow, $preparation->status);
++            self::assertSame(SubmissionPreparationStatus::PreparedNowNow, $preparation->status);
+             self::assertNotNull($preparation->submission);
+         } finally {
+             $worker->close();
+@@ -929,7 +976,7 @@
+         $run = self::id('submission-run');
+         $command = new SubmitClaimedBackupCommand($claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now);
+         self::assertSame(\App\Application\Backup\Execution\ExistingSubmissionStatus::FreshClaim, $submission->inspectExistingSubmission($command));
+-        self::assertSame(SubmissionPreparationStatus::PreparedNow, $submission->prepareAfterFullRevalidation($command)->status);
++        self::assertSame(SubmissionPreparationStatus::PreparedNowNow, $submission->prepareAfterFullRevalidation($command)->status);
+         self::assertSame(\App\Application\Backup\Execution\ExistingSubmissionStatus::RecoveryRequired, $submission->inspectExistingSubmission($command));
+         $this->connection()->createSavepoint('submission_outcome');
+ 
+@@ -1472,7 +1519,7 @@
+                 $claim->id, $run, $claim->claimToken, $claim->claimFence, $this->now,
+             );
+             $transaction = new DbalBackupSubmissionStore($this->connection(), new DbalBackupProblemRecorder());
+-            self::assertSame(SubmissionPreparationStatus::PreparedNow, $transaction->prepareAfterFullRevalidation($command)->status);
++            self::assertSame(SubmissionPreparationStatus::PreparedNowNow, $transaction->prepareAfterFullRevalidation($command)->status);
+             self::assertSame('', file_get_contents($journal));
+ 
+             $restartAt = $this->now->modify('+1 second');
+@@ -2147,7 +2194,7 @@
+             $this->now,
+         ));
+ 
+-        self::assertSame(SubmissionPreparationStatus::PreparedNow, $prepared->status);
++        self::assertSame(SubmissionPreparationStatus::PreparedNowNow, $prepared->status);
+         self::assertNotNull($prepared->submission);
+ 
+         return $prepared->submission;

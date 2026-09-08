@@ -867,7 +867,18 @@ class ComposeContractTest(unittest.TestCase):
             ])
             self.assertEqual(0, migration_configured.returncode, migration_configured.stderr)
             migration_model = json.loads(migration_configured.stdout)
-            self.assertEqual(EXPECTED_SERVICES | {"schema-migration"}, set(migration_model["services"]))
+            self.assertEqual(EXPECTED_SERVICES | {"schema-migration", "maintenance-check"}, set(migration_model["services"]))
+            probe = migration_model["services"]["maintenance-check"]
+            self.assertEqual("false", probe["environment"]["BACKUP_EXECUTION_ENABLED"])
+            self.assertEqual("false", probe["environment"]["MATRIX_NOTIFICATION_ENABLED"])
+            self.assertNotIn("ports", probe)
+            self.assertEqual("no", probe["restart"])
+            self.assertEqual("linux/amd64", probe["platform"])
+            for service_name in ("data-worker", "backup-worker", "webapp"):
+                self.assertEqual("/run/hoddmimir-maintenance", services[service_name]["environment"]["HODDMIMIR_MAINTENANCE_DIRECTORY"])
+                mounts = [mount for mount in services[service_name]["volumes"] if mount["target"] == "/run/hoddmimir-maintenance"]
+                self.assertEqual(1, len(mounts))
+                self.assertTrue(mounts[0]["read_only"])
             migration = migration_model["services"]["schema-migration"]
             self.assertEqual("linux/amd64", migration["platform"])
             self.assertEqual(services["data-worker"]["image"], migration["image"])
@@ -1335,17 +1346,16 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assert_safe_docker_calls()
 
-    def test_unchanged_files_apply_pending_migration_before_verification(self) -> None:
+    def test_unchanged_files_cannot_apply_pending_migration_without_maintenance(self) -> None:
         self.install_current("new")
+        before = self.current_state()
         self.write_state(sorted(EXPECTED_SERVICES), schema_up_to_date=False)
-
         result = self.run_transaction()
-
-        self.assertEqual(0, result.returncode, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertTrue(payload["changed"])
-        self.assertEqual("schema-migrated-and-verified", payload["status"])
-        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "run", "ps"], self.operations())
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.current_state())
+        self.assertIn("image-only migration is disabled", result.stderr)
+        self.assertNotIn("run", self.operations())
+        self.assertNotIn("down", self.operations())
         self.assert_safe_docker_calls()
 
     def test_unchanged_migration_failure_keeps_application_files_and_services(self) -> None:
@@ -1357,12 +1367,12 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
-        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check", "run"], self.operations())
+        self.assertEqual(["config", "config", "up", "bootstrap", "schema-check"], self.operations())
         self.assertNotIn("down", self.operations())
         self.assertIn("without changing application files", result.stderr)
         self.assertIn("existing application services were not stopped", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
-        self.assertIn("Cause: Docker Compose run failed with exit code 1.", result.stderr)
+        self.assertIn("image-only migration is disabled", result.stderr)
         self.assert_safe_docker_calls()
 
     def test_changed_verify_failure_restores_all_files_and_reverifies(self) -> None:
@@ -1519,7 +1529,7 @@ class DeploymentTransactionTest(unittest.TestCase):
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assert_safe_docker_calls()
 
-    def test_migration_failure_restores_application_files_without_claiming_ddl_rollback(self) -> None:
+    def test_pending_migration_is_blocked_before_ddl_on_image_only_recovery_path(self) -> None:
         self.install_current("old")
         before = self.current_state()
         self.write_state(sorted(EXPECTED_SERVICES), failures={"run": [1]}, schema_up_to_date=False)
@@ -1528,10 +1538,10 @@ class DeploymentTransactionTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(before, self.current_state())
-        self.assertIn("MariaDB DDL may already be applied or partially applied", result.stderr)
+        self.assertIn("image-only migration is disabled", result.stderr)
         self.assertIn("forward-only and was not rolled back", result.stderr)
         self.assertEqual(
-            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "run", "up", "ps"],
+            ["config", "config", "ps", "pull", "up", "bootstrap", "schema-check", "up", "ps"],
             self.operations(),
         )
         self.assertIn("application services remained running", result.stderr)

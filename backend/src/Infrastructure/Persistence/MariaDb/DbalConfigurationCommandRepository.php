@@ -71,12 +71,12 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
         );
         return new BackupTarget($id, new TargetRevision($this->integer($row['revision'])),
             TargetStatus::from($this->text($row['status'])), 'pbs' === $this->text($row['storage_type']),
-            $minimum, new AllowedNodes($nodeIds), $concurrency, $mapping);
+            $minimum, new AllowedNodes($nodeIds), $concurrency, $mapping, (new BackupDefaultsMapper())->fromRow($row));
     }
 
     public function findPolicy(PolicyId $id): ?BackupPolicy
     {
-        $row = $this->connection->fetchAssociative('SELECT * FROM backup_policies WHERE id = ?', [$id->binary()], [ParameterType::BINARY]);
+        $row = $this->connection->fetchAssociative('SELECT policy.*, target.default_backup_mode, target.default_compression, target.default_legacy_maxfiles, target.default_keep_all, target.default_keep_last, target.default_keep_hourly, target.default_keep_daily, target.default_keep_weekly, target.default_keep_monthly, target.default_keep_yearly FROM backup_policies policy LEFT JOIN backup_targets target ON target.id = policy.target_id WHERE policy.id = ?', [$id->binary()], [ParameterType::BINARY]);
         if (false === $row) {
             return null;
         }
@@ -98,6 +98,7 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
             $thresholds,
             null === $row['schedule'] ? null : Schedule::from($this->text($row['schedule'])),
             $this->storedFailureRecipients($row['failure_notification_recipients_json'] ?? null),
+            (new BackupDefaultsMapper())->fromRow($row),
         );
     }
 
@@ -170,7 +171,7 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
                 'pbs_datastore_id' => $this->payloadNullableBinary($command, 'pbsDatastoreId'),
                 'pbs_namespace_id' => $this->payloadNullableBinary($command, 'pbsNamespaceId'),
                 'created_at' => $now, 'updated_at' => $now, 'disabled_at' => $now,
-            ], $this->targetTypes());
+            ] + (new BackupDefaultsMapper())->payloadData($command->payload), $this->targetTypes());
             $this->replaceAllowedNodes($command, $this->payloadBinary($command, 'connectionId'), $this->payloadBinary($command, 'clusterId'));
             return new ConfigurationCommandResult(ConfigurationCommandStatus::Applied, 1);
         }
@@ -190,6 +191,18 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
                 || !hash_equals($this->binary($row['storage_id']), $this->payloadBinary($command, 'storageId'))) {
                 return ConfigurationCommandResult::blocked('immutable_context_mismatch');
             }
+            $defaultsData = [];
+            foreach (BackupDefaultsMapper::FIELDS as $field => $column) {
+                $defaultsData[$field] = array_key_exists($field, $command->payload) ? $command->payload[$field] : ($row[$column] ?? null);
+            }
+            $defaultsData = (new BackupDefaultsMapper())->payloadData($defaultsData);
+            $defaultsChanged = (new BackupDefaultsMapper())->fromRow($row) != (new BackupDefaultsMapper())->fromRow($defaultsData);
+            if ($defaultsChanged && false !== $this->connection->fetchOne(
+                "SELECT id FROM backup_policies WHERE target_id = ? AND status = 'enabled' LIMIT 1 FOR UPDATE",
+                [$command->subjectId], [ParameterType::BINARY],
+            )) {
+                return ConfigurationCommandResult::blocked('disable_target_policies_before_changing_defaults');
+            }
             $this->connection->update('backup_targets', [
                 'display_name' => $this->payloadString($command, 'displayName'),
                 'minimum_free_bytes' => $this->payloadNullableDecimal($command, 'minimumFreeBytes'),
@@ -198,7 +211,7 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
                 'pbs_datastore_id' => $this->payloadNullableBinary($command, 'pbsDatastoreId'),
                 'pbs_namespace_id' => $this->payloadNullableBinary($command, 'pbsNamespaceId'),
                 'revision' => $next, 'updated_at' => $this->now(),
-            ], ['id' => $command->subjectId], $this->targetUpdateTypes() + ['id' => ParameterType::BINARY]);
+            ] + $defaultsData, ['id' => $command->subjectId], $this->targetUpdateTypes() + ['id' => ParameterType::BINARY]);
             $this->replaceAllowedNodes($command, $this->binary($row['connection_id']), $this->binary($row['cluster_id']));
         } else {
             $enabled = ConfigurationCommandType::TargetEnable === $command->type;
@@ -245,6 +258,9 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
             $data = $this->policyData($command);
             $data['id'] = $command->subjectId;
             $blockers = $this->policyRetentionBlockers($data);
+            if ('enabled' === ($row['status'] ?? null)) {
+                array_push($blockers, ...$this->policyNotificationBlockers($data), ...$this->policyConfigurationBlockers($data));
+            }
             if ([] !== $blockers) {
                 return ConfigurationCommandResult::blocked(...$blockers);
             }
@@ -258,6 +274,7 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
             $enabled = ConfigurationCommandType::PolicyEnable === $command->type;
             if ($enabled) {
                 $blockers = $this->policyRetentionBlockers($row);
+                array_push($blockers, ...$this->policyNotificationBlockers($row), ...$this->policyConfigurationBlockers($row));
                 if ([] !== $blockers) {
                     return ConfigurationCommandResult::blocked(...$blockers);
                 }
@@ -268,6 +285,21 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
                 ['id' => $command->subjectId], ['id' => ParameterType::BINARY]);
         }
         return new ConfigurationCommandResult(ConfigurationCommandStatus::Applied, $next);
+    }
+
+    /** @param array<string, mixed> $row
+     *  @return list<string>
+     */
+    private function policyConfigurationBlockers(array $row): array
+    {
+        $target = $this->connection->fetchAssociative('SELECT * FROM backup_targets WHERE id = ? FOR UPDATE',
+            [$row['target_id'] ?? null], [ParameterType::BINARY]);
+        $defaults = (new BackupDefaultsMapper())->fromRow(false === $target ? [] : $target);
+        $blockers = [];
+        if (null === ($row['backup_mode'] ?? $defaults->mode)) $blockers[] = 'mode_unconfigured';
+        if (null === ($row['compression'] ?? $defaults->compression)) $blockers[] = 'compression_unconfigured';
+        if (null === ($this->retention($row) ?? $defaults->retention)) $blockers[] = 'retention_unconfigured';
+        return $blockers;
     }
 
     /** @param array<string, mixed> $policyData
@@ -285,7 +317,7 @@ final readonly class DbalConfigurationCommandRepository implements TargetCommand
         }
 
         $target = $this->connection->fetchAssociative(<<<'SQL'
-SELECT storage.storage_type,
+SELECT target.*, storage.storage_type,
        (SELECT capability.version_major
           FROM proxmox_capability_snapshots capability
          WHERE capability.connection_id = target.connection_id AND capability.product = 'pve'
@@ -319,7 +351,7 @@ SQL, [
             $blockers[] = 'retention_execution_forbidden_for_pbs_target';
         }
         $pveMajor = $target['pve_major'] ?? null;
-        $legacyRetentionConfigured = null !== ($policyData['legacy_maxfiles'] ?? null);
+        $legacyRetentionConfigured = null !== ($this->retention($policyData) ?? (new BackupDefaultsMapper())->fromRow($target)->retention)?->legacyMaxFiles;
         $policyId = $policyData['id'] ?? null;
         if ($includeExistingGuestOverrides && !$legacyRetentionConfigured && is_string($policyId) && 16 === strlen($policyId)) {
             $legacyRetentionConfigured = 1 === $this->integer($this->connection->fetchOne(
@@ -333,6 +365,18 @@ SQL, [
         }
 
         return $blockers;
+    }
+
+    /** @param array<string, mixed> $policyData
+     *  @return list<string>
+     */
+    private function policyNotificationBlockers(array $policyData): array
+    {
+        return [] === $this->storedFailureRecipients(
+            $policyData['failure_notification_recipients_json'] ?? null,
+        )->addresses
+            ? ['failure_notification_recipients_unconfigured']
+            : [];
     }
 
     private function selection(ConfigurationCommand $command): ConfigurationCommandResult

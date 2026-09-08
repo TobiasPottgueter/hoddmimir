@@ -33,10 +33,22 @@ final readonly class BackupWorkerRunner implements BackupWorkerRuntime
         private BackupRunIdentifierSource $runIds,
         private BackupNotificationDeliveryHook $notifications,
         private Clock $clock,
+        private \App\Application\Maintenance\MaintenanceAccess $maintenance = new \App\Application\Maintenance\UnrestrictedMaintenanceAccess(),
     ) {
     }
 
     public function runOnce(string $workerId): BackupWorkerTickStatus
+    {
+        $permit = $this->maintenance->acquire(\App\Application\Maintenance\MaintenanceActivity::MonitorBackups);
+        if (null === $permit) return BackupWorkerTickStatus::NoWork;
+        try {
+            return $this->tick($workerId);
+        } finally {
+            $permit->release();
+        }
+    }
+
+    private function tick(string $workerId): BackupWorkerTickStatus
     {
         if (16 !== \strlen($workerId)) throw new InvalidArgumentException('The backup worker identifier must contain 16 bytes.');
         try {

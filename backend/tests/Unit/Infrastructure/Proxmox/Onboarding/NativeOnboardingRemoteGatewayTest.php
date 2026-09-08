@@ -78,6 +78,7 @@ final class NativeOnboardingRemoteGatewayTest extends TestCase
             ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fvms%2F999999999'],
             ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fpool%2Fhoddmimir-propagation-probe'],
             ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fstorage%2Fhoddmimir-propagation-probe'],
+            ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fnodes%2Fhoddmimir-propagation-probe'],
             ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fvms%2F999999999'],
             ['GET', 'https://proxmox.example.test:8006/api2/json/access/permissions?path=%2Fstorage%2Fhoddmimir-propagation-probe'],
         ], array_map(static fn (array $request): array => [$request[0], $request[1]], $requests));

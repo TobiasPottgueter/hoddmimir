@@ -204,6 +204,26 @@ final class MonitoringBranchCoverageTest extends TestCase
         }
     }
 
+    public function testInspectionsMustReferToUniqueObservedTasks(): void
+    {
+        $task = $this->pbsTask();
+        $inspection = new \App\Application\Proxmox\Pbs\PbsTaskInspection($task->upid, 'running', null, null, [], false, null, null);
+        self::assertSame([$inspection], $this->inspectionCommit([$task], [$inspection])->pbsInspections);
+        $this->assertInvalid(fn () => $this->inspectionCommit([], [$inspection]));
+        $this->assertInvalid(fn () => $this->inspectionCommit([$task], [$inspection, $inspection]));
+    }
+
+    /**
+     * @param list<PbsTaskObservation> $tasks
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $inspections
+     */
+    private function inspectionCommit(array $tasks, array $inspections): MonitoringCommit
+    {
+        return $this->rawCommit(ProxmoxProduct::Pbs, InstallationBinding::pbsLegacyEndpoint($this->endpoint()),
+            MonitoringRunKind::ObservedTasks, 1, [$this->scope(MonitoringScopeType::PbsTasksRunning)],
+            pbsTasks: $tasks, inspections: $inspections);
+    }
+
     public function testCommitRejectsEveryHeaderAndPayloadMismatch(): void
     {
         $pveScope = $this->scope(MonitoringScopeType::PveBackupJobs);
@@ -620,6 +640,7 @@ final class MonitoringBranchCoverageTest extends TestCase
      * @param list<PveBackupTask> $pveTasks
      * @param list<PbsJobObservation> $pbsJobs
      * @param list<PbsTaskObservation> $pbsTasks
+     * @param list<\App\Application\Proxmox\Pbs\PbsTaskInspection> $inspections
      */
     private function rawCommit(
         ProxmoxProduct $product,
@@ -631,6 +652,7 @@ final class MonitoringBranchCoverageTest extends TestCase
         array $pveTasks = [],
         array $pbsJobs = [],
         array $pbsTasks = [],
+        array $inspections = [],
     ): MonitoringCommit {
         return new MonitoringCommit(
             $this->id('run'),
@@ -647,6 +669,7 @@ final class MonitoringBranchCoverageTest extends TestCase
             $pbsJobs,
             $pbsTasks,
             $this->now(),
+            $inspections,
         );
     }
 

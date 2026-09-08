@@ -243,6 +243,10 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 "re2c",
                 "linux-headers",
                 "su-exec",
+                "libcrypto3",
+                "libssl3",
+                "openssl",
+                "sqlite-libs",
             },
             "docker/web/Dockerfile": {
                 "c-ares",
@@ -261,6 +265,9 @@ class SupplyChainGateContractTest(unittest.TestCase):
                 "pkgconf",
                 "re2c",
                 "su-exec",
+                "libcrypto3",
+                "libssl3",
+                "openssl",
             },
         }
 
@@ -286,10 +293,10 @@ class SupplyChainGateContractTest(unittest.TestCase):
         php = read("docker/php/Dockerfile")
         web = read("docker/web/Dockerfile")
 
-        self.assertIn("ARG CURL_VERSION=8.20.0-r0", php)
-        self.assertIn("ARG LIBCURL_VERSION=8.20.0-r0", php)
-        self.assertIn("ARG CURL_VERSION=8.21.0-r0", web)
-        self.assertIn("ARG LIBCURL_VERSION=8.21.0-r0", web)
+        self.assertIn("ARG CURL_VERSION=8.22.0-r0", php)
+        self.assertIn("ARG LIBCURL_VERSION=8.22.0-r0", php)
+        self.assertIn("ARG CURL_VERSION=8.22.0-r0", web)
+        self.assertIn("ARG LIBCURL_VERSION=8.22.0-r0", web)
 
     def test_production_worker_and_web_exclude_tests_dev_config_and_composer(self) -> None:
         php = read("docker/php/Dockerfile")

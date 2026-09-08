@@ -186,10 +186,22 @@ final class OnboardingEvidenceVerifierTest extends TestCase
         yield 'permission not propagated' => [$test->command(OnboardingProduct::Pve), $test->replacePermission($pve, OnboardingCredentialKind::Scan, '/pool', 'Pool.Audit', new OnboardingPermission('/pool', 'Pool.Audit', true, false)), OnboardingIssueCode::PermissionNotPropagated];
         yield 'NoAccess overrides grant' => [$test->command(OnboardingProduct::Pve), $test->appendPermission($pve, OnboardingCredentialKind::Scan, new OnboardingPermission('/pool', 'Pool.Audit', false, false)), OnboardingIssueCode::NoAccessOverride];
         yield 'scanner has write permission' => [$test->command(OnboardingProduct::Pve), $test->appendPermission($pve, OnboardingCredentialKind::Scan, new OnboardingPermission('/vms', 'VM.Backup', true, true)), OnboardingIssueCode::ForbiddenPermissionPresent];
+        yield 'backup cannot audit foreign tasks' => [$test->command(OnboardingProduct::Pve), $test->replacePermission($pve, OnboardingCredentialKind::Backup, '/nodes', 'Sys.Audit', null), OnboardingIssueCode::RequiredPermissionMissing];
+        yield 'backup audit must propagate' => [$test->command(OnboardingProduct::Pve), $test->replacePermission($pve, OnboardingCredentialKind::Backup, '/nodes', 'Sys.Audit', new OnboardingPermission('/nodes', 'Sys.Audit', true, false)), OnboardingIssueCode::PermissionNotPropagated];
         yield 'backup has third permission' => [$test->command(OnboardingProduct::Pve), $test->appendPermission($pve, OnboardingCredentialKind::Backup, new OnboardingPermission('/vms', 'VM.PowerMgmt', true, true)), OnboardingIssueCode::ForbiddenPermissionPresent];
         yield 'PBS tape audit forbidden' => [$test->command(OnboardingProduct::Pbs), $test->appendPermission($test->pbsEvidence(4), OnboardingCredentialKind::Scan, new OnboardingPermission('/tape', 'Tape.Audit', true, true)), OnboardingIssueCode::ForbiddenPermissionPresent];
         yield 'unsupported PBS major' => [$test->command(OnboardingProduct::Pbs), $test->pbsEvidence(2), OnboardingIssueCode::UnsupportedVersion];
         yield 'future unsupported PBS major' => [$test->command(OnboardingProduct::Pbs), $test->pbsEvidence(5), OnboardingIssueCode::UnsupportedVersion];
+    }
+
+    public function testExistingRootScannerRightsOnBackupTokenAreAccepted(): void
+    {
+        $evidence = $this->pveEvidence(8);
+        foreach (['Sys.Audit', 'VM.Audit', 'Pool.Audit', 'Datastore.Audit'] as $privilege) {
+            $evidence = $this->appendPermission($evidence, OnboardingCredentialKind::Backup,
+                new OnboardingPermission('/', $privilege, true, true));
+        }
+        self::assertTrue((new OnboardingEvidenceVerifier())->verify($this->command(OnboardingProduct::Pve), $evidence)->passed());
     }
 
     private function command(OnboardingProduct $product, ?string $scanId = null, ?string $backupId = null): OnboardingActivationCommand
@@ -222,6 +234,7 @@ final class OnboardingEvidenceVerifierTest extends TestCase
             [['/', 'Sys.Audit'], ['/nodes', 'Sys.Audit'], ['/vms', 'VM.Audit'], ['/pool', 'Pool.Audit'], ['/storage', 'Datastore.Audit']],
         );
         $backupPermissions = [
+            new OnboardingPermission('/nodes', 'Sys.Audit', true, true),
             new OnboardingPermission('/vms', 'VM.Backup', true, true),
             new OnboardingPermission('/vms', 'Datastore.AllocateSpace', true, true),
             new OnboardingPermission('/storage', 'VM.Backup', true, true),

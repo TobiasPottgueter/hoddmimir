@@ -5,6 +5,71 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type PbsObservedTask = {
+  id: string;
+  connectionId: string;
+  workerType: string;
+  workerId: string | null;
+  lifecycle: "running" | "stopped" | "unknown";
+  remoteStatus: string | null;
+  startedAt: string | null;
+  lastSeenAt: string | null;
+  inspectedAt: string | null;
+};
+
+export type PbsObservedTaskPage = {
+  items: Array<PbsObservedTask>;
+  total: number;
+};
+
+export type PbsObservedTaskDetail = {
+  id: string;
+  connectionId: string;
+  workerType: string;
+  workerId: string | null;
+  lifecycle: "running" | "stopped" | "unknown";
+  remoteStatus: string | null;
+  startedAt: string | null;
+  lastSeenAt: string | null;
+  inspectedAt: string | null;
+  upid: string;
+  inspection: {
+    status: "running" | "stopped" | null;
+    exitStatus: string | null;
+    endTime: number | null;
+    lines: Array<{
+      number: number;
+      text: string;
+    }>;
+    truncated: boolean;
+    statusFailure: string | null;
+    logFailure: string | null;
+  } | null;
+};
+
+export type QueueMetricPoint = {
+  observedAt: string;
+  samples: number;
+  waitingAverage: number;
+  waitingPeak: number;
+  activePeak: number;
+  unresolvedPeak: number;
+  oldestWaitSeconds: number;
+};
+
+export type QueueMetricHistory = {
+  bucketSeconds: 120 | 900 | 3600;
+  retentionDays: 30;
+  items: Array<QueueMetricPoint>;
+};
+
+export type MaintenanceError = {
+  error: {
+    code: "maintenance";
+    message: "Hoddmímir wird gewartet.";
+  };
+};
+
 export type BackupRequestState =
   | "pending"
   | "retry_wait"
@@ -160,7 +225,8 @@ export type BackupNotification = {
   id: CanonicalUuid;
   kind: "failure" | "attention_required" | "recovery";
   state: "pending" | "claimed" | "sent";
-  attempt: number;
+  attempt: number | null;
+  checkNumber: number;
   deliveryAttempts: number;
   guestName: string;
   guestType: "qemu" | "lxc";
@@ -594,6 +660,16 @@ export type UserRolesCommandRequest = {
 };
 
 export type TargetCommandRequest = {
+  defaultBackupMode?: "snapshot" | "suspend" | "stop" | null;
+  defaultCompression?: "0" | "gzip" | "lzo" | "zstd" | null;
+  defaultLegacyMaxfiles?: number | null;
+  defaultKeepAll?: boolean | null;
+  defaultKeepLast?: number | null;
+  defaultKeepHourly?: number | null;
+  defaultKeepDaily?: number | null;
+  defaultKeepWeekly?: number | null;
+  defaultKeepMonthly?: number | null;
+  defaultKeepYearly?: number | null;
   expectedRevision: number;
   displayName: string;
   connectionId: CanonicalUuid;
@@ -629,6 +705,9 @@ export type PolicyCommandRequest = {
   keepMonthly: number | null;
   keepYearly: number | null;
   retentionExecutionEnabled: boolean;
+  /**
+   * Drafts may be saved without recipients, but at least one recipient is required before a policy can be enabled or execute a backup.
+   */
   failureNotificationRecipients: Array<string>;
 };
 
@@ -1050,6 +1129,16 @@ export type ConfiguredBackupTargetAllowedNode = {
 };
 
 export type ConfiguredBackupTarget = {
+  defaultBackupMode?: "snapshot" | "suspend" | "stop" | null;
+  defaultCompression?: "0" | "gzip" | "lzo" | "zstd" | null;
+  defaultLegacyMaxfiles?: number | null;
+  defaultKeepAll?: boolean | null;
+  defaultKeepLast?: number | null;
+  defaultKeepHourly?: number | null;
+  defaultKeepDaily?: number | null;
+  defaultKeepWeekly?: number | null;
+  defaultKeepMonthly?: number | null;
+  defaultKeepYearly?: number | null;
   id: CanonicalUuid;
   revision: number;
   enabled: boolean;
@@ -1100,6 +1189,7 @@ export type PolicyBlockerCode =
   | "priority_unconfigured"
   | "thresholds_unconfigured"
   | "schedule_unconfigured"
+  | "failure_notification_recipients_unconfigured"
   | "retention_incompatible";
 
 export type PolicyRetention = {
@@ -1114,6 +1204,9 @@ export type PolicyRetention = {
 };
 
 export type ConfiguredPolicy = {
+  effectiveMode?: string | null;
+  effectiveCompression?: string | null;
+  effectiveRetention?: PolicyRetention | null;
   id: CanonicalUuid;
   revision: number;
   status: PolicyStatus;
@@ -1178,6 +1271,7 @@ export type ShadowGateCode =
   | "node_enabled"
   | "guest_enabled"
   | "policy_enabled"
+  | "policy_failure_notification_configured"
   | "policy_retention_compatible"
   | "target_enabled"
   | "explicit_exclusion_absent"
@@ -1227,6 +1321,7 @@ export type ShadowGateDetailCode =
   | "concurrency_limit_reached"
   | "invalid_mapping"
   | "incompatible"
+  | "unconfigured"
   | "active_request_exists"
   | "higher_ranked_candidate";
 
@@ -1657,12 +1752,152 @@ export type AuditEventType2 = AuditEventType;
 
 export type AuditOutcome = "succeeded" | "denied";
 
+export type ListPbsTasksData = {
+  body?: never;
+  path?: never;
+  query?: {
+    connectionId?: string;
+    offset?: number;
+  };
+  url: "/api/v1/operations/pbs-tasks";
+};
+
+export type ListPbsTasksErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError | MaintenanceError;
+};
+
+export type ListPbsTasksError = ListPbsTasksErrors[keyof ListPbsTasksErrors];
+
+export type ListPbsTasksResponses = {
+  /**
+   * Persisted collector observations; inspection freshness and truncation are explicit.
+   */
+  200: PbsObservedTaskPage;
+};
+
+export type ListPbsTasksResponse =
+  ListPbsTasksResponses[keyof ListPbsTasksResponses];
+
+export type GetPbsTaskData = {
+  body?: never;
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/api/v1/operations/pbs-tasks/{id}";
+};
+
+export type GetPbsTaskErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * PBS task not found.
+   */
+  404: {
+    error: {
+      code: "pbs_task_not_found";
+    };
+  };
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError | MaintenanceError;
+};
+
+export type GetPbsTaskError = GetPbsTaskErrors[keyof GetPbsTaskErrors];
+
+export type GetPbsTaskResponses = {
+  /**
+   * Persisted collector observations; inspection freshness and truncation are explicit.
+   */
+  200: PbsObservedTaskDetail;
+};
+
+export type GetPbsTaskResponse = GetPbsTaskResponses[keyof GetPbsTaskResponses];
+
+export type GetQueueHistoryData = {
+  body?: never;
+  path?: never;
+  query?: {
+    hours?: 24 | 168 | 720;
+    targetId?: string;
+  };
+  url: "/api/v1/operations/queue/history";
+};
+
+export type GetQueueHistoryErrors = {
+  /**
+   * Unknown, malformed, incompatible, or out-of-bounds query.
+   */
+  400: ApiError;
+  /**
+   * A valid local web session is required.
+   */
+  401: AuthError;
+  /**
+   * Permission or CSRF validation failed.
+   */
+  403: AuthError;
+  /**
+   * The read-only projection is temporarily unavailable without exposing database or runtime details.
+   */
+  503: ReadModelUnavailableError | MaintenanceError;
+};
+
+export type GetQueueHistoryError =
+  GetQueueHistoryErrors[keyof GetQueueHistoryErrors];
+
+export type GetQueueHistoryResponses = {
+  /**
+   * Priority-ordered backup request queue.
+   */
+  200: QueueMetricHistory;
+};
+
+export type GetQueueHistoryResponse =
+  GetQueueHistoryResponses[keyof GetQueueHistoryResponses];
+
 export type GetInventoryOverviewData = {
   body?: never;
   path?: never;
   query?: never;
   url: "/api/v1/inventory/overview";
 };
+
+export type GetInventoryOverviewErrors = {
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
+};
+
+export type GetInventoryOverviewError =
+  GetInventoryOverviewErrors[keyof GetInventoryOverviewErrors];
 
 export type GetInventoryOverviewResponses = {
   /**
@@ -1697,6 +1932,10 @@ export type ListInventoryResourcesErrors = {
    * Unknown, malformed, incompatible, or out-of-bounds query.
    */
   400: ApiError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type ListInventoryResourcesError =
@@ -1732,7 +1971,7 @@ export type ListBackupTargetCandidatesErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupTargetCandidatesError =
@@ -1779,7 +2018,7 @@ export type ListExecutorPermissionEvidenceErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListExecutorPermissionEvidenceError =
@@ -1824,7 +2063,7 @@ export type UpdateBackupTargetErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type UpdateBackupTargetError =
@@ -1873,7 +2112,7 @@ export type EnableBackupTargetErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type EnableBackupTargetError =
@@ -1918,7 +2157,7 @@ export type DisableBackupTargetErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisableBackupTargetError =
@@ -1954,7 +2193,7 @@ export type ListBackupTargetsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupTargetsError =
@@ -2001,7 +2240,7 @@ export type CreateBackupTargetErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type CreateBackupTargetError =
@@ -2029,6 +2268,10 @@ export type LoginErrors = {
    * A valid local web session is required.
    */
   401: AuthError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type LoginError = LoginErrors[keyof LoginErrors];
@@ -2058,6 +2301,10 @@ export type GetAuthSessionErrors = {
    * Permission or CSRF validation failed.
    */
   403: AuthError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type GetAuthSessionError =
@@ -2092,6 +2339,10 @@ export type LogoutErrors = {
    * Permission or CSRF validation failed.
    */
   403: AuthError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type LogoutError = LogoutErrors[keyof LogoutErrors];
@@ -2125,7 +2376,7 @@ export type ListPoliciesErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListPoliciesError = ListPoliciesErrors[keyof ListPoliciesErrors];
@@ -2171,7 +2422,7 @@ export type CreatePolicyErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type CreatePolicyError = CreatePolicyErrors[keyof CreatePolicyErrors];
@@ -2215,7 +2466,7 @@ export type UpdatePolicyErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type UpdatePolicyError = UpdatePolicyErrors[keyof UpdatePolicyErrors];
@@ -2263,7 +2514,7 @@ export type EnablePolicyErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type EnablePolicyError = EnablePolicyErrors[keyof EnablePolicyErrors];
@@ -2307,7 +2558,7 @@ export type DisablePolicyErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisablePolicyError = DisablePolicyErrors[keyof DisablePolicyErrors];
@@ -2351,7 +2602,7 @@ export type DisablePolicySelectionErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisablePolicySelectionError =
@@ -2396,7 +2647,7 @@ export type UpsertPolicyGuestOverridesErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type UpsertPolicyGuestOverridesError =
@@ -2441,7 +2692,7 @@ export type DisablePolicyGuestOverridesErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisablePolicyGuestOverridesError =
@@ -2477,7 +2728,7 @@ export type ListPolicySelectionErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListPolicySelectionError =
@@ -2522,7 +2773,7 @@ export type UpsertPolicySelectionErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type UpsertPolicySelectionError =
@@ -2556,7 +2807,7 @@ export type ListShadowEvaluationsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListShadowEvaluationsError =
@@ -2595,7 +2846,7 @@ export type ListShadowDecisionsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListShadowDecisionsError =
@@ -2632,7 +2883,7 @@ export type GetShadowDecisionErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetShadowDecisionError =
@@ -2667,7 +2918,7 @@ export type GetOperationsDashboardErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetOperationsDashboardError =
@@ -2710,7 +2961,7 @@ export type ListBackupRequestsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupRequestsError =
@@ -2757,7 +3008,7 @@ export type RequestManualBackupErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type RequestManualBackupError =
@@ -2806,7 +3057,7 @@ export type CancelBackupRequestErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type CancelBackupRequestError =
@@ -2842,7 +3093,7 @@ export type ListBackupRequestEventsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupRequestEventsError =
@@ -2877,7 +3128,7 @@ export type ListBackupRunsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupRunsError =
@@ -2914,7 +3165,7 @@ export type GetBackupRunErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetBackupRunError = GetBackupRunErrors[keyof GetBackupRunErrors];
@@ -2949,7 +3200,7 @@ export type ListBackupRunEventsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupRunEventsError =
@@ -2985,7 +3236,7 @@ export type ListBackupRunLogsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupRunLogsError =
@@ -3020,7 +3271,7 @@ export type ListBackupNotificationsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListBackupNotificationsError =
@@ -3047,7 +3298,7 @@ export type GetBackupNotificationHealthErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetBackupNotificationHealthError =
@@ -3069,6 +3320,16 @@ export type GetCollectorStatusData = {
   query?: never;
   url: "/api/v1/collector/status";
 };
+
+export type GetCollectorStatusErrors = {
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
+};
+
+export type GetCollectorStatusError =
+  GetCollectorStatusErrors[keyof GetCollectorStatusErrors];
 
 export type GetCollectorStatusResponses = {
   /**
@@ -3095,6 +3356,10 @@ export type ListCollectorRunsErrors = {
    * Unknown, malformed, incompatible, or out-of-bounds query.
    */
   400: ApiError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type ListCollectorRunsError =
@@ -3126,6 +3391,10 @@ export type ListCollectorScopesErrors = {
    * Unknown, malformed, incompatible, or out-of-bounds query.
    */
   400: ApiError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type ListCollectorScopesError =
@@ -3157,6 +3426,10 @@ export type GetAdministrationHealthErrors = {
    * Permission or CSRF validation failed.
    */
   403: AuthError;
+  /**
+   * Persistent deployment maintenance temporarily blocks application requests; retry after the Retry-After interval.
+   */
+  503: MaintenanceError;
 };
 
 export type GetAdministrationHealthError =
@@ -3196,7 +3469,7 @@ export type ListAdministrationUsersErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListAdministrationUsersError =
@@ -3243,7 +3516,7 @@ export type CreateAdministrationUserErrors = {
   /**
    * The security administration store is temporarily unavailable.
    */
-  503: SecurityCommandUnavailableError;
+  503: SecurityCommandUnavailableError | MaintenanceError;
 };
 
 export type CreateAdministrationUserError =
@@ -3292,7 +3565,7 @@ export type UpdateAdministrationUserErrors = {
   /**
    * The security administration store is temporarily unavailable.
    */
-  503: SecurityCommandUnavailableError;
+  503: SecurityCommandUnavailableError | MaintenanceError;
 };
 
 export type UpdateAdministrationUserError =
@@ -3341,7 +3614,7 @@ export type DisableAdministrationUserErrors = {
   /**
    * The security administration store is temporarily unavailable.
    */
-  503: SecurityCommandUnavailableError;
+  503: SecurityCommandUnavailableError | MaintenanceError;
 };
 
 export type DisableAdministrationUserError =
@@ -3390,7 +3663,7 @@ export type ReplaceAdministrationUserRolesErrors = {
   /**
    * The security administration store is temporarily unavailable.
    */
-  503: SecurityCommandUnavailableError;
+  503: SecurityCommandUnavailableError | MaintenanceError;
 };
 
 export type ReplaceAdministrationUserRolesError =
@@ -3428,7 +3701,7 @@ export type ListAdministrationRolesErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListAdministrationRolesError =
@@ -3469,7 +3742,7 @@ export type ListAdministrationAuditEventsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListAdministrationAuditEventsError =
@@ -3510,7 +3783,7 @@ export type GetAdministrationAuditEventErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetAdministrationAuditEventError =
@@ -3548,7 +3821,7 @@ export type ListConnectionsErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type ListConnectionsError =
@@ -3585,7 +3858,7 @@ export type GetConnectionErrors = {
   /**
    * The read-only projection is temporarily unavailable without exposing database or runtime details.
    */
-  503: ReadModelUnavailableError;
+  503: ReadModelUnavailableError | MaintenanceError;
 };
 
 export type GetConnectionError = GetConnectionErrors[keyof GetConnectionErrors];
@@ -3629,7 +3902,7 @@ export type UpdateConnectionErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type UpdateConnectionError =
@@ -3674,7 +3947,7 @@ export type DisableConnectionErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisableConnectionError =
@@ -3724,7 +3997,7 @@ export type DisableConnectionEndpointErrors = {
   /**
    * The configuration command store is temporarily unavailable.
    */
-  503: ConfigurationUnavailableError;
+  503: ConfigurationUnavailableError | MaintenanceError;
 };
 
 export type DisableConnectionEndpointError =
@@ -3761,7 +4034,7 @@ export type GetConnectionOnboardingGuidanceErrors = {
   /**
    * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
    */
-  503: OnboardingUnavailableError;
+  503: OnboardingUnavailableError | MaintenanceError;
 };
 
 export type GetConnectionOnboardingGuidanceError =
@@ -3808,7 +4081,7 @@ export type ActivateOnboardedConnectionErrors = {
   /**
    * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
    */
-  503: OnboardingUnavailableError;
+  503: OnboardingUnavailableError | MaintenanceError;
 };
 
 export type ActivateOnboardedConnectionError =
@@ -3857,7 +4130,7 @@ export type RotateOnboardedConnectionCredentialsErrors = {
   /**
    * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
    */
-  503: OnboardingUnavailableError;
+  503: OnboardingUnavailableError | MaintenanceError;
 };
 
 export type RotateOnboardedConnectionCredentialsError =
@@ -3906,7 +4179,7 @@ export type AddVerifiedConnectionEndpointErrors = {
   /**
    * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
    */
-  503: OnboardingUnavailableError;
+  503: OnboardingUnavailableError | MaintenanceError;
 };
 
 export type AddVerifiedConnectionEndpointError =
@@ -3956,7 +4229,7 @@ export type UpdateVerifiedConnectionEndpointErrors = {
   /**
    * The read-only onboarding verification or atomic local persistence is temporarily unavailable.
    */
-  503: OnboardingUnavailableError;
+  503: OnboardingUnavailableError | MaintenanceError;
 };
 
 export type UpdateVerifiedConnectionEndpointError =

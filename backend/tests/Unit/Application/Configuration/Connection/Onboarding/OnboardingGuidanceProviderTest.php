@@ -15,7 +15,7 @@ final class OnboardingGuidanceProviderTest extends TestCase
         $value = (new OnboardingGuidanceProvider())->guidance(OnboardingProduct::Pve)->toArray();
 
         self::assertSame('pve', $value['product']);
-        self::assertCount(15, $value['commands']);
+        self::assertCount(16, $value['commands']);
         self::assertNotEmpty($value['warnings']);
         self::assertSame('pve-read-users', $value['commands'][0]['id']);
         self::assertSame('pve-token-backup-acl', $value['commands'][14]['id']);
@@ -24,6 +24,8 @@ final class OnboardingGuidanceProviderTest extends TestCase
         self::assertStringContainsString('Datastore.AllocateSpace VM.Backup', $value['commands'][8]['command']);
         self::assertStringContainsString('--privsep 1', $value['commands'][11]['command']);
         self::assertStringContainsString('--propagate 1', $value['commands'][14]['command']);
+        self::assertStringContainsString('acl modify /nodes', $value['commands'][15]['command']);
+        self::assertStringContainsString('--roles HoddmimirScan', $value['commands'][15]['command']);
     }
 
     public function testPbsGuidanceUsesOnlyBuiltInRolesForBothUserAndToken(): void

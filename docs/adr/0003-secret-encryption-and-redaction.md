@@ -1,5 +1,10 @@
 # ADR 0003: Secret encryption and structured redaction
 
+## Ergänzung vom 7. September 2026
+
+[ADR 0006](0006-maintenance-upgrade-database-restore.md) ergänzt den implementierten, noch live abzunehmenden DB-Restorepfad mit passendem gesichertem Keyring. Die unten beschriebene additive Schlüsselunion bleibt der Vertrag des bestehenden Image-Rollbacks; sie ist kein Nachweis des neuen Restoreverfahrens.
+
+
 - Status: Accepted
 - Date: 2026-07-10
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Domain\Policy;
 
+use App\Domain\Policy\BackupDefaults;
 use App\Domain\Policy\BackupMode;
 use App\Domain\Policy\BackupPolicy;
 use App\Domain\Policy\Compression;
@@ -47,6 +48,7 @@ final class BackupPolicyTest extends TestCase
             PolicyActivationBlocker::PriorityUnconfigured,
             PolicyActivationBlocker::ThresholdsUnconfigured,
             PolicyActivationBlocker::ScheduleUnconfigured,
+            PolicyActivationBlocker::FailureNotificationRecipientsUnconfigured,
             PolicyActivationBlocker::UnsupportedPveMajor,
         ];
         self::assertSame($expected, $draft->activationBlockers(6));
@@ -70,6 +72,28 @@ final class BackupPolicyTest extends TestCase
 
         self::assertSame(
             [PolicyActivationBlocker::RetentionIncompatible],
+            $draft->activationBlockers(9),
+        );
+        $this->expectException(PolicyActivationFailed::class);
+        $draft->activate(9);
+    }
+
+    public function testActivationRequiresAtLeastOnePveFailureMailRecipient(): void
+    {
+        $draft = BackupPolicy::draft(
+            self::policyId(),
+            new PolicyRevision(1),
+            new BackupTargetId(str_repeat("\x02", 16)),
+            BackupMode::Snapshot,
+            Compression::Zstd,
+            self::pruneRetention(),
+            new PolicyPriority(500),
+            new PolicyThresholds(3600, '1048576', 300),
+            Schedule::CollectorCycle,
+        );
+
+        self::assertSame(
+            [PolicyActivationBlocker::FailureNotificationRecipientsUnconfigured],
             $draft->activationBlockers(9),
         );
         $this->expectException(PolicyActivationFailed::class);
@@ -216,6 +240,52 @@ final class BackupPolicyTest extends TestCase
             false,
             true,
         );
+    }
+
+    public function testStorageDefaultsFillOnlyMissingPolicyValuesAndSurviveTransitions(): void
+    {
+        $defaults = new BackupDefaults(BackupMode::Stop, Compression::Gzip, self::pruneRetention());
+        $policy = BackupPolicy::draft(
+            self::policyId(), new PolicyRevision(1), new BackupTargetId(str_repeat("\x02", 16)),
+            null, null, null, new PolicyPriority(500), new PolicyThresholds(3600, null, null),
+            Schedule::CollectorCycle, new FailureNotificationRecipients(['alerts@example.test']), $defaults,
+        );
+        self::assertNull($policy->mode);
+        self::assertNull($policy->compression);
+        self::assertNull($policy->retention);
+        self::assertSame([], $policy->configurationBlockers());
+        $enabled = $policy->activate(9);
+        self::assertSame($defaults, $enabled->targetDefaults);
+        self::assertSame($defaults, $enabled->disable()->targetDefaults);
+        $resolved = (new PolicyResolver())->resolve($enabled, 9, null, null, null, true, false);
+        self::assertSame(BackupMode::Stop, $resolved->mode);
+        self::assertSame(Compression::Gzip, $resolved->compression);
+        self::assertSame($defaults->retention, $resolved->desiredRetention);
+        self::assertNull($resolved->approvedDeletionRetention);
+        $guest = (new PolicyResolver())->resolve($enabled, 9, BackupMode::Snapshot, Compression::Zstd,
+            RetentionPolicy::prune(true, null, null, null, null, null, null), false, true);
+        self::assertSame(BackupMode::Snapshot, $guest->mode);
+        self::assertSame(Compression::Zstd, $guest->compression);
+        self::assertTrue($guest->desiredRetention->keepAll);
+
+        $override = BackupPolicy::rehydrate(self::policyId(), new PolicyRevision(2), PolicyStatus::Enabled,
+            $policy->targetId, BackupMode::Suspend, Compression::Zstd, RetentionPolicy::legacyMaxFiles(7),
+            $policy->priority, $policy->thresholds, $policy->schedule, $policy->failureNotificationRecipients, $defaults);
+        $resolvedOverride = (new PolicyResolver())->resolve($override, 8, null, null, null, false, true);
+        self::assertSame(BackupMode::Suspend, $resolvedOverride->mode);
+        self::assertSame(Compression::Zstd, $resolvedOverride->compression);
+        self::assertSame(7, $resolvedOverride->desiredRetention->legacyMaxFiles);
+    }
+
+    public function testInheritedLegacyRetentionStillBlocksPveNine(): void
+    {
+        $complete = self::completeDraft(self::pruneRetention());
+        $policy = BackupPolicy::rehydrate($complete->id, $complete->revision, PolicyStatus::Draft,
+            $complete->targetId, null, null, null, $complete->priority, $complete->thresholds,
+            $complete->schedule, $complete->failureNotificationRecipients,
+            new BackupDefaults(BackupMode::Snapshot, Compression::Zstd, RetentionPolicy::legacyMaxFiles(3)));
+        self::assertSame([], $policy->activationBlockers(8));
+        self::assertSame([PolicyActivationBlocker::RetentionIncompatible], $policy->activationBlockers(9));
     }
 
     private static function completeDraft(RetentionPolicy $retention): BackupPolicy

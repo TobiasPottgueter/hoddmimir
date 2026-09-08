@@ -90,6 +90,7 @@ final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBa
         $sql = <<<'SQL'
             SELECT target.id, target.connection_id, target.cluster_id, target.storage_id,
                    target.display_name, target.status, target.revision,
+                   target.default_backup_mode, target.default_compression, target.default_legacy_maxfiles, target.default_keep_all, target.default_keep_last, target.default_keep_hourly, target.default_keep_daily, target.default_keep_weekly, target.default_keep_monthly, target.default_keep_yearly,
                    target.minimum_free_bytes, target.fixed_parallel_limit,
                    target.pbs_connection_id, target.pbs_datastore_id, target.pbs_namespace_id,
                    target.disabled_at,
@@ -180,6 +181,7 @@ final readonly class DbalConfiguredBackupTargetReadModel implements ConfiguredBa
                 $this->nullableDate($row['disabled_at'] ?? null),
                 $allowed,
                 $assessment->blockers,
+                (new BackupDefaultsMapper())->fromRow($row),
             );
         }, $rows);
 

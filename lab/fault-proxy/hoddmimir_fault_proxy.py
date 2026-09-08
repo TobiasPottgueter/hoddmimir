@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
 ACTIVATION_ACK = "INJECT_AFTER_VERIFIED_UPSTREAM_RESPONSE"
+PRE_UPSTREAM_ACTIVATION_ACK = "DROP_VZDUMP_BEFORE_UPSTREAM"
 HOLD_ACTIVATION_ACK = "HOLD_AFTER_VERIFIED_UPSTREAM_RESPONSE"
 HOLD_RELEASE_DOCUMENT = b"RELEASE\n"
 HOLD_REQUIRED_UID = 0
@@ -205,14 +206,18 @@ class ProxyConfiguration:
     hold_routes: tuple[FaultRoute, ...] = ()
     hold_max_seconds: float = 30.0
     hold_control_directory: Path | None = None
+    fault_timing: str = "after-upstream"
 
     @classmethod
     def from_arguments(cls, arguments: argparse.Namespace) -> "ProxyConfiguration":
-        if arguments.activation_ack != ACTIVATION_ACK:
+        expected_ack = PRE_UPSTREAM_ACTIVATION_ACK if arguments.fault_timing == "before-upstream" else ACTIVATION_ACK
+        if arguments.activation_ack != expected_ack:
             raise ConfigurationError("The explicit lab fault-injection acknowledgement is missing.")
         if not arguments.fault_route:
             raise ConfigurationError("Select at least one exact fault route.")
         routes = tuple(dict.fromkeys(FaultRoute(value) for value in arguments.fault_route))
+        if arguments.fault_timing == "before-upstream" and routes != (FaultRoute.POST_VZDUMP,):
+            raise ConfigurationError("Pre-upstream drops permit only the exact VZDump POST route.")
         if arguments.fault_count < 1 or arguments.fault_count > 100:
             raise ConfigurationError("The per-route fault count must be between 1 and 100.")
         if arguments.listen_port < 1 or arguments.listen_port > 65535:
@@ -236,6 +241,8 @@ class ProxyConfiguration:
             raise ConfigurationError("The upstream timeout must be between 0 and 300 seconds.")
 
         hold_routes = tuple(dict.fromkeys(FaultRoute(value) for value in (arguments.hold_route or ())))
+        if arguments.fault_timing == "before-upstream" and hold_routes:
+            raise ConfigurationError("Pre-upstream drops cannot be combined with response holds.")
         hold_directory = Path(arguments.hold_control_directory) if arguments.hold_control_directory else None
         if hold_routes:
             if len(hold_routes) != 1:
@@ -292,6 +299,7 @@ class ProxyConfiguration:
             hold_routes=hold_routes,
             hold_max_seconds=arguments.hold_max_seconds,
             hold_control_directory=hold_directory,
+            fault_timing=arguments.fault_timing,
         )
 
 
@@ -649,6 +657,14 @@ class FaultProxyHandler(http.server.BaseHTTPRequestHandler):
         body = self._read_request_body()
         if body is None:
             return
+        if self.runtime.configuration.fault_timing == "before-upstream" and self.runtime.fault_plan.claim(route):
+            try:
+                self.runtime.counters.record_many(route, ("faultsInjected", "fault"))
+            except MetricsError:
+                pass
+            finally:
+                self._abort_client_connection()
+            return
         upstream = self.runtime.configuration.upstream
         connection = http.client.HTTPSConnection(
             upstream.hostname,
@@ -718,7 +734,7 @@ class FaultProxyHandler(http.server.BaseHTTPRequestHandler):
                 self._abort_client_connection()
                 return
 
-        should_inject = successful and self.runtime.fault_plan.claim(route)
+        should_inject = successful and self.runtime.configuration.fault_timing == "after-upstream" and self.runtime.fault_plan.claim(route)
         if should_inject:
             try:
                 self.runtime.counters.record_many(route, ("faultsInjected", "fault"))
@@ -871,6 +887,7 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metrics-file", required=True)
     parser.add_argument("--fault-route", action="append", choices=[route.value for route in FaultRoute])
     parser.add_argument("--fault-count", type=int, default=1)
+    parser.add_argument("--fault-timing", choices=("after-upstream", "before-upstream"), default="after-upstream")
     parser.add_argument("--activation-ack", required=True)
     parser.add_argument("--hold-route", action="append", choices=[route.value for route in FaultRoute])
     parser.add_argument("--hold-count", type=int, default=1, help="one-shot hold count; must be exactly 1")

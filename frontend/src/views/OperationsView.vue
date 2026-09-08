@@ -7,6 +7,7 @@ import Message from "primevue/message";
 import Tag from "primevue/tag";
 
 import type { CollectorRun, CollectorScope } from "@/api/generated/types.gen";
+import PbsTaskPanel from "@/components/operations/PbsTaskPanel.vue";
 import AsyncState from "@/components/common/AsyncState.vue";
 import {
   collectorHealth,
@@ -234,5 +235,6 @@ onMounted(() => void store.load());
         </AsyncState>
       </section>
     </AsyncState>
+    <PbsTaskPanel />
   </section>
 </template>

@@ -142,12 +142,17 @@ backups.
 | `GET /nodes/{node}/tasks/{upid}/log` | `task-log-page.json` | Ordered synthetic `n`/`t` rows |
 | `DELETE /nodes/{node}/tasks/{upid}` | `task-stop-response.json` | Successful API2 JSON null envelope |
 
-PVE 7 demonstrates the legacy `maxfiles` request. PVE 8 demonstrates the
-property-string `prune-backups` request. PVE 9 demonstrates the current
-retention request and intentionally contains no `maxfiles` field. All three
-requests are limited to `vmid`, `storage`, `mode`, `compress`, and exactly one
-of the version-supported retention fields. The related status response reuses
-the existing `task-status-*.json` fixtures.
+PVE 7 demonstrates the legacy `maxfiles` request and deliberately omits
+`notification-mode`. PVE 8 demonstrates the property-string `prune-backups`
+request. PVE 9 demonstrates the current retention request and intentionally
+contains no `maxfiles` field. PVE 8 and 9 always select
+`notification-mode=legacy-sendmail`, so configured `mailto` recipients keep
+the failure-only semantics of `mailnotification=failure` instead of inheriting
+the node's notification-system default. The typed submission contract requires
+at least one recipient, and the serializer therefore always emits `mailto` and
+`mailnotification=failure`. Executable policies and every queue/submission path
+enforce the same requirement before any live PVE request. The related status
+response reuses the existing `task-status-*.json` fixtures.
 
 The following provenance-only Node.js program reproduces an endpoint hash
 from an explicitly downloaded local `apidoc.js`. Set `file` to the matching

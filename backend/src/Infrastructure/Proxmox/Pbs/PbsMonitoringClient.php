@@ -8,7 +8,7 @@ use App\Application\Proxmox\Pbs\PbsAclEvidence;
 use App\Application\Proxmox\Pbs\PbsJobListSnapshot;
 use App\Application\Proxmox\Pbs\PbsTaskPageSource;
 
-interface PbsMonitoringClient extends PbsTaskPageSource
+interface PbsMonitoringClient extends PbsTaskPageSource, \App\Application\Proxmox\Pbs\PbsTaskInspectionSource
 {
     public function aclEvidence(): PbsAclEvidence;
 
