@@ -46,5 +46,10 @@
     "vite": "^8.1.4",
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.7"
+  },
+  "overrides": {
+    "@hey-api/json-schema-ref-parser": {
+      "js-yaml": "4.3.1"
+    }
   }
 }

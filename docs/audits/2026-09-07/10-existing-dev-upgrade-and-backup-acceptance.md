@@ -248,3 +248,18 @@ verglichen. Ausschließlich ihre vier Container, ihr eigenes Netzwerk und ihr
 eigenes Datenvolume wurden entfernt. Der ältere Labstack blieb unberührt.
 Das dauerhafte Deploymentziel ist die bestehende Installation an der
 unveränderten HTTPS-Adresse.
+
+## Frontend-Abhängigkeiten vor Veröffentlichung
+
+Der erste Veröffentlichungslauf für `74d4ef8` bestand Frontendtests, Typecheck,
+Formatierung und Build, wurde aber durch `npm audit` blockiert. Die betroffenen
+transitiven Versionen von brace-expansion, nanoid, PostCSS und undici wurden
+innerhalb der vorhandenen kompatiblen Bereiche aktualisiert.
+Der Schema-Parser bindet js-yaml weiterhin exakt an eine verwundbare Version;
+ein auf dieses Paket begrenztes npm-Override verwendet deshalb 4.3.1,
+die [korrigierte 4.x-Version](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj).
+Der OpenAPI-Generator selbst bleibt unverändert. Der aktualisierte Lockfile
+meldet keine npm-Auditbefunde; die 299 Frontendtests einschließlich Coverage,
+API-Client-Abgleich, Lint und Formatprüfung bestehen erneut.
+Die Veröffentlichung erfolgt erst nach einem neuen vollständigen CI-Lauf des
+korrigierten Commits. Es wurden keine Images aus dem blockierten Lauf freigegeben.
