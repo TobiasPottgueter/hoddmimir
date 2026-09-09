@@ -1,16 +1,17 @@
 # Webinterface: UX-Analyse und Anpassungsplan
 
-Stand: 8. September 2026. Geprüfter Quellstand: `196b9d0`.
-Status: Frontend und erweiterte Laufhistoriensuche lokal umgesetzt und geprüft am 9. September 2026.
+Ursprüngliche Analyse: 8. September 2026, Quellstand `196b9d0`.
+Status: Frontend und erweiterte Laufhistoriensuche am 9. September 2026 als
+`2.0.0-rc.20260909.1` veröffentlicht und auf der bestehenden DEV-Installation abgenommen.
 Die untenstehenden Befunde dokumentieren den ursprünglichen Zustand.
 Die erweiterte serverseitige Laufhistoriensuche ist einschließlich API-Vertrag,
 Client und UI implementiert (siehe ergänzende Abnahme).
 
 ## Umsetzungsstand vom 9. September 2026
 
-Quellbasis: `196b9d0`, Änderungen im lokalen Arbeitsbaum, ohne Commit oder
-Deployment. Keine PVE-/PBS-Aktion und keine Änderung an Backup- oder
-Collector-Verhalten.
+Quellbasis der ursprünglichen lokalen Umsetzung: `196b9d0`; UX-Commit `6acd1dc`.
+Veröffentlichter und deployter Anwendungsstand: `6bb4d1c` (Abnahme unten).
+Die UX-Änderungen ändern weder Backup- noch Collector-Verhalten.
 
 | Paket | Umsetzung | Nachweis |
 | --- | --- | --- |
@@ -109,6 +110,84 @@ Eine vollständige WCAG-Abnahme, Performance-Messungen großer produktiver
 Historien und die reguläre Container-/Live-Abnahme sind nicht Teil dieser
 lokalen Abnahme. Commit-, Release- und Deployment-Gates bleiben an ihren
 vorgeschriebenen Grenzen erforderlich.
+
+### Veröffentlichung und Abnahme der bestehenden DEV-Installation
+
+Am 9. September 2026 wurde `2.0.0-rc.20260909.1` aus Commit
+`6bb4d1c1aeff52c07df845236e1dae2415abcf1c` veröffentlicht und auf
+`/opt/hoddmimir` unter <https://hoddmimir.netzkultur.cloud> ausgerollt.
+Der spätere Dokumentationscommit gehört nicht zum OCI-Quellstand.
+
+- `6acd1dc`: UX-Pakete und serverseitige Laufhistoriensuche.
+- `eeb59e9`: js-yaml 4.3.2 und Vitest/coverage 4.1.11 nach Befunden des
+  verpflichtenden Dependency-Audits. Siehe die Herstellerhinweise zu
+  [js-yaml](https://github.com/nodeca/js-yaml/security/advisories/GHSA-2883-xcg3-v3hh)
+  und [Vitest](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9).
+- `6bb4d1c`: gRPC 1.83.2 einschließlich des erforderlichen x/net 0.58.0 für
+  den neu gebauten FrankenPHP-Server nach dem Containerbefund
+  [CVE-2026-84445](https://github.com/grpc/grpc-go/security/advisories/GHSA-2v4p-qf9q-27wj).
+  Die fehlgeschlagenen Vorläufe wurden nicht veröffentlicht. Sicherheitsgates
+  und Schwellwerte blieben unverändert.
+
+Der vollständige [Veröffentlichungsworkflow 34338778016](https://github.com/TobiasPottgueter/hoddmimir/actions/runs/34338778016)
+war erfolgreich: Backend-Validierung, echte MariaDB-Integration, Frontend,
+OpenAPI, Ansible, Secret-/Supply-Chain-Prüfungen, Coverage, sämtliche zwölf
+Mutationsteile samt Gesamtauswertung, 23 Playwright-Szenarien, drei amd64-
+Container-SBOMs und -Scans sowie Stack-Start und Secret-Bereitstellung.
+Der lokale vollständige Backend-Testbuild bestand 2.827 Tests mit 13.014
+Assertions; Frontend und Coverage bestanden 330 Tests. Die MariaDB-Coverage
+umfasste 501 Tests mit 8.374 Assertions.
+
+| Gate des veröffentlichten Quellstands | Ergebnis |
+| --- | --- |
+| Domain/Application | 100 % Zeilen und Zweige (8.206/8.206; 7.553/7.553) |
+| Eigene Proxmox-Infrastruktur | 100 % Zeilen und Zweige (3.157/3.157; 2.501/2.501) |
+| Globale Backend-Coverage | 95,47 % Zeilen; 91,91 % Zweige |
+| Mutation | kritisch 90,61 %; global 80,94 % |
+| Container-Sicherheit | keine hohen oder kritischen Befunde; ausschließlich `linux/amd64` |
+
+Alle drei veröffentlichten Registry-/Plattform-Digests, OCI-Quellrevisionen
+und Plattformangaben wurden anschließend unabhängig über anonyme Registry-
+Abrufe gegen die CI-Publikationsevidenz geprüft. Das Deployment aktualisierte
+WebApp, Collector und Backup Worker. Die vorhandene MariaDB behielt ihren
+bisherigen Image-Digest; es gab keinen Datenbank-Image- oder Volume-Wechsel.
+
+Die frische direkte Prüfung von PVE 7/8/9 und PBS 3/4 zeigte keine aktiven
+Backup-Tasks; auf den drei PVE-Systemen waren keine Backupzeitpläne vorhanden,
+alle 18 Testgäste waren gestoppt. Vor dem Upgrade wurden Datenbank samt Grants,
+Installationskonfiguration und Secrets geschützt außerhalb des Zielhosts
+kopiert. Wartungsprotokoll 1 sperrte die Anwendung, prüfte erneut Remote-Ruhe,
+erstellte eine frische Sicherung und restaurierte deren rund 137 MB in eine
+isolierte MariaDB. Inhaltsvergleich sowie Funktions-/Rechteprüfung bestanden
+vor der Umstellung. Nach erfolgreicher Kandidatenprüfung wurde die Wartung
+wieder geöffnet. Die abgeschlossene Transaktion
+`b1929f08da47408382f2e0d9af259a9c` wurde ebenfalls außerhalb des Hosts gesichert;
+Datenbank- und Konfigurationsprüfsummen der Archivkopie stimmen überein.
+
+| Abnahme nach Deployment | Ergebnis |
+| --- | --- |
+| Erster Ansible-Lauf mit neuen Images | `ok=42 changed=1 unreachable=0 failed=0` |
+| Zweiter Ansible-Lauf | `ok=42 changed=0 unreachable=0 failed=0` |
+| Laufzeitidentität | vier gesunde Container; erwartete Digests/OCI-Revisionen; amd64 |
+| Betrieb | HTTPS/IPv4 und NTP geprüft; Wartung offen, keine aktive Deploymenttransaktion |
+| Datenerhalt | fünf Verbindungen, sechs Ziele, sechs Policies, 43 Anforderungen, 23 Läufe, 24 Meldungen und ein Benutzer erhalten; IDs abgeglichen |
+| Secrets/Keyring | Dateiinhalte per Fingerprint unverändert |
+| Ausführung | Backup-Ausführung bleibt deaktiviert; bestehende Matrix-Konfiguration bleibt aktiviert |
+
+Die neue HTTP-Laufhistoriensuche wurde mit den vorhandenen 23 Läufen geprüft:
+Gastidentität, VMID, Gastname, Ziel, UTC-Mikrosekundenintervall, kombinierte
+Filter und stabile Pagination. Ungültige Filter und ein Cursor mit anderem
+Filterkontext ergeben HTTP 400. Im Browser wurden HTTPS-Anmeldung, VMID-Filter
+und Erhalt des Filters nach Reload geprüft. Die Ansicht wurde bei 1440 und
+375 Pixeln visuell kontrolliert; kein horizontaler Seitenüberlauf. Dabei
+wurden keine neuen Backups oder Benachrichtigungen ausgelöst.
+
+Lokale, nicht versionierte Evidenz liegt unter
+`artifacts/followup-validation/2026-09-09/ux-deployment/`; geschütztes
+Rückkehrmaterial unter `.secrets/production/ux-deployment-20260909/`.
+Secrets, Inventar und Sicherungsinhalte sind nicht Bestandteil des Commits.
+Die zuvor genannten Grenzen zu WCAG, großen produktiven Historien und
+paginierter Namensauswahl bleiben bestehen.
 
 ## Ergebnis
 
