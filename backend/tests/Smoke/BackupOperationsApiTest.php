@@ -10,6 +10,7 @@ use App\Application\Backup\Operations\BackupOperationCommandResult;
 use App\Application\Backup\Operations\BackupOperationCommandStatus;
 use App\Application\Backup\Operations\BackupRequestState;
 use App\Application\Backup\Operations\BackupRunState;
+use App\Application\Backup\Operations\BackupRunQuery;
 use App\Application\Backup\Operations\OperationsPage;
 use App\Application\Backup\Operations\OperationsReadModel;
 use App\Application\Backup\Operations\OperationsCollectorSchedule;
@@ -37,11 +38,12 @@ use Symfony\Component\HttpFoundation\Request;
 
 final class BackupOperationsApiTest extends WebTestCase
 {
+    private OperationsReadFake $read;
     private KernelBrowser $client; private OperationsAuthenticator $auth; private OperationCommandFake $commands; private OperationsAuditStore $audit;
     protected function setUp(): void
     {
         $this->client=self::createClient(); $this->client->disableReboot();
-        self::getContainer()->set(DbalOperationsReadModel::class,new OperationsReadFake());
+        $this->read = new OperationsReadFake(); self::getContainer()->set(DbalOperationsReadModel::class,$this->read);
         $this->commands=new OperationCommandFake(); self::getContainer()->set(DbalBackupOperationCommandRepository::class,$this->commands);
         $this->audit = new OperationsAuditStore(); self::getContainer()->set(DbalLocalAuthStore::class, $this->audit);
         $this->auth=new OperationsAuthenticator(); self::getContainer()->set(HttpRequestAuthenticator::class,$this->auth);
@@ -60,6 +62,37 @@ final class BackupOperationsApiTest extends WebTestCase
         $this->client->request('GET','/api/v1/operations/runs/'.self::UUID); self::assertResponseIsSuccessful();
         $this->client->request('GET','/api/v1/operations/runs/missing'); self::assertResponseStatusCodeSame(404);
     }
+    public function testRunFiltersAreValidatedBeforeTheReadModelAndPreservedTogether(): void
+    {
+        $fake = $this->read;
+        foreach ([
+            'vmid=0', 'vmid=-1', 'vmid=01', 'vmid=2147483648', 'vmid=99999999999999999999', 'vmid=1.2', 'vmid[]=1',
+            'guestId=wrong', 'nodeId=wrong', 'targetId=wrong', 'search=', 'search=%00', 'search='.str_repeat('a', 191),
+            'search[]=name', 'state[]=failed', 'state=wrong', 'limit[]=1', 'cursor[]=x', 'limit=0',
+            'startedFrom=2026-02-30T00:00:00Z', 'startedBefore=2026-01-01', 'startedFrom=2026-01-02T00:00:00Z&startedBefore=2026-01-01T00:00:00Z',
+            'unknown=filter',
+        ] as $query) {
+            $this->client->request('GET', '/api/v1/operations/runs?'.$query);
+            self::assertResponseStatusCodeSame(400, $query);
+            self::assertNull($fake->runQuery);
+        }
+        $this->client->request('GET', '/api/v1/operations/runs?'.http_build_query([
+            'limit' => '10', 'state' => 'failed', 'guestId' => self::UUID, 'nodeId' => self::POLICY_ID, 'targetId' => self::TARGET_ID,
+            'vmid' => '101', 'search' => 'München_%', 'startedFrom' => '2026-09-01T00:00:00Z', 'startedBefore' => '2026-09-10T00:00:00.123456Z',
+        ]));
+        self::assertResponseIsSuccessful();
+        $query = $fake->lastRunQuery();
+        self::assertNotNull($query);
+        self::assertSame(10, $query->page->limit);
+        self::assertSame(BackupRunState::Failed, $query->state);
+        self::assertSame(self::UUID, $query->guestId?->value);
+        self::assertSame(self::POLICY_ID, $query->nodeId?->value);
+        self::assertSame(self::TARGET_ID, $query->targetId?->value);
+        self::assertSame(101, $query->vmid);
+        self::assertSame('München_%', $query->search);
+        self::assertSame('2026-09-10 00:00:00.123456', $query->startedBefore?->format('Y-m-d H:i:s.u'));
+    }
+
     public function testQueueHistoryIsProtectedBoundedAndValidatesFilters(): void
     {
         $metrics = $this->createMock(\App\Application\Backup\Metrics\QueueMetricStore::class);
@@ -175,7 +208,9 @@ final class OperationsReadFake implements OperationsReadModel
     public bool $fail=false;
     public function dashboard(bool $includeAudit): OperationsDashboard{if($this->fail)throw new \RuntimeException('closed'); return new OperationsDashboard(['collector'=>null,'backup'=>null],new OperationsCollectorSchedule('2026-07-13T00:02:00.000000Z',null,null,null),['systems'=>0,'nodes'=>0,'guests'=>0,'targets'=>0,'policies'=>0],[],['manual'=>0,'never_backed_up'=>0,'max_age'=>0,'bytes_written'=>0],[],null,null,0,0,0,$this->notificationHealth(),[],$includeAudit);}
     public function queue(PageRequest $page,?BackupRequestState $state): OperationsPage{return new OperationsPage($page,[['policyId'=>'10112233-4455-6677-8899-aabbccddeeff','targetId'=>'20112233-4455-6677-8899-aabbccddeeff']],null);}
-    public function runs(PageRequest $page,?BackupRunState $state): OperationsPage{return new OperationsPage($page,[],null);}
+    public ?BackupRunQuery $runQuery = null;
+    public function lastRunQuery(): ?BackupRunQuery { return $this->runQuery; }
+    public function runs(BackupRunQuery $query): OperationsPage{$this->runQuery = $query; return new OperationsPage($query->page,[],null);}
     public function run(string $id): ?array{return 'missing' === $id ? null : ['id'=>$id];}
     public function requestEvents(string $requestId,PageRequest $page): OperationsPage{return new OperationsPage($page,[],null);}
     public function runEvents(string $runId,PageRequest $page): OperationsPage{return new OperationsPage($page,[],null);}

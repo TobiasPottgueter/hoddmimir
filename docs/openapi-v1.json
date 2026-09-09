@@ -950,6 +950,7 @@
     "/api/v1/operations/runs": {
       "get": {
         "operationId": "listBackupRuns",
+        "description": "Server-filtered history ordered by stored run startedAt descending, then run ID descending. Filters are combined with AND and bound to the cursor; changing any filter requires a fresh first page. Guest, node and target IDs refer to the persisted request, not current guest placement. Names and VMID come from retained inventory, including archived objects. startedAt marks the beginning of a run attempt, not confirmation of a Proxmox task. Pending requests without a run are absent.",
         "parameters": [
           { "$ref": "#/components/parameters/Limit" },
           { "$ref": "#/components/parameters/Cursor" },
@@ -957,7 +958,14 @@
             "name": "state",
             "in": "query",
             "schema": { "$ref": "#/components/schemas/BackupRunState" }
-          }
+          },
+          {"name": "guestId", "in": "query", "description": "Guest recorded in the request.", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+          {"name": "nodeId", "in": "query", "description": "Node recorded in the request, independent of current placement.", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+          {"name": "targetId", "in": "query", "description": "Backup target recorded in the request, including disabled targets.", "schema": {"$ref": "#/components/schemas/CanonicalUuid"}},
+          {"name": "vmid", "in": "query", "description": "Exact VMID, across clusters. Combine with guestId or nodeId to disambiguate. Canonical positive decimal query value without leading zeros.", "schema": {"type": "integer", "minimum": 1, "maximum": 2147483647}},
+          {"name": "search", "in": "query", "description": "Literal guest-name substring, case-insensitive under the database Unicode collation. SQL wildcard characters are literal. Nonblank, at most 190 UTF-8 bytes, no control characters.", "schema": {"type": "string", "minLength": 1, "maxLength": 190}},
+          {"name": "startedFrom", "in": "query", "description": "Inclusive lower bound on stored run start time. UTC with Z and optional 1-6 fractional seconds; years 1000-9999. Invalid calendar values are rejected.", "schema": {"type": "string", "format": "date-time", "pattern": "^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"}},
+          {"name": "startedBefore", "in": "query", "description": "Exclusive upper bound on stored run start time; must be greater than startedFrom when both are supplied. UTC with Z and optional 1-6 fractional seconds; years 1000-9999. Invalid calendar values are rejected.", "schema": {"type": "string", "format": "date-time", "pattern": "^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"}}
         ],
         "responses": {
           "200": {

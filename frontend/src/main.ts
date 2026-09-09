@@ -1,3 +1,4 @@
+import { definePreset } from "@primeuix/themes";
 import Aura from "@primeuix/themes/aura";
 import PrimeVue from "primevue/config";
 import { createApp } from "vue";
@@ -16,7 +17,24 @@ app.use(pinia);
 app.use(router);
 app.use(PrimeVue, {
   theme: {
-    preset: Aura,
+    preset: definePreset(Aura, {
+      semantic: {
+        primary: Object.fromEntries(
+          [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map(
+            (level) => [level, `{blue.${level}}`],
+          ),
+        ),
+        colorScheme: {
+          light: {
+            primary: {
+              color: "{primary.700}",
+              hoverColor: "{primary.800}",
+              activeColor: "{primary.900}",
+            },
+          },
+        },
+      },
+    }),
     options: {
       darkModeSelector: ".app-dark",
     },

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Infrastructure\Maintenance;
 
 use App\Application\Backup\Notification\MatrixNotificationFormatter;
+use App\Application\Backup\Operations\BackupRunQuery;
 use App\Application\Backup\Queue\QueueClaimTokenSource;
 use App\Application\Inventory\ReadModel\PageRequest;
 use App\Application\Security\Auth\PasswordHash;
@@ -75,7 +76,7 @@ SQL);
         $reads->dashboard(true);
         $reads->notifications(new PageRequest(1), null);
         $reads->queue(new PageRequest(1), null);
-        $reads->runs(new PageRequest(1), null);
+        $reads->runs(new BackupRunQuery(new PageRequest(1)));
         $id = new UserId(random_bytes(16));
         $username = new NormalizedUsername('maintenance-'.bin2hex($id->binary()));
         $auth = new DbalLocalAuthStore($this->connection);

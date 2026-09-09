@@ -4,6 +4,7 @@ import PrimeVue from "primevue/config";
 import Select from "primevue/select";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import PagedPicker from "@/components/common/PagedPicker.vue";
 import { UUID, resource } from "@/test/fixtures";
 import { useInventoryStore } from "@/stores/inventory";
 import InventoryView from "./InventoryView.vue";
@@ -35,17 +36,21 @@ describe("InventoryView", () => {
     expect(selects.length).toBeGreaterThanOrEqual(3);
     selects[2]?.vm.$emit("update:modelValue", "qemu");
     await wrapper.vm.$nextTick();
+    expect(store.guestType).toBe("all");
+    await wrapper.get("form").trigger("submit");
     expect(store.guestType).toBe("qemu");
 
     selects[0]?.vm.$emit("update:modelValue", "pve_storage");
     await wrapper.vm.$nextTick();
+    await wrapper.get("form").trigger("submit");
     expect(store.kind).toBe("pve_storage");
 
     selects[1]?.vm.$emit("update:modelValue", "archived");
     await wrapper.vm.$nextTick();
+    await wrapper.get("form").trigger("submit");
     expect(store.inventoryState).toBe("archived");
 
-    store.connectionId = ` ${UUID} `;
+    wrapper.findComponent(PagedPicker).vm.$emit("update:modelValue", UUID);
     await wrapper.get("form").trigger("submit");
     expect(store.connectionId).toBe(UUID);
 

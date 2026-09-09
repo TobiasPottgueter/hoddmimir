@@ -3116,6 +3116,34 @@ export type ListBackupRunsData = {
     limit?: number;
     cursor?: PageCursor;
     state?: BackupRunState;
+    /**
+     * Guest recorded in the request.
+     */
+    guestId?: CanonicalUuid;
+    /**
+     * Node recorded in the request, independent of current placement.
+     */
+    nodeId?: CanonicalUuid;
+    /**
+     * Backup target recorded in the request, including disabled targets.
+     */
+    targetId?: CanonicalUuid;
+    /**
+     * Exact VMID, across clusters. Combine with guestId or nodeId to disambiguate. Canonical positive decimal query value without leading zeros.
+     */
+    vmid?: number;
+    /**
+     * Literal guest-name substring, case-insensitive under the database Unicode collation. SQL wildcard characters are literal. Nonblank, at most 190 UTF-8 bytes, no control characters.
+     */
+    search?: string;
+    /**
+     * Inclusive lower bound on stored run start time. UTC with Z and optional 1-6 fractional seconds; years 1000-9999. Invalid calendar values are rejected.
+     */
+    startedFrom?: string;
+    /**
+     * Exclusive upper bound on stored run start time; must be greater than startedFrom when both are supplied. UTC with Z and optional 1-6 fractional seconds; years 1000-9999. Invalid calendar values are rejected.
+     */
+    startedBefore?: string;
   };
   url: "/api/v1/operations/runs";
 };

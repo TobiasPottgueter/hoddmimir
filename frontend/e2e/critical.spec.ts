@@ -106,7 +106,9 @@ test.describe("authentifizierte Konfigurationsflüsse", () => {
 
     await page.goto("/");
     await expect(page.getByText("Heartbeat veraltet")).toBeVisible();
-    await expect(page.getByText("Kein Heartbeat vorhanden.")).toHaveCount(1);
+    await expect(page.getByText("Kein Heartbeat", { exact: true })).toHaveCount(
+      1,
+    );
     await expect(page.getByText("Manuelles Backup angefordert")).toBeVisible();
 
     await page.goto("/administration");
@@ -289,9 +291,11 @@ test.describe("authentifizierte Konfigurationsflüsse", () => {
     await field(form, "Priorität").locator("input").fill("350");
     await selectOption(form, "Backupmodus", "Snapshot");
     await selectOption(form, "Kompression", "Zstandard");
-    await field(form, "Maximales Alter in Sekunden")
-      .locator("input")
-      .fill("86400");
+    await form.getByLabel("Maximales Alter", { exact: true }).fill("86400");
+    await form
+      .locator("summary")
+      .filter({ hasText: "Erweiterte Aufbewahrung" })
+      .click();
     await field(form, "Letzte behalten").locator("input").fill("5");
     await field(form, "Fehler-E-Mail-Empfänger")
       .locator("textarea")

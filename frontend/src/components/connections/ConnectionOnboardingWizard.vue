@@ -330,6 +330,7 @@ onMounted(async () => {
         <label>
           <span>Port</span>
           <InputNumber
+            aria-label="Port"
             v-model="wizard.form.port"
             :disabled="wizard.mode.value === 'rotate'"
             :min="1"
@@ -339,6 +340,7 @@ onMounted(async () => {
         <label>
           <span>TLS-Modus</span>
           <Select
+            aria-label="TLS-Modus"
             :model-value="wizard.form.tlsMode"
             :options="tlsOptions"
             option-label="label"
@@ -399,6 +401,7 @@ onMounted(async () => {
           <label>
             <span>Scanner-Secret</span>
             <Password
+              aria-label="Scanner-Secret"
               v-model="wizard.form.scanTokenSecret"
               :feedback="false"
               toggle-mask
@@ -416,6 +419,7 @@ onMounted(async () => {
           <label>
             <span>Backup-Secret</span>
             <Password
+              aria-label="Backup-Secret"
               v-model="wizard.form.backupTokenSecret"
               :feedback="false"
               toggle-mask

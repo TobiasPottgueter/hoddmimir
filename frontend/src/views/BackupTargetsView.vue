@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import {
+  useQueryFilters,
+  queryChoice,
+  queryText,
+  queryUuid,
+} from "@/composables/useQueryFilters";
+import PagedPicker from "@/components/common/PagedPicker.vue";
+import { connectionPages, resourcePages } from "@/composables/usePickerPages";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
@@ -28,6 +36,7 @@ const canManage = computed(() =>
   auth.hasPermission("backup_configuration.manage"),
 );
 const formOpen = ref(false);
+const targetForm = ref<InstanceType<typeof BackupTargetForm> | null>(null);
 const editedTarget = ref<ConfiguredBackupTarget | null>(null);
 const sourceCandidate = ref<BackupTargetCandidate | null>(null);
 const connectionDraft = ref(store.connectionId);
@@ -40,19 +49,49 @@ const enabledOptions: Array<{ label: string; value: boolean | null }> = [
   { label: "Deaktiviert", value: false },
 ];
 
+const clusterPages = computed(() =>
+  resourcePages({
+    kind: "pve_cluster",
+    ...(connectionDraft.value ? { connectionId: connectionDraft.value } : {}),
+  }),
+);
+const url = useQueryFilters(
+  (query) => {
+    store.setConnectionId(queryUuid(query, "connectionId"));
+    store.setClusterId(queryUuid(query, "clusterId"));
+    configuredStore.setSearch(queryText(query, "search", 100));
+    const enabled = queryChoice(query, "enabled", ["", "true", "false"], "");
+    configuredStore.setEnabled(enabled === "" ? null : enabled === "true");
+    connectionDraft.value = store.connectionId;
+    clusterDraft.value = store.clusterId;
+    searchDraft.value = configuredStore.search;
+    enabledDraft.value = configuredStore.enabled;
+  },
+  () => {
+    void store.load();
+    void configuredStore.load();
+  },
+);
 function applyFilters(): void {
-  store.setConnectionId(connectionDraft.value);
-  store.setClusterId(clusterDraft.value);
-  void store.load();
+  void url.apply({
+    connectionId: connectionDraft.value,
+    clusterId: clusterDraft.value,
+    search: configuredStore.search,
+    enabled:
+      configuredStore.enabled === null ? "" : String(configuredStore.enabled),
+  });
 }
-
 function applyConfiguredFilters(): void {
-  configuredStore.setSearch(searchDraft.value);
-  configuredStore.setEnabled(enabledDraft.value);
-  void configuredStore.load();
+  void url.apply({
+    connectionId: store.connectionId,
+    clusterId: store.clusterId,
+    search: searchDraft.value,
+    enabled: enabledDraft.value === null ? "" : String(enabledDraft.value),
+  });
 }
 
 function openCreate(candidate: BackupTargetCandidate | null = null): void {
+  if (formOpen.value && !targetForm.value?.confirmDiscard()) return;
   commands.clearResult();
   editedTarget.value = null;
   sourceCandidate.value = candidate;
@@ -60,6 +99,7 @@ function openCreate(candidate: BackupTargetCandidate | null = null): void {
 }
 
 function openEdit(target: ConfiguredBackupTarget): void {
+  if (formOpen.value && !targetForm.value?.confirmDiscard()) return;
   commands.clearResult();
   editedTarget.value = target;
   sourceCandidate.value = null;
@@ -114,8 +154,7 @@ onMounted(() => {
         <h2 id="backup-targets-title">Backup-Ziele</h2>
         <p>
           Konfigurierte Ziele und PVE-/PBS-Kandidaten aus dem automatischen
-          Collector. Änderungen werden revisioniert über die geschützte API
-          gespeichert; Backups werden hier niemals direkt gestartet.
+          Collector. Wähle den Speicherort und prüfe seine Verfügbarkeit.
         </p>
       </div>
       <Button
@@ -159,6 +198,7 @@ onMounted(() => {
     />
 
     <BackupTargetForm
+      ref="targetForm"
       v-if="formOpen && canManage"
       :target="editedTarget"
       :candidate="sourceCandidate"
@@ -207,6 +247,12 @@ onMounted(() => {
           label="Filter anwenden"
           icon="pi pi-filter"
           :loading="configuredStore.loading"
+        />
+        <Button
+          type="button"
+          label="Filter zurücksetzen"
+          severity="secondary"
+          @click="url.apply({})"
         />
       </form>
 
@@ -266,27 +312,35 @@ onMounted(() => {
         aria-label="Backupziel-Kandidaten filtern"
         @submit.prevent="applyFilters"
       >
-        <label>
-          <span>Verbindungs-ID</span>
-          <InputText
-            v-model="connectionDraft"
-            placeholder="Optional UUID"
-            autocomplete="off"
-          />
-        </label>
-        <label>
-          <span>Cluster-ID</span>
-          <InputText
+        <label
+          ><span>Verbindung</span
+          ><PagedPicker
+            :model-value="connectionDraft"
+            label="Verbindung"
+            :load-page="connectionPages"
+            @update:model-value="
+              connectionDraft = $event;
+              clusterDraft = '';
+            "
+        /></label>
+        <label
+          ><span>Cluster</span
+          ><PagedPicker
             v-model="clusterDraft"
-            placeholder="Optional UUID"
-            autocomplete="off"
-          />
-        </label>
+            label="Cluster"
+            :load-page="clusterPages"
+        /></label>
         <Button
           type="submit"
           label="Filter anwenden"
           icon="pi pi-filter"
           :loading="store.loading"
+        />
+        <Button
+          type="button"
+          label="Filter zurücksetzen"
+          severity="secondary"
+          @click="url.apply({})"
         />
       </form>
 

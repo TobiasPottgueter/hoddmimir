@@ -288,8 +288,8 @@ onMounted(() => {
           <AdministrationHealthPanel
             :workers="operationsDashboard?.workers ?? null"
             :health="store.health"
-            :loading="store.healthLoading || operations.loading"
-            :error="store.healthError ?? operations.error"
+            :loading="store.healthLoading || operations.dashboardStatus.loading"
+            :error="store.healthError ?? operations.dashboardStatus.error"
           />
         </template>
         <Message
@@ -569,6 +569,7 @@ onMounted(() => {
         <label v-if="editedUser === null">
           <span>Rollen</span>
           <MultiSelect
+            aria-label="Rollen"
             v-model="userForm.roles"
             :options="roleOptions"
             option-label="label"

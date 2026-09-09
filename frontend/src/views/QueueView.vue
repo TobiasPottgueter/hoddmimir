@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useQueryFilters, queryChoice } from "@/composables/useQueryFilters";
+import ReadStatus from "@/components/common/ReadStatus.vue";
+import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { computed, onMounted, ref, watch } from "vue";
 import QueueHistory from "@/components/operations/QueueHistory.vue";
 import Button from "primevue/button";
@@ -19,6 +22,11 @@ import { useConfigurationInventoryStore } from "@/stores/configurationInventory"
 import { usePoliciesStore } from "@/stores/policies";
 
 const store = useBackupOperationsStore();
+const { refresh, paused } = useAutoRefresh(
+  () => store.loadQueue(),
+  () => store.queue.length <= store.queuePage.limit,
+  () => store.queueStatus.loading || store.mutationPending,
+);
 const auth = useAuthStore();
 const policies = usePoliciesStore();
 const inventory = useConfigurationInventoryStore();
@@ -41,6 +49,19 @@ const requestStateOptions = [
     value: state,
   })),
 ];
+const stateDraft = ref(store.queueState);
+const url = useQueryFilters(
+  (query) => {
+    store.queueState = queryChoice(
+      query,
+      "state",
+      ["all", ...requestStates],
+      "all",
+    );
+    stateDraft.value = store.queueState;
+  },
+  () => void store.loadQueue(),
+);
 const policyId = ref<string | null>(null);
 const guestId = ref<string | null>(null);
 const cancelCandidate = ref<BackupRequest | null>(null);
@@ -77,7 +98,6 @@ async function confirmCancel(): Promise<void> {
   if (await store.cancel(cancelCandidate.value)) cancelCandidate.value = null;
 }
 onMounted(() => {
-  void store.loadQueue();
   void policies.loadAllEnabledForOperations();
 });
 </script>
@@ -94,10 +114,26 @@ onMounted(() => {
         </p>
       </div>
     </div>
-    <QueueHistory />
-    <Message v-if="store.error" severity="error" :closable="false">{{
-      store.error
+    <ReadStatus
+      :state="store.queueStatus"
+      :pause-reason="
+        paused
+          ? 'Weitere Ergebnisse sind geöffnet. Anzeige aktualisieren lädt wieder die erste Seite.'
+          : ''
+      "
+      @refresh="refresh()"
+    />
+    <Message v-if="store.mutationError" severity="error" :closable="false">{{
+      store.mutationError
     }}</Message>
+    <Message
+      v-if="store.mutationSuccess"
+      severity="success"
+      :closable="false"
+      >{{ store.mutationSuccess }}</Message
+    >
+    <QueueHistory />
+
     <Message v-if="policies.operationError" severity="error" :closable="false">
       {{ policies.operationError }}
     </Message>
@@ -111,16 +147,21 @@ onMounted(() => {
     <form
       class="filter-bar"
       aria-label="Backup-Queue filtern"
-      @submit.prevent="store.loadQueue()"
+      @submit.prevent="url.apply({ state: stateDraft })"
     >
       <Select
-        v-model="store.queueState"
+        v-model="stateDraft"
         :options="requestStateOptions"
         option-label="label"
         option-value="value"
         aria-label="Queue-Zustand"
       />
-      <Button type="submit" label="Filter anwenden" icon="pi pi-filter" />
+      <Button
+        type="submit"
+        label="Filter anwenden"
+        icon="pi pi-filter"
+        :loading="store.queueStatus.loading"
+      />
     </form>
     <form
       v-if="auth.hasPermission('backup_operations.manage')"
@@ -130,6 +171,7 @@ onMounted(() => {
       <h3>Manuelles Backup anfordern</h3>
       <label
         >Aktivierte Policy<Select
+          aria-label="Aktivierte Policy"
           v-model="policyId"
           :options="enabledPolicies"
           option-label="displayName"
@@ -138,6 +180,7 @@ onMounted(() => {
       /></label>
       <label
         >VM oder CT<Select
+          aria-label="VM oder CT"
           v-model="guestId"
           :options="inventory.guests"
           option-label="displayName"
@@ -155,7 +198,7 @@ onMounted(() => {
         label="Backup anfordern"
         icon="pi pi-plus"
         :disabled="selectedPolicy === null || guestId === null"
-        :loading="store.loading || policies.operationLoading"
+        :loading="store.mutationPending || policies.operationLoading"
       />
     </form>
     <div class="shadow-list" aria-live="polite">
@@ -199,6 +242,7 @@ onMounted(() => {
     <Button
       v-if="store.queuePage.hasMore"
       label="Weitere Anforderungen"
+      :loading="store.queueStatus.loading"
       severity="secondary"
       @click="store.loadQueue(undefined, true)"
     />
@@ -208,8 +252,8 @@ onMounted(() => {
       header="Backup-Anforderung abbrechen"
       :style="{ width: '32rem' }"
       ><p>
-        Die Anforderung wird revisioniert abgebrochen. Ein laufender PVE-Task
-        wird erst durch den Backup-Worker gestoppt.
+        Der Abbruch wird angefordert. Ein laufender PVE-Task wird erst durch den
+        Backup-Worker gestoppt.
       </p>
       <template #footer
         ><Button
@@ -217,6 +261,7 @@ onMounted(() => {
           severity="secondary"
           @click="cancelCandidate = null" /><Button
           label="Abbruch bestätigen"
+          :loading="store.mutationPending"
           severity="danger"
           @click="confirmCancel" /></template
     ></Dialog>

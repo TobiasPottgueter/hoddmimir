@@ -10,7 +10,7 @@ interface OperationsReadModel
 {
     public function dashboard(bool $includeAudit): OperationsDashboard;
     public function queue(PageRequest $page, ?BackupRequestState $state): OperationsPage;
-    public function runs(PageRequest $page, ?BackupRunState $state): OperationsPage;
+    public function runs(BackupRunQuery $query): OperationsPage;
     /** @return array<string, mixed>|null */
     public function run(string $id): ?array;
     public function requestEvents(string $requestId, PageRequest $page): OperationsPage;

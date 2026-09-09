@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import {
+  useQueryFilters,
+  queryChoice,
+  queryText,
+  queryUuid,
+} from "@/composables/useQueryFilters";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
@@ -34,6 +40,7 @@ const selectedPolicy = computed(
     store.items.find((policy) => policy.id === store.selectedPolicyId) ?? null,
 );
 const formOpen = ref(false);
+const policyForm = ref<InstanceType<typeof PolicyForm> | null>(null);
 const editedPolicy = ref<ConfiguredPolicy | null>(null);
 const searchDraft = ref(store.search);
 const statusDraft = ref<PolicyStatus | null>(store.status);
@@ -44,19 +51,70 @@ const statusOptions: Array<{ label: string; value: PolicyStatus | null }> = [
   { label: "Deaktiviert", value: "disabled" },
 ];
 
+const selectionDraft = ref(store.selectedPolicyId ?? "");
+const url = useQueryFilters(
+  (query) => {
+    store.setSearch(queryText(query, "search", 100));
+    const state = queryChoice(
+      query,
+      "status",
+      ["", "draft", "enabled", "disabled"],
+      "",
+    );
+    store.setStatus(state || null);
+    searchDraft.value = store.search;
+    statusDraft.value = store.status;
+    selectionDraft.value = queryUuid(query, "policy");
+  },
+  () => void loadFromUrl(),
+);
+let selectionRequest = 0;
+async function loadFromUrl() {
+  const request = ++selectionRequest;
+  await store.load();
+  const id = selectionDraft.value;
+  if (!id) {
+    store.selectedPolicyId = null;
+    return;
+  }
+  if (store.selectedPolicyId === id) return;
+  // A shared selection may be on a later server-ordered page.
+  for (
+    let page = 0;
+    request === selectionRequest &&
+    !store.items.some((item) => item.id === id) &&
+    store.page.hasMore &&
+    !store.error &&
+    page < 1000;
+    page++
+  )
+    await store.loadMore();
+  if (request === selectionRequest) await selectPolicy(id);
+}
 function applyFilters() {
-  store.setSearch(searchDraft.value);
-  store.setStatus(statusDraft.value);
-  void store.load();
+  void url.apply({
+    search: searchDraft.value,
+    status: statusDraft.value ?? "",
+    policy: selectionDraft.value,
+  });
+}
+function shareSelection(id: string) {
+  void url.apply({
+    search: store.search,
+    status: store.status ?? "",
+    policy: id,
+  });
 }
 
 function openCreate(): void {
+  if (formOpen.value && !policyForm.value?.confirmDiscard()) return;
   commands.clearResult();
   editedPolicy.value = null;
   formOpen.value = true;
 }
 
 function openEdit(policy: ConfiguredPolicy): void {
+  if (formOpen.value && !policyForm.value?.confirmDiscard()) return;
   commands.clearResult();
   editedPolicy.value = policy;
   formOpen.value = true;
@@ -112,6 +170,7 @@ async function changeSelection(
 }
 
 async function reloadServerState(): Promise<void> {
+  if (formOpen.value && !policyForm.value?.confirmDiscard()) return;
   const selectedId = store.selectedPolicyId;
   commands.clearResult();
   closeForm();
@@ -129,7 +188,7 @@ async function selectPolicy(policyId: string): Promise<void> {
 }
 
 onMounted(() => {
-  void store.load();
+  void loadFromUrl();
   void targetStore.loadAllForConfiguration();
   void inventory.loadClusters();
 });
@@ -142,9 +201,8 @@ onMounted(() => {
         <span class="section-kicker">Policy-Konfiguration</span>
         <h2 id="policies-title">Policies</h2>
         <p>
-          Backupregeln, Auswahlzuweisungen und Guest-Overrides aus der
-          serverseitigen Projektion. Änderungen verwenden CSRF, Idempotenz und
-          erwartete Revisionen.
+          Lege Backupregeln fest und wähle die zugehörigen Cluster, Nodes und
+          Gäste. Abweichende Regeln pro Gast bleiben sichtbar.
         </p>
       </div>
       <Button
@@ -194,6 +252,7 @@ onMounted(() => {
     />
 
     <PolicyForm
+      ref="policyForm"
       v-if="formOpen && canManage"
       :policy="editedPolicy"
       :targets="targetStore.configurationItems"
@@ -232,6 +291,12 @@ onMounted(() => {
         icon="pi pi-filter"
         :loading="store.loading"
       />
+      <Button
+        type="button"
+        label="Filter zurücksetzen"
+        severity="secondary"
+        @click="url.apply({})"
+      />
     </form>
 
     <AsyncState
@@ -248,7 +313,7 @@ onMounted(() => {
           :policy="policy"
           :selected="store.selectedPolicyId === policy.id"
           :can-manage="canManage"
-          @show-selection="selectPolicy"
+          @show-selection="shareSelection"
           @edit="openEdit"
           @toggle="togglePolicy"
         />
@@ -276,7 +341,7 @@ onMounted(() => {
       <AsyncState
         :loading="store.selectionLoading"
         :error="store.selectionError"
-        :empty="store.selectionEmpty"
+        :empty="store.selectionEmpty && !canManage"
         empty-title="Keine Auswahlregeln"
         empty-description="Für diese Policy sind keine Zuweisungen oder Guest-Overrides vorhanden."
       >

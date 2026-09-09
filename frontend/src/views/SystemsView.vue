@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
+import { RouterLink } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
 import Card from "primevue/card";
 import Message from "primevue/message";
 import Tag from "primevue/tag";
@@ -10,6 +12,7 @@ import { formatUtc } from "@/composables/useFormatters";
 import { stringAttribute } from "@/composables/useResourceAttributes";
 import { useSystemsStore } from "@/stores/systems";
 
+const auth = useAuthStore();
 const store = useSystemsStore();
 
 onMounted(() => void store.load());
@@ -27,8 +30,15 @@ onMounted(() => void store.load());
     </div>
 
     <Message severity="info" :closable="false">
-      Verbindungen und Zugangsdaten werden in einer späteren Phase
-      administriert. Diese Ansicht löst keinen Scan aus.
+      Neue Systeme erscheinen nach dem nächsten automatischen Collector-Zyklus.
+      <RouterLink
+        v-if="auth.hasPermission('backup_configuration.manage')"
+        to="/connections"
+        >Verbindungen verwalten</RouterLink
+      >
+      <span v-else
+        >Zum Hinzufügen einer Verbindung wende dich an die Administration.</span
+      >
     </Message>
 
     <AsyncState

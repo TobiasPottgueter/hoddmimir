@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed } from "vue";
+import { RouterLink } from "vue-router";
 import Message from "primevue/message";
 import Tag from "primevue/tag";
+import ReadStatus from "@/components/common/ReadStatus.vue";
+import RelativeTime from "@/components/common/RelativeTime.vue";
+import { useAutoRefresh } from "@/composables/useAutoRefresh";
+import { useFreshnessClock } from "@/composables/useFreshness";
 import {
   backupRequestStateLabel,
   backupRequestStateSeverity,
@@ -9,6 +14,7 @@ import {
   backupRunStateSeverity,
   operationsWorkerStatusLabel,
   operationsWorkerStatusSeverity,
+  operationsWorkerIsFresh,
 } from "@/composables/useBackupOperations";
 import { useAdministration } from "@/composables/useAdministration";
 import { formatUtc } from "@/composables/useFormatters";
@@ -16,13 +22,14 @@ import { useBackupOperationsStore } from "@/stores/backupOperations";
 
 const store = useBackupOperationsStore();
 const dashboard = computed(() => store.dashboard);
+const now = useFreshnessClock();
 const { eventLabel, outcomeLabel } = useAdministration();
 const resourceEntries = [
-  ["systems", "Aktive Systeme"],
-  ["nodes", "Aktive Nodes"],
-  ["guests", "Aktive Gäste"],
-  ["targets", "Aktive Backup-Ziele"],
-  ["policies", "Aktive Policies"],
+  ["systems", "Aktive Systeme", "/systems"],
+  ["nodes", "Aktive Nodes", "/inventory?kind=pve_node"],
+  ["guests", "Aktive Gäste", "/inventory?kind=pve_guest"],
+  ["targets", "Aktive Backup-Ziele", "/backup-targets?enabled=true"],
+  ["policies", "Aktive Policies", "/policies?status=enabled"],
 ] as const;
 const queueStates = [
   "pending",
@@ -41,202 +48,267 @@ const queueReasons = [
   ["bytes_written", "Schreibvolumen", 100],
 ] as const;
 const runHighlights = ["running", "failed", "unknown", "succeeded"] as const;
-onMounted(() => void store.loadDashboard());
+const { refresh } = useAutoRefresh(
+  () => store.loadDashboard(),
+  () => true,
+  () => store.dashboardStatus.loading,
+);
 </script>
+
 <template>
-  <section class="dashboard" aria-labelledby="dashboard-title">
-    <div class="dashboard-hero">
+  <section
+    class="dashboard dashboard--operations"
+    aria-labelledby="dashboard-title"
+  >
+    <div class="view-heading">
       <div>
         <span class="section-kicker">Betriebsübersicht</span>
         <h2 id="dashboard-title">Hoddmímir auf einen Blick</h2>
-        <p>
-          Collector, Backup-Worker, Scheduler-Evidenz und Queue aus der
-          serverseitigen Operations-Projektion.
-        </p>
+        <p>Backup-Betrieb, offene Probleme und letzte Ergebnisse.</p>
       </div>
     </div>
-    <Message v-if="store.error" severity="error" :closable="false">{{
-      store.error
-    }}</Message>
-    <p v-if="store.loading" role="status">Betriebsdaten werden geladen …</p>
+    <ReadStatus :state="store.dashboardStatus" @refresh="refresh()" />
     <template v-if="dashboard">
-      <div class="component-grid">
-        <article v-for="kind in ['collector', 'backup'] as const" :key="kind">
-          <i class="pi pi-wave-pulse" />
-          <div>
+      <div class="dashboard-workers">
+        <article
+          v-for="kind in ['collector', 'backup'] as const"
+          :key="kind"
+          class="dashboard-worker"
+        >
+          <div class="dashboard-worker__heading">
             <h3>
               {{ kind === "collector" ? "Collector Worker" : "Backup Worker" }}
             </h3>
-            <template v-if="dashboard.workers[kind]"
-              ><Tag
-                :value="
-                  dashboard.workers[kind]!.fresh
-                    ? operationsWorkerStatusLabel(
-                        dashboard.workers[kind]!.status,
-                      )
-                    : 'Heartbeat veraltet'
-                "
-                :severity="
-                  dashboard.workers[kind]!.fresh
-                    ? operationsWorkerStatusSeverity(
-                        dashboard.workers[kind]!.status,
-                      )
-                    : 'danger'
-                "
-              />
-              <p>
-                Heartbeat
-                {{ formatUtc(dashboard.workers[kind]!.heartbeatAt) }} ·
-                {{ dashboard.workers[kind]!.buildVersion }}
-              </p></template
-            >
-            <p v-else>Kein Heartbeat vorhanden.</p>
+            <Tag
+              v-if="dashboard.workers[kind]"
+              :value="
+                operationsWorkerIsFresh(dashboard.workers[kind], now)
+                  ? operationsWorkerStatusLabel(dashboard.workers[kind]!.status)
+                  : 'Heartbeat veraltet'
+              "
+              :severity="
+                operationsWorkerIsFresh(dashboard.workers[kind], now)
+                  ? operationsWorkerStatusSeverity(
+                      dashboard.workers[kind]!.status,
+                    )
+                  : 'danger'
+              "
+            />
+            <Tag v-else value="Kein Heartbeat" severity="warn" />
           </div>
+          <p v-if="dashboard.workers[kind]">
+            Letzte Rückmeldung:
+            <RelativeTime :timestamp="dashboard.workers[kind]!.heartbeatAt" />
+          </p>
+          <p v-else>Noch keine Rückmeldung vorhanden.</p>
+          <RouterLink :to="kind === 'collector' ? '/operations' : '/runs'"
+            >{{
+              kind === "collector"
+                ? "Collector-Status ansehen"
+                : "Backup-Läufe ansehen"
+            }}
+            <i class="pi pi-arrow-right" aria-hidden="true"
+          /></RouterLink>
         </article>
       </div>
-      <section v-if="dashboard.collectorSchedule" class="system-overview">
-        <h3>Collector-Zeitplan</h3>
-        <p>
-          Nächster Zyklus:
-          {{ formatUtc(dashboard.collectorSchedule.nextScanAt) }}
-        </p>
-        <p>
-          Letzter Versuch:
-          {{ formatUtc(dashboard.collectorSchedule.lastAttemptFinishedAt) }} ·
-          Letzter erfolgreicher Apply:
-          {{ formatUtc(dashboard.collectorSchedule.lastSuccessfulAppliedAt) }}
-        </p>
-      </section>
-      <div class="setup-grid">
+      <section
+        class="dashboard-priorities"
+        aria-label="Aktueller Backup-Betrieb"
+      >
         <article
-          v-for="[key, label] in resourceEntries"
-          :key="key"
-          class="setup-card"
+          class="dashboard-metric"
+          :class="{ 'dashboard-metric--warning': dashboard.openProblems > 0 }"
         >
-          <h3>{{ label }}</h3>
-          <strong>{{ dashboard.resources[key] }}</strong>
+          <h3>Offene Probleme</h3>
+          <strong>{{ dashboard.openProblems }}</strong>
+          <span
+            >Veraltete Nachweise: {{ dashboard.staleEvidence }} ·
+            Shadow-Blocker: {{ dashboard.shadowBlockers }}</span
+          >
+          <RouterLink to="/shadow?outcome=blocked"
+            >Sperrgründe prüfen</RouterLink
+          >
         </article>
-      </div>
-      <div class="component-grid">
-        <article>
-          <div>
-            <h3>Stale Evidenz</h3>
-            <strong>{{ dashboard.staleEvidence }}</strong>
-          </div>
-        </article>
-        <article>
-          <div>
-            <h3>Shadow-Blocker</h3>
-            <strong>{{ dashboard.shadowBlockers }}</strong>
-          </div>
-        </article>
-        <article>
-          <div>
-            <h3>Offene Probleme</h3>
-            <strong>{{ dashboard.openProblems }}</strong>
-          </div>
-        </article>
-      </div>
-      <section class="system-overview" aria-labelledby="queue-overview-title">
+        <RouterLink to="/queue?state=pending" class="dashboard-metric">
+          <h3>Wartende Anforderungen</h3>
+          <strong>{{ dashboard.requestsByState.pending }}</strong>
+          <span
+            >{{ dashboard.requestsByState.retry_wait }} warten auf
+            Wiederholung</span
+          >
+        </RouterLink>
+        <RouterLink to="/runs?state=running" class="dashboard-metric">
+          <h3>Laufende Backups</h3>
+          <strong>{{ dashboard.runsByState.running }}</strong>
+          <span
+            >{{ dashboard.runsByState.failed }} fehlgeschlagen ·
+            {{ dashboard.runsByState.unknown }} unklar</span
+          >
+        </RouterLink>
+      </section>
+      <article
+        class="dashboard-last-backup"
+        aria-labelledby="last-backup-title"
+      >
+        <div>
+          <h3 id="last-backup-title">Letztes erfolgreiches Backup</h3>
+          <template v-if="dashboard.lastSuccessfulRun">
+            <RouterLink :to="`/runs/${dashboard.lastSuccessfulRun.runId}`"
+              >{{ dashboard.lastSuccessfulRun.guestName }} (VMID
+              {{ dashboard.lastSuccessfulRun.vmid }})</RouterLink
+            >
+            <span>
+              · {{ dashboard.lastSuccessfulRun.nodeName }} ·
+              {{ dashboard.lastSuccessfulRun.targetName }}</span
+            >
+          </template>
+          <p v-else>Noch kein erfolgreiches V2-Backup vorhanden.</p>
+        </div>
+        <RelativeTime
+          v-if="dashboard.lastSuccessfulRun"
+          :timestamp="dashboard.lastSuccessfulRun.finishedAt"
+        />
+      </article>
+      <section class="dashboard-section" aria-labelledby="queue-overview-title">
         <div class="target-evidence__heading">
           <h3 id="queue-overview-title">Queue nach Zustand und Priorität</h3>
           <small
             >Älteste fällige Anforderung:
-            {{ formatUtc(dashboard.oldestPendingAt) }}</small
+            {{
+              formatUtc(dashboard.oldestPendingAt, "Keine fällige Anforderung")
+            }}</small
           >
         </div>
-        <div class="setup-grid">
-          <article v-for="state in queueStates" :key="state" class="setup-card">
+        <div class="dashboard-state-grid">
+          <RouterLink
+            v-for="state in queueStates"
+            :key="state"
+            :to="`/queue?state=${state}`"
+            class="dashboard-count"
+          >
             <Tag
               :value="backupRequestStateLabel(state)"
               :severity="backupRequestStateSeverity(state)"
             />
             <strong>{{ dashboard.requestsByState[state] }}</strong>
-          </article>
+          </RouterLink>
         </div>
-        <div class="setup-grid">
-          <article
-            v-for="[reason, label, priority] in queueReasons"
-            :key="reason"
-            class="setup-card"
-          >
-            <h4>{{ label }}</h4>
-            <strong>{{ dashboard.requestsByReason[reason] }}</strong>
-            <small>Priorität {{ priority }}</small>
-          </article>
-        </div>
-      </section>
-      <section class="system-overview" aria-labelledby="run-overview-title">
-        <h3 id="run-overview-title">Backup-Läufe</h3>
-        <div class="setup-grid">
-          <article
-            v-for="state in runHighlights"
-            :key="state"
-            class="setup-card"
-          >
-            <Tag
-              :value="backupRunStateLabel(state)"
-              :severity="backupRunStateSeverity(state)"
-            />
-            <strong>{{ dashboard.runsByState[state] }}</strong>
-          </article>
-        </div>
-        <article v-if="dashboard.lastSuccessfulRun" class="shadow-evaluation">
-          <div>
-            <strong>Letztes erfolgreiches Backup</strong>
-            <span>
-              {{ dashboard.lastSuccessfulRun.guestName }} (VMID
-              {{ dashboard.lastSuccessfulRun.vmid }}) ·
-              {{ dashboard.lastSuccessfulRun.nodeName }} ·
-              {{ dashboard.lastSuccessfulRun.targetName }}
-            </span>
+        <div class="dashboard-reasons">
+          <div v-for="[reason, label, priority] in queueReasons" :key="reason">
+            <span>{{ label }}</span
+            ><strong>{{ dashboard.requestsByReason[reason] }}</strong
+            ><small>Priorität {{ priority }}</small>
           </div>
-          <Tag value="Erfolgreich" severity="success" />
-          <small>{{ formatUtc(dashboard.lastSuccessfulRun.finishedAt) }}</small>
-        </article>
-        <Message v-else severity="secondary" :closable="false">
-          Noch kein erfolgreiches V2-Backup vorhanden.
-        </Message>
+        </div>
       </section>
-      <section class="system-overview" aria-labelledby="delivery-title">
-        <h3 id="delivery-title">Matrix-Zustellung</h3>
-        <p>
-          Ausstehend {{ dashboard.notifications.byState.pending }} · in
-          Zustellung {{ dashboard.notifications.byState.claimed }} · zugestellt
-          {{ dashboard.notifications.byState.sent }}
-        </p>
-        <p>
-          Älteste offene Meldung:
-          {{ formatUtc(dashboard.notifications.oldestUnsentAt) }} · nächster
-          Zustellversuch:
-          {{ formatUtc(dashboard.notifications.nextDeliveryAttemptAt) }}
-        </p>
-        <Message
-          v-if="dashboard.notifications.lastErrorCode"
-          severity="warn"
-          :closable="false"
-        >
-          Letzter sicherer Zustellfehlercode:
-          {{ dashboard.notifications.lastErrorCode }}
-        </Message>
+      <section class="dashboard-section" aria-labelledby="resources-title">
+        <h3 id="resources-title">Konfigurierte Umgebung</h3>
+        <div class="dashboard-resources">
+          <RouterLink
+            v-for="[key, label, to] in resourceEntries"
+            :key="key"
+            :to="to"
+            ><span>{{ label }}</span
+            ><strong>{{ dashboard.resources[key] }}</strong></RouterLink
+          >
+        </div>
       </section>
-      <section v-if="dashboard.auditVisible">
-        <h3>Letzte Audit-Ereignisse</h3>
-        <ul>
-          <li v-for="event in dashboard.recentAuditEvents" :key="event.id">
-            {{ formatUtc(event.occurredAt) }} ·
-            {{ eventLabel(event.eventType) }} ·
-            {{ outcomeLabel(event.outcome) }}
-          </li>
-        </ul>
-      </section>
+      <details class="dashboard-section" open>
+        <summary>Weitere Betriebsergebnisse</summary>
+        <section v-if="dashboard.collectorSchedule">
+          <h3>Collector-Zeitplan</h3>
+          <p>
+            Nächster Zyklus:
+            {{
+              formatUtc(
+                dashboard.collectorSchedule.nextScanAt,
+                "Noch nicht geplant",
+              )
+            }}
+          </p>
+          <p>
+            Letzter Versuch:
+            {{
+              formatUtc(
+                dashboard.collectorSchedule.lastAttemptFinishedAt,
+                "Noch kein abgeschlossener Versuch",
+              )
+            }}
+            · Letzte erfolgreiche Inventarübernahme:
+            {{
+              formatUtc(
+                dashboard.collectorSchedule.lastSuccessfulAppliedAt,
+                "Noch keine erfolgreiche Übernahme",
+              )
+            }}
+          </p>
+        </section>
+        <section aria-labelledby="run-overview-title">
+          <h3 id="run-overview-title">Backup-Läufe</h3>
+          <div class="dashboard-state-grid">
+            <RouterLink
+              v-for="state in runHighlights"
+              :key="state"
+              :to="`/runs?state=${state}`"
+              class="dashboard-count"
+              ><Tag
+                :value="backupRunStateLabel(state)"
+                :severity="backupRunStateSeverity(state)"
+              /><strong>{{ dashboard.runsByState[state] }}</strong></RouterLink
+            >
+          </div>
+        </section>
+        <section aria-labelledby="delivery-title">
+          <h3 id="delivery-title">Matrix-Zustellung</h3>
+          <p>
+            Ausstehend {{ dashboard.notifications.byState.pending }} · in
+            Zustellung {{ dashboard.notifications.byState.claimed }} ·
+            zugestellt {{ dashboard.notifications.byState.sent }}
+          </p>
+          <p>
+            Älteste offene Meldung:
+            {{
+              formatUtc(
+                dashboard.notifications.oldestUnsentAt,
+                "Keine offene Meldung",
+              )
+            }}
+            · nächster Zustellversuch:
+            {{
+              formatUtc(
+                dashboard.notifications.nextDeliveryAttemptAt,
+                "Nicht geplant",
+              )
+            }}
+          </p>
+          <Message
+            v-if="dashboard.notifications.lastErrorCode"
+            severity="warn"
+            :closable="false"
+            >Zustellung fehlgeschlagen:
+            {{ dashboard.notifications.lastErrorCode }}.
+            <RouterLink to="/runs#notifications-title"
+              >Meldungen prüfen</RouterLink
+            >.</Message
+          >
+        </section>
+        <section v-if="dashboard.auditVisible">
+          <h3>Letzte Audit-Ereignisse</h3>
+          <ul>
+            <li v-for="event in dashboard.recentAuditEvents" :key="event.id">
+              {{ formatUtc(event.occurredAt) }} ·
+              {{ eventLabel(event.eventType) }} ·
+              {{ outcomeLabel(event.outcome) }}
+            </li>
+          </ul>
+        </section>
+      </details>
     </template>
     <Message
-      v-else-if="!store.loading && !store.error"
+      v-else-if="!store.dashboardStatus.loading && !store.dashboardStatus.error"
       severity="secondary"
       :closable="false"
+      >Noch keine Betriebsdaten verfügbar. Prüfe den Collector-Status.</Message
     >
-      Keine Betriebsprojektion verfügbar.
-    </Message>
   </section>
 </template>

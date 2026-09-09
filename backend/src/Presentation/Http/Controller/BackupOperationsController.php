@@ -9,6 +9,8 @@ use App\Application\Backup\Operations\BackupOperationCommandResult;
 use App\Application\Backup\Operations\BackupOperationCommandStatus;
 use App\Application\Backup\Operations\BackupRequestState;
 use App\Application\Backup\Operations\BackupRunState;
+use App\Application\Backup\Operations\BackupRunQuery;
+use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use App\Application\Backup\Operations\OperationsReadModel;
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
@@ -54,9 +56,23 @@ final readonly class BackupOperationsController
     {
         return $this->read(function () use ($request): array {
             $this->guardRead($request);
-            $this->assertQuery($request, ['limit','cursor','state']);
-            $state = $request->query->get('state');
-            return $this->readModel->runs($this->page($request), null === $state ? null : BackupRunState::from($state))->toArray();
+            $this->assertQuery($request, ['limit', 'cursor', 'state', 'guestId', 'vmid', 'search', 'nodeId', 'targetId', 'startedFrom', 'startedBefore']);
+            $values = $request->query->all();
+            foreach ($values as $value) if (!is_string($value)) throw new InvalidArgumentException('Query values must be scalar strings.');
+            $vmid = $values['vmid'] ?? null;
+            if (null !== $vmid && (1 !== preg_match('/\A[1-9][0-9]{0,9}\z/D', $vmid) || (int) $vmid > 2147483647)) throw new InvalidArgumentException('Invalid VMID.');
+            $query = new BackupRunQuery(
+                page: $this->page($request),
+                state: isset($values['state']) ? BackupRunState::from($values['state']) : null,
+                guestId: isset($values['guestId']) ? new ReadModelIdentifier($values['guestId']) : null,
+                nodeId: isset($values['nodeId']) ? new ReadModelIdentifier($values['nodeId']) : null,
+                targetId: isset($values['targetId']) ? new ReadModelIdentifier($values['targetId']) : null,
+                vmid: null === $vmid ? null : (int) $vmid,
+                search: $values['search'] ?? null,
+                startedFrom: $values['startedFrom'] ?? null,
+                startedBefore: $values['startedBefore'] ?? null,
+            );
+            return $this->readModel->runs($query)->toArray();
         });
     }
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatDuration, formatUtc } from "./useFormatters";
+import {
+  formatBytes,
+  formatDuration,
+  formatUtc,
+  formatRelativeTime,
+} from "./useFormatters";
 
 describe("Formatierer", () => {
   it("formatiert UTC-Zeitwerte und fängt leere oder ungültige Werte ab", () => {
@@ -28,4 +33,20 @@ describe("Formatierer", () => {
       "1 s",
     );
   });
+});
+
+it("kennzeichnet UTC und relative Zeitgrenzen eindeutig", () => {
+  const now = Date.parse("2026-09-09T12:00:00Z");
+  expect(formatUtc("2026-09-09T12:00:00Z")).toMatch(/12:00:00 UTC$/);
+  expect(formatUtc(null, "Nicht geplant")).toBe("Nicht geplant");
+  expect(formatRelativeTime("invalid", now)).toBe("Ungültiger Zeitwert");
+  expect(formatRelativeTime("2026-09-09T12:00:10Z", now)).toContain(
+    "in weniger",
+  );
+  expect(formatRelativeTime("2026-09-09T11:59:50Z", now)).toContain(
+    "vor weniger",
+  );
+  expect(formatRelativeTime("2026-09-09T11:58:00Z", now)).toBe("vor 2 Minuten");
+  expect(formatRelativeTime("2026-09-09T10:00:00Z", now)).toBe("vor 2 Stunden");
+  expect(formatRelativeTime("2026-09-07T12:00:00Z", now)).toBe("vorgestern");
 });

@@ -2,7 +2,17 @@
 import { onMounted, reactive, ref } from "vue";
 import Button from "primevue/button";
 import Message from "primevue/message";
-import InputText from "primevue/inputtext";
+import PagedPicker from "@/components/common/PagedPicker.vue";
+import {
+  policyPages,
+  targetPages,
+  resourcePages,
+} from "@/composables/usePickerPages";
+import {
+  useQueryFilters,
+  queryChoice,
+  queryUuid,
+} from "@/composables/useQueryFilters";
 import Select from "primevue/select";
 import Tab from "primevue/tab";
 import TabList from "primevue/tablist";
@@ -45,7 +55,7 @@ const reasonOptions = [
   { label: "Maximales Alter", value: "max_age" },
   { label: "Geschriebene Bytes", value: "bytes_written" },
 ];
-function applyFilters() {
+function loadFilters() {
   void store.applyDecisionFilters({
     ...(filters.outcome === ""
       ? {}
@@ -65,8 +75,30 @@ function applyFilters() {
   });
 }
 
+const guestPages = resourcePages({ kind: "pve_guest" });
+const url = useQueryFilters((query) => {
+  filters.outcome = queryChoice(
+    query,
+    "outcome",
+    ["", "eligible", "blocked", "not_due", "deduplicated"],
+    "",
+  );
+  filters.reason = queryChoice(
+    query,
+    "reason",
+    ["", "manual", "never_backed_up", "max_age", "bytes_written"],
+    "",
+  );
+  filters.policyId = queryUuid(query, "policyId");
+  filters.targetId = queryUuid(query, "targetId");
+  filters.guestId = queryUuid(query, "guestId");
+}, loadFilters);
+function applyFilters() {
+  void url.apply({ ...filters });
+}
+
 onMounted(() => {
-  void store.loadDecisions();
+  loadFilters();
   void store.loadEvaluations();
 });
 </script>
@@ -113,22 +145,28 @@ onMounted(() => {
               option-value="value"
               aria-label="Grund"
             />
-            <InputText
+            <PagedPicker
               v-model="filters.policyId"
-              placeholder="Policy-ID"
-              aria-label="Policy-ID"
+              label="Policy"
+              :load-page="policyPages"
             />
-            <InputText
+            <PagedPicker
               v-model="filters.targetId"
-              placeholder="Ziel-ID"
-              aria-label="Ziel-ID"
+              label="Backup-Ziel"
+              :load-page="targetPages"
             />
-            <InputText
+            <PagedPicker
               v-model="filters.guestId"
-              placeholder="Gast-ID"
-              aria-label="Gast-ID"
+              label="Gast: Name oder VMID"
+              :load-page="guestPages"
             />
             <Button type="submit" label="Filter anwenden" icon="pi pi-filter" />
+            <Button
+              type="button"
+              label="Filter zurücksetzen"
+              severity="secondary"
+              @click="url.apply({})"
+            />
           </form>
           <AsyncState
             :loading="store.decisionsLoading"

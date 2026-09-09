@@ -8,12 +8,15 @@ const byteFormatter = new Intl.NumberFormat("de-DE", {
   maximumFractionDigits: 1,
 });
 
-export function formatUtc(timestamp: string | null): string {
-  if (timestamp === null) return "Keine Messung";
+export function formatUtc(
+  timestamp: string | null,
+  empty = "Keine Messung",
+): string {
+  if (timestamp === null) return empty;
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime())
     ? "Ungültiger Zeitwert"
-    : dateFormatter.format(date);
+    : `${dateFormatter.format(date)} UTC`;
 }
 
 export function formatBytes(bytes: number | null): string {
@@ -36,4 +39,22 @@ export function formatDuration(
   const duration = Date.parse(finishedAt) - Date.parse(startedAt);
   if (!Number.isFinite(duration) || duration < 0) return "–";
   return `${byteFormatter.format(duration / 1000)} s`;
+}
+
+const relativeFormatter = new Intl.RelativeTimeFormat("de-DE", {
+  numeric: "auto",
+});
+export function formatRelativeTime(timestamp: string, now: number): string {
+  const difference = Date.parse(timestamp) - now;
+  if (!Number.isFinite(difference)) return "Ungültiger Zeitwert";
+  const absolute = Math.abs(difference);
+  if (absolute < 60_000)
+    return difference > 0
+      ? "in weniger als einer Minute"
+      : "vor weniger als einer Minute";
+  const unit =
+    absolute < 3_600_000 ? "minute" : absolute < 86_400_000 ? "hour" : "day";
+  const divisor =
+    unit === "minute" ? 60_000 : unit === "hour" ? 3_600_000 : 86_400_000;
+  return relativeFormatter.format(Math.trunc(difference / divisor), unit);
 }

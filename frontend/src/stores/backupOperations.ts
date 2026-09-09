@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import { apiErrorMessage } from "@/api/errors";
 import {
@@ -7,6 +7,7 @@ import {
   type BackupRequest,
   type BackupRun,
   type OperationsApi,
+  type RunHistoryFilters,
 } from "@/api/operationsApi";
 import type {
   BackupEvent,
@@ -20,6 +21,18 @@ import type {
 import type { CursorPageMetadata } from "@/api/pagination";
 import { useAuthStore } from "@/stores/auth";
 
+export interface ReadState {
+  loading: boolean;
+  error: string | null;
+  loaded: boolean;
+  updatedAt: string | null;
+}
+const readState = (): ReadState => ({
+  loading: false,
+  error: null,
+  loaded: false,
+  updatedAt: null,
+});
 const page = (): CursorPageMetadata => ({
   limit: 25,
   count: 0,
@@ -37,6 +50,7 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
   const notificationHealth = ref<BackupNotificationHealth | null>(null);
   const queueState = ref<BackupRequestState | "all">("all");
   const runState = ref<BackupRunState | "all">("all");
+  const runFilters = ref<RunHistoryFilters>({});
   const notificationKind = ref<
     "all" | "failure" | "attention_required" | "recovery"
   >("all");
@@ -47,146 +61,257 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
   const eventPage = ref(page());
   const logs = ref<BackupLogEntry[]>([]);
   const logPage = ref(page());
-  const loading = ref(false);
-  const error = ref<string | null>(null);
-  const emptyQueue = computed(() => !loading.value && queue.value.length === 0);
-  async function execute(operation: () => Promise<void>): Promise<void> {
-    loading.value = true;
-    error.value = null;
+  const states = reactive({
+    dashboard: readState(),
+    queue: readState(),
+    runs: readState(),
+    notifications: readState(),
+    detail: readState(),
+  });
+  type Section = keyof typeof states;
+  const generation: Record<Section, number> = {
+    dashboard: 0,
+    queue: 0,
+    runs: 0,
+    notifications: 0,
+    detail: 0,
+  };
+  const mutationPending = ref(false);
+  const mutationError = ref<string | null>(null);
+  const mutationSuccess = ref<string | null>(null);
+  const emptyQueue = computed(
+    () =>
+      states.queue.loaded &&
+      !states.queue.loading &&
+      !states.queue.error &&
+      queue.value.length === 0,
+  );
+  async function read<T>(
+    section: Section,
+    operation: () => Promise<T>,
+    apply: (value: T) => void,
+  ): Promise<void> {
+    const current = ++generation[section];
+    const state = states[section];
+    state.loading = true;
+    state.error = null;
     try {
-      await operation();
+      const value = await operation();
+      if (current !== generation[section]) return;
+      apply(value);
+      state.loaded = true;
+      state.updatedAt = new Date().toISOString();
     } catch (failure) {
-      error.value = apiErrorMessage(failure);
+      if (current === generation[section])
+        state.error = apiErrorMessage(failure);
     } finally {
-      loading.value = false;
+      if (current === generation[section]) state.loading = false;
     }
   }
   async function loadDashboard(
     api: OperationsApi = operationsApi,
   ): Promise<void> {
-    await execute(async () => {
-      dashboard.value = await api.dashboard();
-    });
+    await read(
+      "dashboard",
+      () => api.dashboard(),
+      (value) => {
+        dashboard.value = value;
+      },
+    );
   }
   async function loadQueue(
     api: OperationsApi = operationsApi,
     append = false,
   ): Promise<void> {
-    await execute(async () => {
-      const result = await api.queue(
-        queuePage.value.limit,
-        append ? (queuePage.value.nextCursor ?? undefined) : undefined,
-        queueState.value === "all" ? undefined : queueState.value,
-      );
-      queue.value = append ? [...queue.value, ...result.items] : result.items;
-      queuePage.value = result.page;
-    });
+    if (append && states.queue.loading) return;
+    await read(
+      "queue",
+      () =>
+        api.queue(
+          queuePage.value.limit,
+          append ? (queuePage.value.nextCursor ?? undefined) : undefined,
+          queueState.value === "all" ? undefined : queueState.value,
+        ),
+      (result) => {
+        queue.value = append ? [...queue.value, ...result.items] : result.items;
+        queuePage.value = result.page;
+      },
+    );
+  }
+  function setRunFilters(
+    state: BackupRunState | "all",
+    filters: RunHistoryFilters,
+  ): void {
+    if (
+      runState.value === state &&
+      JSON.stringify(runFilters.value) === JSON.stringify(filters)
+    )
+      return;
+    ++generation.runs;
+    runState.value = state;
+    runFilters.value = { ...filters };
+    runs.value = [];
+    runsPage.value = page();
+    Object.assign(states.runs, readState());
   }
   async function loadRuns(
     api: OperationsApi = operationsApi,
     append = false,
   ): Promise<void> {
-    await execute(async () => {
-      const result = await api.runs(
-        runsPage.value.limit,
-        append ? (runsPage.value.nextCursor ?? undefined) : undefined,
-        runState.value === "all" ? undefined : runState.value,
-      );
-      runs.value = append ? [...runs.value, ...result.items] : result.items;
-      runsPage.value = result.page;
-    });
+    if (
+      append &&
+      (states.runs.loading || !runsPage.value.hasMore || states.runs.error)
+    )
+      return;
+    await read(
+      "runs",
+      () =>
+        api.runs(
+          runsPage.value.limit,
+          append ? (runsPage.value.nextCursor ?? undefined) : undefined,
+          runState.value === "all" ? undefined : runState.value,
+          { ...runFilters.value },
+        ),
+      (result) => {
+        runs.value = append ? [...runs.value, ...result.items] : result.items;
+        runsPage.value = result.page;
+      },
+    );
   }
   async function loadNotifications(
     api: OperationsApi = operationsApi,
     append = false,
   ): Promise<void> {
-    await execute(async () => {
-      const [result, health] = await Promise.all([
-        api.notifications(
-          notificationPage.value.limit,
-          append ? (notificationPage.value.nextCursor ?? undefined) : undefined,
-          notificationKind.value === "all" ? undefined : notificationKind.value,
-        ),
-        api.notificationHealth(),
-      ]);
-      notifications.value = append
-        ? [...notifications.value, ...result.items]
-        : result.items;
-      notificationPage.value = result.page;
-      notificationHealth.value = health;
-    });
+    if (append && states.notifications.loading) return;
+    await read(
+      "notifications",
+      () =>
+        Promise.all([
+          api.notifications(
+            notificationPage.value.limit,
+            append
+              ? (notificationPage.value.nextCursor ?? undefined)
+              : undefined,
+            notificationKind.value === "all"
+              ? undefined
+              : notificationKind.value,
+          ),
+          api.notificationHealth(),
+        ]),
+      ([result, health]) => {
+        notifications.value = append
+          ? [...notifications.value, ...result.items]
+          : result.items;
+        notificationPage.value = result.page;
+        notificationHealth.value = health;
+      },
+    );
   }
   async function loadRun(
     id: string,
     api: OperationsApi = operationsApi,
   ): Promise<void> {
-    await execute(async () => {
-      const run = await api.run(id);
-      detail.value = run;
-      const [requests, runEvents, lines] = await Promise.all([
-        api.requestEvents(run.requestId, 25),
-        api.runEvents(id, 25),
-        api.logs(id, 100),
-      ]);
-      requestEvents.value = requests.items;
-      requestEventPage.value = requests.page;
-      events.value = runEvents.items;
-      eventPage.value = runEvents.page;
-      logs.value = lines.items;
-      logPage.value = lines.page;
-    });
+    if (detail.value?.id !== id) {
+      detail.value = null;
+      requestEvents.value = [];
+      events.value = [];
+      logs.value = [];
+      states.detail.loaded = false;
+      states.detail.updatedAt = null;
+    }
+    await read(
+      "detail",
+      async () => {
+        const run = await api.run(id);
+        const [requests, runEvents, lines] = await Promise.all([
+          api.requestEvents(run.requestId, 25),
+          api.runEvents(id, 25),
+          api.logs(id, 100),
+        ]);
+        return { run, requests, runEvents, lines };
+      },
+      ({ run, requests, runEvents, lines }) => {
+        detail.value = run;
+        requestEvents.value = requests.items;
+        requestEventPage.value = requests.page;
+        events.value = runEvents.items;
+        eventPage.value = runEvents.page;
+        logs.value = lines.items;
+        logPage.value = lines.page;
+      },
+    );
   }
   async function loadMoreRequestEvents(
     api: OperationsApi = operationsApi,
   ): Promise<void> {
-    if (detail.value === null || !requestEventPage.value.hasMore) return;
-    await execute(async () => {
-      const result = await api.requestEvents(
-        detail.value!.requestId,
-        requestEventPage.value.limit,
-        requestEventPage.value.nextCursor ?? undefined,
-      );
-      requestEvents.value = [...requestEvents.value, ...result.items];
-      requestEventPage.value = result.page;
-    });
+    if (
+      detail.value === null ||
+      !requestEventPage.value.hasMore ||
+      states.detail.loading
+    )
+      return;
+    const requestId = detail.value.requestId;
+    await read(
+      "detail",
+      () =>
+        api.requestEvents(
+          requestId,
+          25,
+          requestEventPage.value.nextCursor ?? undefined,
+        ),
+      (result) => {
+        requestEvents.value = [...requestEvents.value, ...result.items];
+        requestEventPage.value = result.page;
+      },
+    );
   }
   async function loadMoreRunEvents(
     api: OperationsApi = operationsApi,
   ): Promise<void> {
-    if (detail.value === null || !eventPage.value.hasMore) return;
-    await execute(async () => {
-      const result = await api.runEvents(
-        detail.value!.id,
-        eventPage.value.limit,
-        eventPage.value.nextCursor ?? undefined,
-      );
-      events.value = [...events.value, ...result.items];
-      eventPage.value = result.page;
-    });
+    if (
+      detail.value === null ||
+      !eventPage.value.hasMore ||
+      states.detail.loading
+    )
+      return;
+    const runId = detail.value.id;
+    await read(
+      "detail",
+      () => api.runEvents(runId, 25, eventPage.value.nextCursor ?? undefined),
+      (result) => {
+        events.value = [...events.value, ...result.items];
+        eventPage.value = result.page;
+      },
+    );
   }
   async function loadMoreLogs(
     api: OperationsApi = operationsApi,
   ): Promise<void> {
-    if (detail.value === null || !logPage.value.hasMore || loading.value)
+    if (
+      detail.value === null ||
+      !logPage.value.hasMore ||
+      states.detail.loading
+    )
       return;
-    await execute(async () => {
-      const lines = await api.logs(
-        detail.value!.id,
-        logPage.value.limit,
-        logPage.value.nextCursor ?? undefined,
-      );
-      logs.value = [...logs.value, ...lines.items];
-      logPage.value = lines.page;
-    });
+    const runId = detail.value.id;
+    await read(
+      "detail",
+      () => api.logs(runId, 25, logPage.value.nextCursor ?? undefined),
+      (result) => {
+        logs.value = [...logs.value, ...result.items];
+        logPage.value = result.page;
+      },
+    );
   }
   async function mutation(
     operation: (csrf: string) => Promise<void>,
     api: OperationsApi,
   ): Promise<boolean> {
     const csrf = useAuthStore().csrfToken;
-    if (csrf === null) return false;
-    loading.value = true;
-    error.value = null;
+    if (csrf === null || mutationPending.value) return false;
+    mutationPending.value = true;
+    mutationError.value = null;
+    mutationSuccess.value = null;
     try {
       await operation(csrf);
       return true;
@@ -202,10 +327,10 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
             ? "Die Aktion ist durch den aktuellen Backupzustand blockiert."
             : apiErrorMessage(failure);
       if (status === 409) await loadQueue(api);
-      error.value = message;
+      mutationError.value = message;
       return false;
     } finally {
-      loading.value = false;
+      mutationPending.value = false;
     }
   }
   async function manual(
@@ -217,7 +342,11 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
         api.manual(body, csrf, crypto.randomUUID()).then(() => undefined),
       api,
     );
-    if (ok) await loadQueue(api);
+    if (ok) {
+      mutationSuccess.value =
+        "Backup-Anforderung gespeichert. Der Backup-Worker prüft die Startbedingungen.";
+      await loadQueue(api);
+    }
     return ok;
   }
   async function cancel(
@@ -231,7 +360,11 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
           .then(() => undefined),
       api,
     );
-    if (ok) await loadQueue(api);
+    if (ok) {
+      mutationSuccess.value =
+        "Abbruch angefordert. Der Backup-Worker übernimmt die weitere Verarbeitung.";
+      await loadQueue(api);
+    }
     return ok;
   }
   return {
@@ -245,6 +378,8 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
     notificationHealth,
     queueState,
     runState,
+    runFilters,
+    setRunFilters,
     notificationKind,
     detail,
     requestEvents,
@@ -253,8 +388,14 @@ export const useBackupOperationsStore = defineStore("backup-operations", () => {
     eventPage,
     logs,
     logPage,
-    loading,
-    error,
+    dashboardStatus: states.dashboard,
+    queueStatus: states.queue,
+    runsStatus: states.runs,
+    notificationStatus: states.notifications,
+    detailStatus: states.detail,
+    mutationPending,
+    mutationError,
+    mutationSuccess,
     emptyQueue,
     loadDashboard,
     loadQueue,

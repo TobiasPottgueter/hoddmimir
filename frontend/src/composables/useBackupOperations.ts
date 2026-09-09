@@ -134,3 +134,10 @@ export const operationsWorkerStatusLabel = (
 export const operationsWorkerStatusSeverity = (
   status: OperationsWorkerHealth["status"],
 ) => workerStatusSeverities[status];
+
+export function operationsWorkerIsFresh(
+  worker: OperationsWorkerHealth | null,
+  now: number,
+): boolean {
+  return worker !== null && worker.fresh && Date.parse(worker.expiresAt) > now;
+}

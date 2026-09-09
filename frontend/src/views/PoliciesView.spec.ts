@@ -109,6 +109,64 @@ describe("PoliciesView", () => {
     expect(loadMoreSelection).toHaveBeenCalledOnce();
   });
 
+  it.each([true, false])(
+    "macht leere Auswahl mit Verwaltungsrecht=%s bedienbar",
+    async (canManage) => {
+      useAuthStore().$patch({
+        principal: {
+          id: UUID,
+          username: "review",
+          permissions: canManage
+            ? ["backup_configuration.manage"]
+            : ["inventory.read"],
+        },
+        csrfToken: "test",
+      });
+      const store = usePoliciesStore();
+      store.items = [policy];
+      store.selectedPolicyId = UUID;
+      vi.spyOn(store, "load").mockResolvedValue();
+      vi.spyOn(store, "selectPolicyForEditing").mockResolvedValue();
+      vi.spyOn(
+        useConfiguredBackupTargetsStore(),
+        "loadAllForConfiguration",
+      ).mockResolvedValue();
+      vi.spyOn(
+        useConfigurationInventoryStore(),
+        "loadClusters",
+      ).mockResolvedValue();
+      const change = vi
+        .spyOn(useConfigurationCommandsStore(), "changeSelection")
+        .mockResolvedValue(true);
+      const wrapper = mount(PoliciesView, { global: { plugins: [PrimeVue] } });
+      if (canManage) {
+        expect(wrapper.text()).toContain("Noch keine Nodes oder Gäste");
+        await wrapper
+          .get('form[aria-label="Auswahlregel konfigurieren"]')
+          .trigger("submit");
+        await flushPromises();
+        expect(change).toHaveBeenCalledWith(
+          UUID,
+          {
+            expectedRevision: 1,
+            entries: [
+              expect.objectContaining({
+                scope: "global",
+                selectionValue: "include",
+              }),
+            ],
+          },
+          "selection.upsert",
+        );
+      } else {
+        expect(wrapper.text()).toContain("Keine Auswahlregeln");
+        expect(wrapper.findComponent(PolicySelectionEditor).exists()).toBe(
+          false,
+        );
+      }
+    },
+  );
+
   it("zeigt Policy- und Auswahlcontrols sowie Blocker nur mit Management-Permission", async () => {
     useAuthStore().$patch({
       principal: {

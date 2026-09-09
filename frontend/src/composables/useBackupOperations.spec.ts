@@ -1,3 +1,5 @@
+import { operationsWorkerIsFresh } from "./useBackupOperations";
+import type { OperationsWorkerHealth } from "@/api/generated/types.gen";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -113,4 +115,21 @@ describe("backup operations labels", () => {
       ["Wird beendet", "secondary"],
     ]);
   });
+});
+
+it("lässt einen Heartbeat an seiner Ablaufgrenze veralten", () => {
+  const now = Date.parse("2026-09-09T12:00:00Z");
+  expect(operationsWorkerIsFresh(null, now)).toBe(false);
+  const worker = {
+    fresh: true,
+    expiresAt: "2026-09-09T12:00:00Z",
+  } as OperationsWorkerHealth;
+  expect(operationsWorkerIsFresh(worker, now - 1)).toBe(true);
+  expect(operationsWorkerIsFresh(worker, now)).toBe(false);
+  expect(operationsWorkerIsFresh({ ...worker, fresh: false }, now - 1)).toBe(
+    false,
+  );
+  expect(
+    operationsWorkerIsFresh({ ...worker, expiresAt: "invalid" }, now),
+  ).toBe(false);
 });

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import FormErrors from "@/components/common/FormErrors.vue";
+import QuantityInput from "@/components/common/QuantityInput.vue";
+import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import InputNumber from "primevue/inputnumber";
@@ -45,7 +48,38 @@ const keepMonthly = ref<number | null>(null);
 const keepYearly = ref<number | null>(null);
 const retentionExecutionEnabled = ref(false);
 const failureNotificationRecipients = ref("");
-const validationError = ref<string | null>(null);
+const errors = ref<Record<string, string>>({});
+const quantityErrors = ref<Record<string, string>>({});
+const validationAttempt = ref(0);
+const snapshot = computed(() =>
+  JSON.stringify([
+    displayName.value,
+    selectedClusterId.value,
+    targetId.value,
+    priority.value,
+    backupMode.value,
+    compression.value,
+    maximumAgeSeconds.value,
+    bytesWrittenThreshold.value,
+    cooldownSeconds.value,
+    legacyMaxfiles.value,
+    keepAll.value,
+    keepLast.value,
+    keepHourly.value,
+    keepDaily.value,
+    keepWeekly.value,
+    keepMonthly.value,
+    keepYearly.value,
+    retentionExecutionEnabled.value,
+    failureNotificationRecipients.value,
+    Object.entries(quantityErrors.value).filter(([, error]) => error),
+  ]),
+);
+const unsaved = useUnsavedChanges(snapshot, () => props.pending);
+defineExpose({ confirmDiscard: unsaved.confirmDiscard });
+function cancel(): void {
+  if (unsaved.confirmDiscard()) emit("cancel");
+}
 
 function targetUsesPbs(candidateTargetId: string | null | undefined): boolean {
   return props.targets.some(
@@ -151,7 +185,9 @@ watch(
       !targetUsesPbs(policy?.targetId);
     failureNotificationRecipients.value =
       policy?.failureNotificationRecipients.join("\n") ?? "";
-    validationError.value = null;
+    errors.value = {};
+    quantityErrors.value = {};
+    unsaved.reset();
   },
   { immediate: true },
 );
@@ -166,11 +202,12 @@ function nullable(value: string): string | null {
 }
 
 function submit(): void {
-  if (displayName.value.trim() === "" || selectedCluster.value === null) {
-    validationError.value = "Name, Verbindung und Cluster sind erforderlich.";
-    return;
-  }
-  validationError.value = null;
+  errors.value = { ...quantityErrors.value };
+  if (displayName.value.trim() === "")
+    errors.value["policy-name"] = "Ein Anzeigename ist erforderlich.";
+  if (selectedCluster.value === null)
+    errors.value["policy-cluster"] =
+      "Verbindung und Cluster sind erforderlich.";
   const recipients = failureNotificationRecipients.value
     .split(/[\n,]/u)
     .map((address) => address.trim())
@@ -180,10 +217,16 @@ function submit(): void {
     new Set(recipients.map((address) => address.toLowerCase())).size !==
       recipients.length
   ) {
-    validationError.value =
+    errors.value["policy-recipients"] =
       "Es sind höchstens 32 eindeutige E-Mail-Empfänger erlaubt.";
-    return;
   }
+  validationAttempt.value++;
+  if (
+    Object.values(errors.value).some(Boolean) ||
+    selectedCluster.value === null ||
+    props.pending
+  )
+    return;
   emit(
     "submit",
     {
@@ -233,118 +276,221 @@ function submit(): void {
     aria-label="Policy konfigurieren"
     @submit.prevent="submit"
   >
-    <Message v-if="validationError" severity="error" :closable="false">{{
-      validationError
-    }}</Message>
-    <div class="configuration-form__grid">
-      <label><span>Anzeigename</span><InputText v-model="displayName" /></label>
-      <label class="configuration-form__wide"
-        ><span>Verbindung und Cluster aus Inventar</span
-        ><Select
-          v-model="selectedClusterId"
-          :options="clusterOptions"
-          option-label="label"
-          option-value="value"
-          placeholder="Cluster wählen"
-      /></label>
-      <label
-        ><span>Konfiguriertes Backupziel</span
-        ><Select
-          v-model="targetId"
-          :options="targetOptions"
-          option-label="label"
-          option-value="value"
-      /></label>
-      <label
-        ><span>Priorität</span><InputNumber v-model="priority" :min="0"
-      /></label>
-      <label
-        ><span>Backupmodus</span
-        ><Select
-          v-model="backupMode"
-          :options="modeOptions"
-          option-label="label"
-          option-value="value"
-      /></label>
-      <label
-        ><span>Kompression</span
-        ><Select
-          v-model="compression"
-          :options="compressionOptions"
-          option-label="label"
-          option-value="value"
-      /></label>
-      <label
-        ><span>Maximales Alter in Sekunden</span
-        ><InputText v-model="maximumAgeSeconds" inputmode="numeric"
-      /></label>
-      <label
-        ><span>Schreibschwelle in Bytes</span
-        ><InputText v-model="bytesWrittenThreshold" inputmode="numeric"
-      /></label>
-      <label
-        ><span>Cooldown in Sekunden</span
-        ><InputText v-model="cooldownSeconds" inputmode="numeric"
-      /></label>
-      <label class="configuration-form__wide"
-        ><span>Fehler-E-Mail-Empfänger</span
-        ><Textarea
-          v-model="failureNotificationRecipients"
-          rows="3"
-          placeholder="backup@example.org, platform@example.org"
-        /><small
-          >Komma oder Zeilenumbruch; mindestens ein Empfänger ist zur
-          Aktivierung erforderlich.</small
-        ></label
-      >
-      <label
-        ><span>Legacy maxfiles</span
-        ><InputNumber v-model="legacyMaxfiles" :min="1"
-      /></label>
-      <label
-        ><span>Letzte behalten</span><InputNumber v-model="keepLast" :min="1"
-      /></label>
-      <label
-        ><span>Stündlich behalten</span
-        ><InputNumber v-model="keepHourly" :min="1"
-      /></label>
-      <label
-        ><span>Täglich behalten</span><InputNumber v-model="keepDaily" :min="1"
-      /></label>
-      <label
-        ><span>Wöchentlich behalten</span
-        ><InputNumber v-model="keepWeekly" :min="1"
-      /></label>
-      <label
-        ><span>Monatlich behalten</span
-        ><InputNumber v-model="keepMonthly" :min="1"
-      /></label>
-      <label
-        ><span>Jährlich behalten</span
-        ><InputNumber v-model="keepYearly" :min="1"
-      /></label>
-      <label class="configuration-form__check"
-        ><Checkbox v-model="keepAll" binary /><span
-          >Alle Backups behalten</span
-        ></label
-      >
-      <label class="configuration-form__check"
-        ><Checkbox
-          v-model="retentionExecutionEnabled"
-          binary
-          :disabled="retentionExecutionBlocked"
-        /><span>Retention-Ausführung aktivieren</span></label
-      >
-      <Message
-        v-if="retentionExecutionBlocked"
-        class="configuration-form__wide"
-        severity="info"
-        :closable="false"
-      >
-        Bei PBS-Backupzielen wird die Retention auf PBS verwaltet. Hoddmímir
-        sendet deshalb keine löschwirksamen Retention-Parameter an vzdump.
-      </Message>
-    </div>
+    <FormErrors :errors="errors" :attempt="validationAttempt" />
+    <fieldset>
+      <legend>Basis</legend>
+      <div class="configuration-form__grid">
+        <label for="policy-name"
+          ><span>Anzeigename *</span
+          ><InputText
+            id="policy-name"
+            v-model="displayName"
+            :aria-invalid="!!errors['policy-name']"
+            :aria-describedby="
+              errors['policy-name'] ? 'policy-name-error' : undefined
+            "
+          /><small
+            v-if="errors['policy-name']"
+            id="policy-name-error"
+            class="field-error"
+            >{{ errors["policy-name"] }}</small
+          ></label
+        >
+        <label class="configuration-form__wide"
+          ><span>Verbindung und Cluster aus Inventar</span
+          ><Select
+            v-model="selectedClusterId"
+            input-id="policy-cluster"
+            aria-label="Verbindung und Cluster aus Inventar"
+            :aria-invalid="!!errors['policy-cluster']"
+            :aria-describedby="
+              errors['policy-cluster'] ? 'policy-cluster-error' : undefined
+            "
+            filter
+            :options="clusterOptions"
+            option-label="label"
+            option-value="value"
+            placeholder="Cluster wählen"
+          /><small
+            v-if="errors['policy-cluster']"
+            id="policy-cluster-error"
+            class="field-error"
+            >{{ errors["policy-cluster"] }}</small
+          ></label
+        >
+        <label
+          ><span>Konfiguriertes Backupziel</span
+          ><Select
+            aria-label="Konfiguriertes Backupziel"
+            v-model="targetId"
+            :options="targetOptions"
+            option-label="label"
+            option-value="value"
+        /></label>
+        <label
+          ><span>Priorität</span
+          ><InputNumber aria-label="Priorität" v-model="priority" :min="0"
+        /></label>
+        <label
+          ><span>Backupmodus</span
+          ><Select
+            aria-label="Backupmodus"
+            v-model="backupMode"
+            :options="modeOptions"
+            option-label="label"
+            option-value="value"
+        /></label>
+        <label
+          ><span>Kompression</span
+          ><Select
+            aria-label="Kompression"
+            v-model="compression"
+            :options="compressionOptions"
+            option-label="label"
+            option-value="value"
+        /></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Backup-Auslöser</legend>
+      <p>
+        Die Reihenfolge bleibt: noch nie gesichert, maximales Alter,
+        Schreibvolumen. Leere Auslöser setzen keine eigene Schwelle.
+      </p>
+      <div class="configuration-form__grid">
+        <QuantityInput
+          id="policy-age"
+          v-model="maximumAgeSeconds"
+          label="Maximales Alter"
+          kind="duration"
+          :error="errors['policy-age'] ?? ''"
+          @validation="quantityErrors['policy-age'] = $event"
+        />
+        <QuantityInput
+          id="policy-bytes"
+          v-model="bytesWrittenThreshold"
+          label="Schreibschwelle"
+          kind="bytes"
+          :error="errors['policy-bytes'] ?? ''"
+          @validation="quantityErrors['policy-bytes'] = $event"
+        />
+        <QuantityInput
+          id="policy-cooldown"
+          v-model="cooldownSeconds"
+          label="Cooldown"
+          kind="duration"
+          :error="errors['policy-cooldown'] ?? ''"
+          @validation="quantityErrors['policy-cooldown'] = $event"
+        />
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Benachrichtigungen</legend>
+      <div class="configuration-form__grid">
+        <label class="configuration-form__wide"
+          ><span>Fehler-E-Mail-Empfänger</span
+          ><Textarea
+            v-model="failureNotificationRecipients"
+            id="policy-recipients"
+            :aria-invalid="!!errors['policy-recipients']"
+            :aria-describedby="`policy-recipients-hint${errors['policy-recipients'] ? ' policy-recipients-error' : ''}`"
+            rows="3"
+            placeholder="backup@example.org, platform@example.org"
+          /><small id="policy-recipients-hint"
+            >Komma oder Zeilenumbruch; mindestens ein Empfänger ist zur
+            Aktivierung erforderlich.</small
+          >
+          <small
+            v-if="errors['policy-recipients']"
+            id="policy-recipients-error"
+            class="field-error"
+            >{{ errors["policy-recipients"] }}</small
+          ></label
+        >
+      </div>
+    </fieldset>
+    <details
+      class="form-advanced"
+      :open="!!policy?.desiredRetention || retentionExecutionEnabled"
+    >
+      <summary>Erweiterte Aufbewahrung</summary>
+      <p>
+        Ohne eigene Aufbewahrung gilt die Vorgabe des Backupziels. Die
+        Ausführungsfreigabe bleibt eine separate Entscheidung.
+      </p>
+      <div class="configuration-form__grid">
+        <label
+          ><span>Legacy maxfiles</span
+          ><InputNumber
+            aria-label="Legacy maxfiles"
+            v-model="legacyMaxfiles"
+            :min="1"
+        /></label>
+        <label
+          ><span>Letzte behalten</span
+          ><InputNumber
+            aria-label="Letzte behalten"
+            v-model="keepLast"
+            :min="1"
+        /></label>
+        <label
+          ><span>Stündlich behalten</span
+          ><InputNumber
+            aria-label="Stündlich behalten"
+            v-model="keepHourly"
+            :min="1"
+        /></label>
+        <label
+          ><span>Täglich behalten</span
+          ><InputNumber
+            aria-label="Täglich behalten"
+            v-model="keepDaily"
+            :min="1"
+        /></label>
+        <label
+          ><span>Wöchentlich behalten</span
+          ><InputNumber
+            aria-label="Wöchentlich behalten"
+            v-model="keepWeekly"
+            :min="1"
+        /></label>
+        <label
+          ><span>Monatlich behalten</span
+          ><InputNumber
+            aria-label="Monatlich behalten"
+            v-model="keepMonthly"
+            :min="1"
+        /></label>
+        <label
+          ><span>Jährlich behalten</span
+          ><InputNumber
+            aria-label="Jährlich behalten"
+            v-model="keepYearly"
+            :min="1"
+        /></label>
+        <label class="configuration-form__check"
+          ><Checkbox v-model="keepAll" binary /><span
+            >Alle Backups behalten</span
+          ></label
+        >
+        <label class="configuration-form__check"
+          ><Checkbox
+            v-model="retentionExecutionEnabled"
+            binary
+            :disabled="retentionExecutionBlocked"
+          /><span>Retention-Ausführung aktivieren</span></label
+        >
+        <Message
+          v-if="retentionExecutionBlocked"
+          class="configuration-form__wide"
+          severity="info"
+          :closable="false"
+        >
+          Bei PBS-Backupzielen wird die Retention auf PBS verwaltet. Hoddmímir
+          sendet deshalb keine löschwirksamen Retention-Parameter an vzdump.
+        </Message>
+      </div>
+    </details>
     <div class="configuration-form__actions">
       <Button
         type="submit"
@@ -355,9 +501,10 @@ function submit(): void {
       <Button
         type="button"
         label="Abbrechen"
+        :disabled="pending"
         severity="secondary"
         text
-        @click="emit('cancel')"
+        @click="cancel"
       />
     </div>
   </form>

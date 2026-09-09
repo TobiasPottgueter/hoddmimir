@@ -1,3 +1,4 @@
+import PrimeVue from "primevue/config";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -211,16 +212,16 @@ describe("backup operations views", () => {
   it("renders explicit dashboard loading, empty and error states", async () => {
     const store = useBackupOperationsStore();
     store.loadDashboard = vi.fn();
-    store.loading = true;
+    store.dashboardStatus.loading = true;
     const wrapper = mount(DashboardView, { global: { stubs } });
     expect(wrapper.get('[role="status"]').text()).toContain("geladen");
-    store.loading = false;
+    store.dashboardStatus.loading = false;
     await wrapper.vm.$nextTick();
-    expect(wrapper.text()).toContain("Keine Betriebsprojektion");
-    store.error = "Dashboard nicht erreichbar";
+    expect(wrapper.text()).toContain("Noch keine Betriebsdaten");
+    store.dashboardStatus.error = "Dashboard nicht erreichbar";
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("Dashboard nicht erreichbar");
-    expect(wrapper.text()).not.toContain("Keine Betriebsprojektion");
+    expect(wrapper.text()).not.toContain("Noch keine Betriebsdaten");
   });
   it("renders and paginates runs, notifications and delivery details", async () => {
     const store = useBackupOperationsStore();
@@ -252,12 +253,14 @@ describe("backup operations views", () => {
       lastErrorCode: "webhook_rejected",
       nextDeliveryAttemptAt: "2026-07-13T00:05:00.000000Z",
     };
-    const wrapper = mount(RunsView, { global: { stubs } });
+    const wrapper = mount(RunsView, { global: { plugins: [PrimeVue], stubs } });
     expect(wrapper.text()).toContain("Versuch 2");
     expect(wrapper.text()).toContain("Zustellversuche 2");
     expect(wrapper.text()).toContain("Ausstehend 1");
     expect(wrapper.text()).toContain("webhook_rejected");
-    expect(wrapper.text()).toContain("read-only");
+    expect(wrapper.text()).toContain(
+      "Anforderungen und Abbrüche findest du in der Queue.",
+    );
     for (const button of wrapper.findAll("button"))
       await button.trigger("click");
     expect(store.loadRuns).toHaveBeenCalledWith(undefined, true);
@@ -277,7 +280,7 @@ describe("backup operations views", () => {
       .trigger("submit");
     expect(store.loadQueue).toHaveBeenLastCalledWith();
 
-    const runs = mount(RunsView, { global: { stubs } });
+    const runs = mount(RunsView, { global: { plugins: [PrimeVue], stubs } });
     store.runState = "unknown";
     store.notificationKind = "attention_required";
     await runs.get('form[aria-label="Backup-Läufe filtern"]').trigger("submit");

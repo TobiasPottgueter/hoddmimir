@@ -5,7 +5,7 @@ import { createPinia } from "pinia";
 import DashboardView from "./DashboardView.vue";
 
 describe("statische Ansichten", () => {
-  it("zeigt wahrheitsgemäße Read-only-Einstiege und die drei Komponenten", () => {
+  it("zeigt ohne Daten keine erfundenen Kennzahlen", () => {
     const wrapper = mount(DashboardView, {
       global: {
         plugins: [createPinia()],
@@ -15,8 +15,7 @@ describe("statische Ansichten", () => {
     expect(wrapper.text()).toContain("Betriebsübersicht");
     expect(wrapper.text()).toContain("Hoddmímir auf einen Blick");
     expect(wrapper.text()).toContain("Collector");
-    expect(wrapper.text()).toContain("Backup-Worker");
-    expect(wrapper.text()).toContain("Scheduler-Evidenz");
+    expect(wrapper.text()).toContain("Noch kein erfolgreicher Abruf");
     expect(wrapper.text()).not.toContain("0 von 3");
     expect(wrapper.text()).not.toContain("noch keine produktiven Daten");
     expect(wrapper.text()).not.toContain("Verbinde zuerst");

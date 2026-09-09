@@ -6,8 +6,10 @@ namespace App\Tests\Integration\Database;
 
 use App\Application\Inventory\ReadModel\PageCursor;
 use App\Application\Inventory\ReadModel\PageRequest;
+use App\Application\Inventory\ReadModel\ReadModelIdentifier;
 use App\Application\Backup\Operations\BackupRequestState;
 use App\Application\Backup\Operations\BackupRunState;
+use App\Application\Backup\Operations\BackupRunQuery;
 use App\Infrastructure\Persistence\MariaDb\DbalOperationsReadModel;
 use App\Infrastructure\Persistence\MariaDb\MariaDbQaFixtureSeeder;
 use App\Tests\Fakes\FrozenClock;
@@ -51,7 +53,7 @@ final class DbalOperationsReadModelTest extends DatabaseTestCase
         self::assertSame('c0000000-0000-4000-8000-000000000001', $secondPage['items'][0]['id'] ?? null);
         self::assertFalse($secondPage['page']['hasMore']);
 
-        $runs = $readModel->runs(new PageRequest(1), null)->toArray();
+        $runs = $readModel->runs(new BackupRunQuery(new PageRequest(1)))->toArray();
         self::assertSame('d0000000-0000-4000-8000-000000000001', $runs['items'][0]['id'] ?? null);
         $detail = $readModel->run('d0000000-0000-4000-8000-000000000001');
         self::assertSame('UPID:qa-node-b:00000001:00000001:00000001:vzdump:201:qa@pve:', $detail['upid'] ?? null);
@@ -151,13 +153,119 @@ final class DbalOperationsReadModelTest extends DatabaseTestCase
         $this->seedPendingRequest($pending);
         $readModel = new DbalOperationsReadModel($this->connection(), $clock, 1);
         self::assertSame('pending', $readModel->queue(new PageRequest(10), BackupRequestState::Pending)->items[0]['state'] ?? null);
-        self::assertSame('succeeded', $readModel->runs(new PageRequest(10), BackupRunState::Succeeded)->items[0]['state'] ?? null);
+        self::assertSame('succeeded', $readModel->runs(new BackupRunQuery(new PageRequest(10), BackupRunState::Succeeded))->items[0]['state'] ?? null);
         self::assertSame([], $readModel->queue(new PageRequest(10), BackupRequestState::Running)->items);
 
         try { new DbalOperationsReadModel($this->connection(), $clock, 0); self::fail('Zero freshness was accepted.'); }
         catch (\InvalidArgumentException) { self::addToAssertionCount(1); }
         $this->expectException(\InvalidArgumentException::class);
         new DbalOperationsReadModel($this->connection(), $clock, 86_401);
+    }
+
+    public function testRunHistoryCombinesFiltersAcrossClustersAndPaginatesEqualTimestamps(): void
+    {
+        $clock = new FrozenClock(new DateTimeImmutable('2026-07-13T00:00:00Z'));
+        $this->seedQaFixture($clock);
+        $guest = '50000000-0000-4000-8000-000000000201';
+        $node = '40000000-0000-4000-8000-000000000002';
+        $target = '70000000-0000-4000-8000-000000000001';
+        $this->connection()->update('guests', ['name' => 'shared_%!guest'], ['id' => self::uuid($guest)]);
+        $other = $this->cloneHistoryInventoryContext();
+        $second = $this->seedHistoryRun(2, '2026-07-13 00:00:00.000000');
+        $upper = $this->seedHistoryRun(3, '2026-07-13 00:00:00.000001');
+        $otherRun = $this->seedHistoryRun(4, '2026-07-13 00:00:00.000000', $other);
+        $qemu = self::uuid('50000000-0000-4000-8000-000000000101');
+        $this->connection()->update('guests', ['name' => 'sharedXYZguest'], ['id' => $qemu]);
+        $this->seedHistoryRun(5, '2026-07-13 00:00:00.000000', [self::uuid($guest) => $qemu]);
+        $this->seedPendingRequest(self::uuid('c0000000-0000-4000-8000-000000000006'));
+        // A moved, then archived guest and disabled target remain in history.
+        $this->connection()->update('guest_placements', ['node_id' => self::uuid('40000000-0000-4000-8000-000000000001')], ['guest_id' => self::uuid($guest)]);
+        $this->connection()->update('guests', ['inventory_state' => 'archived', 'archived_at' => '2026-07-14 00:00:00.000000'], ['id' => self::uuid($guest)]);
+        $this->connection()->update('backup_targets', ['status' => 'disabled', 'disabled_at' => '2026-07-14 00:00:00.000000', 'updated_at' => '2026-07-14 00:00:00.000000'], ['id' => self::uuid($target)]);
+        $model = new DbalOperationsReadModel($this->connection(), $clock);
+        $filters = [
+            'state' => BackupRunState::Succeeded, 'vmid' => 201, 'search' => 'SHARED_%!',
+            'startedFrom' => '2026-07-13T00:00:00Z', 'startedBefore' => '2026-07-13T00:00:00.000001Z',
+        ];
+        $page = $model->runs(new BackupRunQuery(new PageRequest(1), ...$filters));
+        self::assertSame($otherRun, $page->items[0]['id']);
+        self::assertNotNull($page->nextCursor);
+        $next = $model->runs(new BackupRunQuery(new PageRequest(1, $page->nextCursor), ...$filters));
+        self::assertSame($second, $next->items[0]['id']);
+        self::assertNotNull($next->nextCursor);
+        $last = $model->runs(new BackupRunQuery(new PageRequest(1, $next->nextCursor), ...$filters));
+        self::assertSame('d0000000-0000-4000-8000-000000000001', $last->items[0]['id']);
+        self::assertNull($last->nextCursor);
+        foreach (['guestId' => $guest, 'nodeId' => $node, 'targetId' => $target] as $key => $id) {
+            $selected = $model->runs(new BackupRunQuery(new PageRequest(), ...[...$filters, $key => new ReadModelIdentifier($id)]));
+            self::assertSame([$second, 'd0000000-0000-4000-8000-000000000001'], array_column($selected->items, 'id'));
+        }
+        $combined = $model->runs(new BackupRunQuery(new PageRequest(), ...[...$filters, 'guestId' => new ReadModelIdentifier($guest), 'nodeId' => new ReadModelIdentifier($node), 'targetId' => new ReadModelIdentifier($target)]));
+        self::assertCount(2, $combined->items);
+        self::assertSame('qa-node-b', $combined->items[0]['nodeName']);
+        /** @var list<array{vmid?: int, search?: string, guestId?: ReadModelIdentifier, state?: BackupRunState}> $mismatches */
+        $mismatches = [['vmid' => 101], ['search' => 'missing'], ['guestId' => new ReadModelIdentifier('50000000-0000-4000-8000-000000000999')], ['state' => BackupRunState::Failed]];
+        foreach ($mismatches as $mismatch) {
+            self::assertSame([], $model->runs(new BackupRunQuery(new PageRequest(), ...[...$filters, ...$mismatch]))->items);
+        }
+        self::assertSame([$upper], array_column($model->runs(new BackupRunQuery(new PageRequest(), startedFrom: '2026-07-13T00:00:00.000001Z'))->items, 'id'));
+        self::assertSame([], $model->runs(new BackupRunQuery(new PageRequest(), startedBefore: '2026-07-13T00:00:00Z'))->items);
+        self::assertCount(5, $model->runs(new BackupRunQuery(new PageRequest()))->items);
+        $this->expectException(\InvalidArgumentException::class);
+        $model->runs(new BackupRunQuery(new PageRequest(1, $page->nextCursor), ...[...$filters, 'vmid' => 101]));
+    }
+
+    /** @return array<string, string> Maps binary fixture IDs into a second connection/cluster. */
+    private function cloneHistoryInventoryContext(): array
+    {
+        $tables = [
+            'proxmox_connections' => '10000000-0000-4000-8000-000000000001',
+            'inventory_sync_runs' => '20000000-0000-4000-8000-000000000001',
+            'pve_clusters' => '30000000-0000-4000-8000-000000000001',
+            'pve_nodes' => '40000000-0000-4000-8000-000000000002',
+            'guests' => '50000000-0000-4000-8000-000000000201',
+            'pve_storages' => '60000000-0000-4000-8000-000000000001',
+            'backup_targets' => '70000000-0000-4000-8000-000000000001',
+            'backup_policies' => '80000000-0000-4000-8000-000000000001',
+        ];
+        $mapping = [];
+        foreach ($tables as $id) $mapping[self::uuid($id)] = self::uuid(substr_replace($id, '1', 1, 1));
+        // As in the QA seeder, collector-cycle process evidence is outside this read fixture.
+        $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+        foreach ($tables as $table => $id) {
+            $row = $this->connection()->fetchAssociative('SELECT * FROM '.$table.' WHERE id = ?', [self::uuid($id)]);
+            self::assertIsArray($row);
+            foreach ($row as &$value) if (is_string($value) && isset($mapping[$value])) $value = $mapping[$value];
+            unset($value);
+            if (isset($row['display_name'])) { self::assertIsString($row['display_name']); $row['display_name'] .= ' Other'; }
+            $this->connection()->insert($table, $row);
+        }
+        } finally { $this->connection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1'); }
+        return $mapping;
+    }
+
+    /** @param array<string, string> $mapping */
+    private function seedHistoryRun(int $sequence, string $startedAt, array $mapping = []): string
+    {
+        $request = $this->connection()->fetchAssociative('SELECT * FROM backup_requests WHERE id = ?', [self::uuid('c0000000-0000-4000-8000-000000000001')]);
+        $run = $this->connection()->fetchAssociative('SELECT * FROM backup_runs WHERE id = ?', [self::uuid('d0000000-0000-4000-8000-000000000001')]);
+        self::assertIsArray($request); self::assertIsArray($run);
+        foreach ($request as &$value) if (is_string($value) && isset($mapping[$value])) $value = $mapping[$value];
+        unset($value);
+        $requestId = self::uuid(sprintf('c0000000-0000-4000-8000-%012d', $sequence));
+        $runId = sprintf('d0000000-0000-4000-8000-%012d', $sequence);
+        $request['id'] = $requestId; $request['root_request_id'] = $requestId;
+        $request['state'] = 'cancelled'; $request['run_id'] = null;
+        $request['scheduled_at'] = sprintf('2026-07-13 00:00:00.%06d', $sequence);
+        $request['available_at'] = $request['scheduled_at'];
+        $this->connection()->insert('backup_requests', $request);
+        $run['id'] = self::uuid($runId); $run['request_id'] = $requestId; $run['root_request_id'] = $requestId;
+        $run['started_at'] = $startedAt; $run['finished_at'] = $startedAt;
+        $run['upid'] = 'UPID:history-'.$sequence; $run['upid_hash'] = hash('sha256', $run['upid'], true);
+        $this->connection()->insert('backup_runs', $run);
+        $this->connection()->update('backup_requests', ['state' => 'succeeded', 'run_id' => self::uuid($runId)], ['id' => $requestId]);
+        return $runId;
     }
 
     private function seedQaFixture(FrozenClock $clock): void

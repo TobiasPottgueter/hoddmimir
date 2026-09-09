@@ -1,7 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import PrimeVue from "primevue/config";
-import InputText from "primevue/inputtext";
+import PagedPicker from "@/components/common/PagedPicker.vue";
 import Select from "primevue/select";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useShadowStore } from "@/stores/shadow";
@@ -28,14 +28,14 @@ describe("ShadowView", () => {
       {
         id: "decision",
         evaluationId: "eval",
-        guestId: "guest",
+        guestId: "33333333-3333-4333-8333-333333333333",
         nodeId: null,
         outcome: "blocked",
         reason: "bytes_written",
         priority: 100,
-        policyId: "policy",
+        policyId: "11111111-1111-4111-8111-111111111111",
         policyRevision: 1,
-        targetId: "target",
+        targetId: "22222222-2222-4222-8222-222222222222",
         targetRevision: 2,
         completedAt: "2026-07-12T10:00:00.000000Z",
       },
@@ -48,7 +48,7 @@ describe("ShadowView", () => {
           code: "guest_enabled",
           passed: false,
           scope: "guest",
-          subjectId: "guest",
+          subjectId: "33333333-3333-4333-8333-333333333333",
           observedAt: null,
           detailCode: "disabled",
         },
@@ -57,7 +57,7 @@ describe("ShadowView", () => {
           code: "inventory_fresh",
           passed: true,
           scope: "inventory",
-          subjectId: "guest",
+          subjectId: "33333333-3333-4333-8333-333333333333",
           observedAt: "2026-07-12T09:59:00.000000Z",
           detailCode: "passed",
         },
@@ -109,14 +109,14 @@ describe("ShadowView", () => {
       {
         id: "decision",
         evaluationId: "eval",
-        guestId: "guest",
+        guestId: "33333333-3333-4333-8333-333333333333",
         nodeId: null,
         outcome: "eligible",
         reason: "never_backed_up",
         priority: 300,
-        policyId: "policy",
+        policyId: "11111111-1111-4111-8111-111111111111",
         policyRevision: 1,
-        targetId: "target",
+        targetId: "22222222-2222-4222-8222-222222222222",
         targetRevision: 1,
         completedAt: "2026-07-12T10:00:00.000000Z",
       },
@@ -150,19 +150,28 @@ describe("ShadowView", () => {
     const selects = wrapper.findAllComponents(Select);
     selects[0]!.vm.$emit("update:modelValue", "eligible");
     selects[1]!.vm.$emit("update:modelValue", "never_backed_up");
-    const inputs = wrapper.findAllComponents(InputText);
-    inputs[0]!.vm.$emit("update:modelValue", "policy");
-    inputs[1]!.vm.$emit("update:modelValue", "target");
-    inputs[2]!.vm.$emit("update:modelValue", "guest");
+    const inputs = wrapper.findAllComponents(PagedPicker);
+    inputs[0]!.vm.$emit(
+      "update:modelValue",
+      "11111111-1111-4111-8111-111111111111",
+    );
+    inputs[1]!.vm.$emit(
+      "update:modelValue",
+      "22222222-2222-4222-8222-222222222222",
+    );
+    inputs[2]!.vm.$emit(
+      "update:modelValue",
+      "33333333-3333-4333-8333-333333333333",
+    );
     await wrapper
       .get('form[aria-label="Shadow-Entscheidungen filtern"]')
       .trigger("submit");
     expect(apply).toHaveBeenLastCalledWith({
       outcome: "eligible",
       reason: "never_backed_up",
-      policyId: "policy",
-      targetId: "target",
-      guestId: "guest",
+      policyId: "11111111-1111-4111-8111-111111111111",
+      targetId: "22222222-2222-4222-8222-222222222222",
+      guestId: "33333333-3333-4333-8333-333333333333",
     });
     await wrapper.get("button.shadow-decision").trigger("click");
     await wrapper

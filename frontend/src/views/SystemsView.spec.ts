@@ -22,7 +22,7 @@ describe("SystemsView", () => {
     expect(wrapper.text()).toContain("PVE-Cluster");
     expect(wrapper.text()).toContain("Proxmox Backup Server");
     expect(wrapper.text()).toContain("Version: 4.2");
-    expect(wrapper.text()).toContain("löst keinen Scan aus");
+    expect(wrapper.text()).toContain("automatischen Collector-Zyklus");
     expect(wrapper.text()).not.toMatch(/jetzt scannen/i);
   });
 });

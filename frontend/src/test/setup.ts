@@ -1,5 +1,5 @@
 import { config, enableAutoUnmount } from "@vue/test-utils";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 
 enableAutoUnmount(afterEach);
 
@@ -21,3 +21,5 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+window.scrollTo = vi.fn();

@@ -988,6 +988,9 @@ export const listBackupRequestEvents = <ThrowOnError extends boolean = false>(
     ...options,
   });
 
+/**
+ * Server-filtered history ordered by stored run startedAt descending, then run ID descending. Filters are combined with AND and bound to the cursor; changing any filter requires a fresh first page. Guest, node and target IDs refer to the persisted request, not current guest placement. Names and VMID come from retained inventory, including archived objects. startedAt marks the beginning of a run attempt, not confirmation of a Proxmox task. Pending requests without a run are absent.
+ */
 export const listBackupRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListBackupRunsData, ThrowOnError>,
 ): RequestResult<ListBackupRunsResponses, ListBackupRunsErrors, ThrowOnError> =>

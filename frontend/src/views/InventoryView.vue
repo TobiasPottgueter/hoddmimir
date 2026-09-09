@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted, reactive } from "vue";
 import Button from "primevue/button";
-import InputText from "primevue/inputtext";
+import PagedPicker from "@/components/common/PagedPicker.vue";
+import {
+  connectionPages,
+  resourcePages,
+  namespaceParentPages,
+} from "@/composables/usePickerPages";
+import {
+  useQueryFilters,
+  queryChoice,
+  queryUuid,
+} from "@/composables/useQueryFilters";
 import Select from "primevue/select";
 
 import type {
@@ -35,26 +45,81 @@ const guestOptions: Array<{ label: string; value: "all" | "qemu" | "lxc" }> = [
   { label: "LXC", value: "lxc" },
 ];
 
+const draft = reactive({
+  kind: store.kind,
+  state: store.inventoryState,
+  guestType: store.guestType,
+  connectionId: store.connectionId,
+  parentId: store.parentId,
+});
+const url = useQueryFilters(
+  (query) => {
+    store.setKind(
+      queryChoice(
+        query,
+        "kind",
+        kindOptions.map((item) => item.value),
+        "pve_guest",
+      ),
+    );
+    store.setInventoryState(
+      queryChoice(query, "state", ["active", "archived"], "active"),
+    );
+    store.setGuestType(
+      store.kind === "pve_guest"
+        ? queryChoice(query, "guestType", ["all", "qemu", "lxc"], "all")
+        : "all",
+    );
+    store.setConnectionId(queryUuid(query, "connectionId"));
+    store.setParentId(
+      ["pve_cluster", "pbs_server"].includes(draft.kind)
+        ? ""
+        : queryUuid(query, "parentId"),
+    );
+    Object.assign(draft, {
+      kind: store.kind,
+      state: store.inventoryState,
+      guestType: store.guestType,
+      connectionId: store.connectionId,
+      parentId: store.parentId,
+    });
+  },
+  () => void store.load(),
+);
 function applyFilters(): void {
-  store.setConnectionId(store.connectionId);
-  store.setParentId(store.parentId);
-  void store.load();
+  void url.apply({ ...draft });
 }
-
+function resetFilters(): void {
+  void url.apply({});
+}
 function changeKind(value: InventoryResourceKind): void {
-  store.setKind(value);
-  void store.load();
+  draft.kind = value;
+  draft.parentId = "";
+  if (value !== "pve_guest") draft.guestType = "all";
 }
-
-function changeState(value: InventoryState): void {
-  store.setInventoryState(value);
-  void store.load();
-}
-
-function changeGuestType(value: "all" | "qemu" | "lxc"): void {
-  store.setGuestType(value);
-  void store.load();
-}
+const parentKind = computed<InventoryResourceKind>(
+  () =>
+    (
+      ({
+        pbs_datastore: "pbs_server",
+        pbs_namespace: "pbs_datastore",
+        pbs_backup_group: "pbs_namespace",
+        pbs_snapshot: "pbs_backup_group",
+      }) as Partial<Record<InventoryResourceKind, InventoryResourceKind>>
+    )[draft.kind] ?? "pve_cluster",
+);
+const parentPages = computed(() =>
+  draft.kind === "pbs_namespace"
+    ? namespaceParentPages({
+        inventoryState: draft.state,
+        ...(draft.connectionId ? { connectionId: draft.connectionId } : {}),
+      })
+    : resourcePages({
+        kind: parentKind.value,
+        inventoryState: draft.state,
+        ...(draft.connectionId ? { connectionId: draft.connectionId } : {}),
+      }),
+);
 
 onMounted(() => void store.load());
 </script>
@@ -80,7 +145,8 @@ onMounted(() => void store.load());
       <label>
         <span>Ressourcentyp</span>
         <Select
-          :model-value="store.kind"
+          aria-label="Ressourcentyp"
+          :model-value="draft.kind"
           :options="kindOptions"
           option-label="label"
           option-value="value"
@@ -90,37 +156,41 @@ onMounted(() => void store.load());
       <label>
         <span>Inventarstatus</span>
         <Select
-          :model-value="store.inventoryState"
+          aria-label="Inventarstatus"
+          v-model="draft.state"
           :options="stateOptions"
           option-label="label"
           option-value="value"
-          @update:model-value="changeState"
         />
       </label>
-      <label v-if="store.kind === 'pve_guest'">
+      <label v-if="draft.kind === 'pve_guest'">
         <span>Gasttyp</span>
         <Select
-          :model-value="store.guestType"
+          aria-label="Gasttyp"
+          v-model="draft.guestType"
           :options="guestOptions"
           option-label="label"
           option-value="value"
-          @update:model-value="changeGuestType"
         />
       </label>
       <label>
-        <span>Verbindungs-ID</span>
-        <InputText
-          v-model="store.connectionId"
-          placeholder="Optional UUID"
-          autocomplete="off"
+        <span>Verbindung</span>
+        <PagedPicker
+          :model-value="draft.connectionId"
+          label="Verbindung"
+          :load-page="connectionPages"
+          @update:model-value="
+            draft.connectionId = $event;
+            draft.parentId = '';
+          "
         />
       </label>
-      <label v-if="!['pve_cluster', 'pbs_server'].includes(store.kind)">
-        <span>Parent-ID</span>
-        <InputText
-          v-model="store.parentId"
-          placeholder="Optional UUID"
-          autocomplete="off"
+      <label v-if="!['pve_cluster', 'pbs_server'].includes(draft.kind)">
+        <span>Übergeordnete Ressource</span>
+        <PagedPicker
+          v-model="draft.parentId"
+          label="Übergeordnete Ressource"
+          :load-page="parentPages"
         />
       </label>
       <Button
@@ -128,6 +198,12 @@ onMounted(() => void store.load());
         label="Filter anwenden"
         icon="pi pi-filter"
         :loading="store.loading"
+      />
+      <Button
+        type="button"
+        label="Filter zurücksetzen"
+        severity="secondary"
+        @click="resetFilters"
       />
     </form>
 

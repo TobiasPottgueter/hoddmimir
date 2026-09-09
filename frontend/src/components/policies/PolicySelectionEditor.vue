@@ -258,6 +258,16 @@ function disable(operation: Operation, id: string): void {
       Gast benötigen eine konkrete Inventar-ID.
     </Message>
 
+    <Message
+      v-if="canManage && nodes.length === 0 && guests.length === 0"
+      severity="info"
+      :closable="false"
+    >
+      Noch keine Nodes oder Gäste für diesen Cluster verfügbar. Globale,
+      Verbindungs- und Clusterregeln können bereits angelegt werden. Für
+      einzelne Nodes oder Gäste prüfe den Collector-Status und warte auf das
+      automatische Inventar.
+    </Message>
     <div v-if="canManage" class="selection-editor__forms">
       <form
         aria-label="Auswahlregel konfigurieren"
@@ -267,6 +277,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Ebene</span
           ><Select
+            aria-label="Ebene"
             v-model="scope"
             :options="scopeOptions"
             option-label="label"
@@ -280,6 +291,7 @@ function disable(operation: Operation, id: string): void {
         <label v-else-if="scope === 'node'"
           ><span>Node aus Inventar (Mehrfachauswahl)</span
           ><MultiSelect
+            aria-label="Node aus Inventar (Mehrfachauswahl)"
             v-model="nodeIds"
             :options="nodeOptions"
             option-label="label"
@@ -293,6 +305,7 @@ function disable(operation: Operation, id: string): void {
           <label
             ><span>Gasttyp</span
             ><Select
+              aria-label="Gasttyp"
               v-model="guestType"
               :options="guestTypeOptions"
               option-label="label"
@@ -301,6 +314,7 @@ function disable(operation: Operation, id: string): void {
           <label
             ><span>Gast aus Inventar (Mehrfachauswahl)</span
             ><MultiSelect
+              aria-label="Gast aus Inventar (Mehrfachauswahl)"
               v-model="guestIds"
               :options="guestOptions"
               option-label="label"
@@ -314,6 +328,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Entscheidung</span
           ><Select
+            aria-label="Entscheidung"
             v-model="selectionValue"
             :options="[
               { label: 'Einschließen', value: 'include' },
@@ -338,6 +353,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Gasttyp</span
           ><Select
+            aria-label="Gasttyp"
             v-model="overrideGuestType"
             :options="guestTypeOptions"
             option-label="label"
@@ -346,6 +362,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Gast aus Inventar</span
           ><Select
+            aria-label="Gast aus Inventar"
             v-model="overrideGuestId"
             :options="overrideGuestOptions"
             option-label="label"
@@ -355,6 +372,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Backupmodus</span
           ><Select
+            aria-label="Backupmodus"
             v-model="overrideMode"
             :options="modeOptions"
             option-label="label"
@@ -363,6 +381,7 @@ function disable(operation: Operation, id: string): void {
         <label
           ><span>Kompression</span
           ><Select
+            aria-label="Kompression"
             v-model="overrideCompression"
             :options="compressionOptions"
             option-label="label"
@@ -370,7 +389,10 @@ function disable(operation: Operation, id: string): void {
         /></label>
         <label
           ><span>Letzte behalten</span
-          ><InputNumber v-model="overrideKeepLast" :min="1"
+          ><InputNumber
+            aria-label="Letzte behalten"
+            v-model="overrideKeepLast"
+            :min="1"
         /></label>
         <Button
           type="submit"

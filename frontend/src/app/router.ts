@@ -19,6 +19,10 @@ const RunDetailView = () => import("@/views/RunDetailView.vue");
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    return to.path !== from.path ? { top: 0 } : false;
+  },
   routes: [
     {
       path: "/login",

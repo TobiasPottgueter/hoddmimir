@@ -1,3 +1,4 @@
+import PagedPicker from "@/components/common/PagedPicker.vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import PrimeVue from "primevue/config";
@@ -114,9 +115,9 @@ describe("BackupTargetsView", () => {
     const candidateForm = wrapper.get(
       'form[aria-label="Backupziel-Kandidaten filtern"]',
     );
-    const fields = candidateForm.findAll("input");
-    await fields[0]?.setValue(` ${UUID} `);
-    await fields[1]?.setValue(` ${OTHER_UUID} `);
+    const fields = candidateForm.findAllComponents(PagedPicker);
+    fields[0]!.vm.$emit("update:modelValue", UUID);
+    fields[1]!.vm.$emit("update:modelValue", OTHER_UUID);
     await candidateForm.trigger("submit");
     expect(store.connectionId).toBe(UUID);
     expect(store.clusterId).toBe(OTHER_UUID);
@@ -129,7 +130,7 @@ describe("BackupTargetsView", () => {
     await configuredForm.get("input").setValue("  Primär  ");
     await configuredForm.trigger("submit");
     expect(configuredStore.search).toBe("Primär");
-    expect(configuredLoad).toHaveBeenCalledTimes(2);
+    expect(configuredLoad).toHaveBeenCalledTimes(3);
   });
 
   it.each([

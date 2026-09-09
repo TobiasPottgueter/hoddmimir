@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import ReadStatus from "@/components/common/ReadStatus.vue";
+import { useAutoRefresh } from "@/composables/useAutoRefresh";
+import { computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import Message from "primevue/message";
 import Tag from "primevue/tag";
@@ -13,7 +15,16 @@ import { useBackupOperationsStore } from "@/stores/backupOperations";
 const route = useRoute();
 const store = useBackupOperationsStore();
 const id = computed(() => String(route.params.id));
-onMounted(() => void store.loadRun(id.value));
+const { refresh, paused } = useAutoRefresh(
+  () => store.loadRun(id.value),
+  () =>
+    store.detail?.id !== id.value ||
+    (store.logs.length <= 100 &&
+      store.events.length <= 25 &&
+      store.requestEvents.length <= 25),
+  () => store.detailStatus.loading,
+);
+watch(id, () => void store.loadRun(id.value));
 </script>
 <template>
   <section class="data-view run-detail-view" aria-labelledby="run-title">
@@ -23,10 +34,17 @@ onMounted(() => void store.loadRun(id.value));
         <h2 id="run-title">Laufdetails</h2>
       </div>
     </div>
-    <Message v-if="store.error" severity="error" :closable="false">{{
-      store.error
-    }}</Message>
-    <template v-if="store.detail">
+
+    <ReadStatus
+      :state="store.detailStatus"
+      :pause-reason="
+        paused
+          ? 'Weitere Ereignisse oder Logzeilen sind geöffnet. Aktualisieren lädt wieder den Anfang.'
+          : ''
+      "
+      @refresh="refresh()"
+    />
+    <template v-if="store.detail && store.detail.id === id">
       <Message
         v-if="
           store.detail.state === 'reconcile_required' ||
@@ -105,6 +123,7 @@ onMounted(() => void store.loadRun(id.value));
         <button
           v-if="store.requestEventPage.hasMore"
           type="button"
+          :disabled="store.detailStatus.loading"
           @click="store.loadMoreRequestEvents()"
         >
           Weitere Anforderungsereignisse
@@ -121,6 +140,7 @@ onMounted(() => void store.loadRun(id.value));
         <button
           v-if="store.eventPage.hasMore"
           type="button"
+          :disabled="store.detailStatus.loading"
           @click="store.loadMoreRunEvents()"
         >
           Weitere Laufereignisse
@@ -135,6 +155,7 @@ onMounted(() => void store.loadRun(id.value));
         <button
           v-if="store.logPage.hasMore"
           type="button"
+          :disabled="store.detailStatus.loading"
           @click="store.loadMoreLogs()"
         >
           Weitere Logzeilen

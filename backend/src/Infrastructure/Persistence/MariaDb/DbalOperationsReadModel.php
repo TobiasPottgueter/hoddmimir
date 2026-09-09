@@ -6,6 +6,7 @@ namespace App\Infrastructure\Persistence\MariaDb;
 
 use App\Application\Backup\Operations\BackupRequestState;
 use App\Application\Backup\Operations\BackupRunState;
+use App\Application\Backup\Operations\BackupRunQuery;
 use App\Application\Backup\Operations\OperationsPage;
 use App\Application\Backup\Operations\OperationsReadModel;
 use App\Application\Backup\Operations\OperationsCollectorSchedule;
@@ -163,11 +164,32 @@ SQL, ['cutoff'=>$cutoff]));
         return new OperationsPage($page, $items, $next);
     }
 
-    public function runs(PageRequest $page, ?BackupRunState $state): OperationsPage
+    public function runs(BackupRunQuery $query): OperationsPage
     {
-        $context = PageCursor::context('backup-runs-v1', null === $state ? 'all' : $state->value);
+        $page = $query->page;
+        $state = $query->state;
+        $context = $query->cursorContext();
         $where = []; $parameters = ['limit' => $page->limit + 1]; $types = ['limit' => ParameterType::INTEGER];
         if (null !== $state) { $where[] = 'run.state = :state'; $parameters['state'] = $state->value; }
+        foreach (['guest_id' => $query->guestId, 'node_id' => $query->nodeId, 'target_id' => $query->targetId] as $column => $id) {
+            if (null === $id) continue;
+            $where[] = 'request.'.$column.' = :'.$column;
+            $parameters[$column] = $id->binary();
+            $types[$column] = ParameterType::BINARY;
+        }
+        if (null !== $query->vmid) {
+            $where[] = 'guest.vmid = :vmid'; $parameters['vmid'] = $query->vmid; $types['vmid'] = ParameterType::INTEGER;
+        }
+        if (null !== $query->search) {
+            $where[] = "guest.name LIKE :search ESCAPE '!'";
+            $parameters['search'] = '%'.strtr($query->search, ['!' => '!!', '%' => '!%', '_' => '!_']).'%';
+        }
+        if (null !== $query->startedFrom) {
+            $where[] = 'run.started_at >= :started_from'; $parameters['started_from'] = $query->startedFrom->format('Y-m-d H:i:s.u');
+        }
+        if (null !== $query->startedBefore) {
+            $where[] = 'run.started_at < :started_before'; $parameters['started_before'] = $query->startedBefore->format('Y-m-d H:i:s.u');
+        }
         if (null !== $page->cursor) {
             $page->cursor->assertContext(PageCursorKind::Resource, $context);
             $where[] = '(run.started_at < :cursor_at OR (run.started_at = :cursor_at AND run.id < :cursor_id))';

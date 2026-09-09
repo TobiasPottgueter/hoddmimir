@@ -26,6 +26,7 @@ import type {
   BackupRunState,
   ManualBackupRequest,
   OperationsDashboard,
+  ListBackupRunsData,
 } from "@/api/generated/types.gen";
 
 export type {
@@ -33,6 +34,17 @@ export type {
   BackupRun,
   BackupNotification,
 } from "@/api/generated/types.gen";
+
+export type RunHistoryFilters = Pick<
+  NonNullable<ListBackupRunsData["query"]>,
+  | "guestId"
+  | "nodeId"
+  | "targetId"
+  | "vmid"
+  | "search"
+  | "startedFrom"
+  | "startedBefore"
+>;
 
 export interface OperationsApi {
   dashboard(): Promise<OperationsDashboard>;
@@ -45,6 +57,7 @@ export interface OperationsApi {
     limit: number,
     cursor?: string,
     state?: BackupRunState,
+    filters?: RunHistoryFilters,
   ): Promise<BackupRunPage>;
   run(id: string): Promise<BackupRun>;
   requestEvents(
@@ -103,11 +116,12 @@ export function createOperationsApi(baseUrl = ""): OperationsApi {
         })
       ).data;
     },
-    async runs(limit, cursor, state) {
+    async runs(limit, cursor, state, filters = {}) {
       return (
         await listBackupRuns({
           client,
           query: {
+            ...filters,
             ...query(limit, cursor),
             ...(state === undefined ? {} : { state }),
           },

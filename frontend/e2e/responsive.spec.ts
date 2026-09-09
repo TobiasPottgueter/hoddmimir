@@ -43,7 +43,8 @@ test("stellt die kritische Navigation auf kleinem Viewport bereit", async ({
   await login(page);
   await page.goto("/policies");
 
-  const toggle = page.getByRole("button", { name: "Navigation öffnen" });
+  const toggle = page.locator(".navigation-toggle");
+  await expect(toggle).toHaveAccessibleName("Navigation öffnen");
   await expect(toggle).toBeVisible();
   await expect(page.getByRole("navigation")).not.toBeInViewport();
   await toggle.click();
