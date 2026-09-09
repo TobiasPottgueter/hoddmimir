@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -eu
+
+printf '%s\n' "$*" >> "$HODDMIMIR_MIGRATION_DOCKER_LOG"
+call_number=$(wc -l < "$HODDMIMIR_MIGRATION_DOCKER_LOG" | tr -d ' ')
+
+if [ "${HODDMIMIR_MIGRATION_FAIL_CALL:-0}" = "$call_number" ]; then
+    exit "${HODDMIMIR_MIGRATION_FAIL_CODE:-42}"
+fi

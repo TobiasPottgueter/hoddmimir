@@ -1,0 +1,56 @@
+#!/bin/sh
+
+set -eu
+
+printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
+
+case " $* " in
+    *' build mariadb-integration backend-tests '*)
+        exit 0
+        ;;
+    *' up --detach --wait mariadb-integration '*)
+        exit 0
+        ;;
+    *' exec -T --user 0 mariadb-integration /usr/local/bin/hoddmimir-database-user-bootstrap '*)
+        exit "${FAKE_DOCKER_BOOTSTRAP_STATUS:-0}"
+        ;;
+    *' up --no-deps --abort-on-container-exit --exit-code-from backend-tests backend-tests '*)
+        status=${FAKE_DOCKER_UP_STATUS:-0}
+
+        if [ "$status" -ne 0 ]; then
+            printf 'simulated docker compose up failure\n' >&2
+        elif [ "${FAKE_DOCKER_CREATE_COVERAGE:-0}" -eq 1 ]; then
+            test -n "${COVERAGE_UID:-}"
+            test -n "${COVERAGE_GID:-}"
+            mkdir -p backend/coverage
+            printf 'fake integration coverage\n' > backend/coverage/integration.cov
+            printf '<coverage/>\n' > backend/coverage/integration.clover.xml
+            chmod 0600 backend/coverage/integration.cov backend/coverage/integration.clover.xml
+        fi
+
+        exit "$status"
+        ;;
+    *' down --volumes --remove-orphans '*)
+        status=${FAKE_DOCKER_DOWN_STATUS:-0}
+
+        if [ "$status" -ne 0 ]; then
+            printf 'simulated docker compose down failure\n' >&2
+        fi
+
+        exit "$status"
+        ;;
+    *' ps --all '*)
+        status=${FAKE_DOCKER_PS_STATUS:-0}
+        printf 'simulated Compose status\n'
+        exit "$status"
+        ;;
+    *' logs --no-color --timestamps mariadb-integration backend-tests '*)
+        status=${FAKE_DOCKER_LOGS_STATUS:-0}
+        printf 'simulated MariaDB diagnostic log\n'
+        exit "$status"
+        ;;
+    *)
+        printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+        exit 64
+        ;;
+esac

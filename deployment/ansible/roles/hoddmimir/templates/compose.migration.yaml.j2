@@ -1,0 +1,71 @@
+---
+services:
+  schema-migration:
+    image: {{ hoddmimir_data_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
+    command: [doctrine:migrations:migrate, --no-interaction, --allow-no-migration, --no-ansi]
+    environment:
+      HODDMIMIR_MAINTENANCE_DIRECTORY: /run/hoddmimir-maintenance
+      APP_ENV: prod
+      APP_DEBUG: "0"
+      APP_TIMEZONE: {{ hoddmimir_timezone | to_json }}
+      APP_SECRET_FILE: /run/secrets/app_secret
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: {{ hoddmimir_database_name | to_json }}
+      DATABASE_USER: hoddmimir_migration
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_migration_password
+    volumes:
+      - {{ (hoddmimir_maintenance_directory ~ ':/run/hoddmimir-maintenance:ro') | to_json }}
+    secrets: [app_secret, mariadb_migration_password]
+    networks: [internal]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/var:uid=10001,gid=10001,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
+    init: true
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
+
+  maintenance-check:
+    image: {{ hoddmimir_data_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
+    command: [hoddmimir:maintenance:probe]
+    env_file: [./runtime.env]
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: "0"
+      APP_SECRET_FILE: /run/secrets/app_secret
+      ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+      ENCRYPTION_KEYRING_REVISION: {{ (hoddmimir_encryption_keyring['revision'] | string) | to_json }}
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: {{ hoddmimir_database_name | to_json }}
+      DATABASE_USER: hoddmimir_migration
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_migration_password
+      HODDMIMIR_MAINTENANCE_DIRECTORY: /run/hoddmimir-maintenance
+      BACKUP_EXECUTION_ENABLED: "false"
+      MATRIX_NOTIFICATION_ENABLED: "false"
+    volumes:
+      - {{ (hoddmimir_maintenance_directory ~ ':/run/hoddmimir-maintenance:ro') | to_json }}
+    secrets: [app_secret, encryption_key, mariadb_migration_password, mariadb_collector_password, mariadb_backup_worker_password, mariadb_web_password]
+    networks: [internal]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/var:uid=10001,gid=10001,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
+    init: true
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128

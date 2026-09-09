@@ -1,0 +1,29 @@
+{
+	admin 127.0.0.1:2019
+	auto_https off
+}
+
+http://{{ hoddmimir_public_domain }} {
+	redir https://{{ hoddmimir_public_domain }}{uri} permanent
+}
+
+https://{{ hoddmimir_public_domain }} {
+	tls {{ hoddmimir_certificate_file }} {{ hoddmimir_certificate_key_file }}
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:{{ hoddmimir_web_port }} {
+		header_up Host {host}
+		header_up -X-Forwarded-For
+		header_up -X-Forwarded-Proto
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}

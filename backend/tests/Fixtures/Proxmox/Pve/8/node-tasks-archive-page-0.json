@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "upid": "UPID:pve8-a:00000034:0010C8E0:67800000:vzdump:301:backup-observer@pve:",
+      "node": "pve8-a",
+      "pid": 52,
+      "pstart": 1100000,
+      "starttime": 1736441856,
+      "type": "vzdump",
+      "id": "301",
+      "user": "backup-observer@pve",
+      "status": "RUNNING",
+      "future-observation": "ignored-active-field"
+    },
+    {
+      "upid": "UPID:pve8-a:00000035:0010C8E1:677FFFF0:vzdump::backup-observer@pve:",
+      "node": "pve8-a",
+      "pid": 53,
+      "pstart": 1100001,
+      "starttime": 1736441840,
+      "type": "vzdump",
+      "id": "",
+      "user": "backup-observer@pve",
+      "endtime": 1736441850,
+      "status": "OK"
+    }
+  ]
+}

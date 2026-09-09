@@ -1,0 +1,52 @@
+--- backend/tests/Unit/Application/Scheduler/Shadow/RunAutomaticShadowEvaluationTest.php
++++ AuditShadowFreshnessTest.php
+@@ -27,7 +27,7 @@
+ use DateTimeImmutable;
+ use PHPUnit\Framework\TestCase;
+ 
+-final class RunAutomaticShadowEvaluationTest extends TestCase
++final class AuditShadowFreshnessTest extends TestCase
+ {
+     public function testMissingExecutorEvidenceBlocksAndPersistsAllGatesInStableOrder(): void
+     {
+@@ -380,6 +380,23 @@
+         self::assertCount(1, $store->batches);
+     }
+ 
++
++    public function testAuditStaleWriteCounterStillPromotesBytesReason(): void
++    {
++        $source=new RecordingAutomaticShadowSource([$this->candidate(
++            auditWriteObservedAt: new DateTimeImmutable('2026-07-11T00:00:00Z'),
++            lastSuccessAt: new DateTimeImmutable('2026-07-10T10:00:00Z'),
++            maximumAgeSeconds: 604800,currentBytes: 1000,baselineBytes: 0,bytesThreshold: 100,cooldownSeconds: 60
++        )]);
++        $store=new CapturingShadowStore();
++        $this->service($source,$store,new DateTimeImmutable('2026-07-12T10:05:00Z'))->execute($this->lease());
++        $decision=$store->batches[0]->decisions[0];
++        self::assertSame(DecisionOutcome::Eligible,$decision->outcome);
++        self::assertSame('bytes_written',$decision->reasonPriority->reason->value);
++        self::assertCount(1,$store->batches[0]->promotions);
++        fwrite(STDOUT,"AUDIT: write counter older than one day still promotes bytes_written with other evidence fresh\n");
++    }
++
+     private function service(RecordingAutomaticShadowSource $source, CapturingShadowStore $store, DateTimeImmutable $now): RunAutomaticShadowEvaluation
+     {
+         return new RunAutomaticShadowEvaluation($source, new PersistShadowEvaluation($store), new EligibilityEvaluator(), new EvidenceFreshnessPolicy(), new ReasonSelector(), new PriorityResolver(), new FixedShadowClock($now));
+@@ -391,6 +408,7 @@
+     }
+ 
+     private function candidate(
++        ?DateTimeImmutable $auditWriteObservedAt = null,
+         ?DateTimeImmutable $executorObservedAt = new DateTimeImmutable('2026-07-12T10:00:00Z'),
+         bool $executorAuthorized = true,
+         ?DateTimeImmutable $lastSuccessAt = null,
+@@ -426,7 +444,7 @@
+             $expectedBackupSizePresent,
+             $nodeConcurrencyAvailable, $targetConcurrencyAvailable,
+             true, $at, $executorObservedAt, $executorAuthorized, $activeRequestAbsent, $lastSuccessAt, $maximumAgeSeconds,
+-            null === $currentBytes ? null : new UInt64Decimal((string) $currentBytes), $at,
++            null === $currentBytes ? null : new UInt64Decimal((string) $currentBytes), $auditWriteObservedAt ?? $at,
+             null === $baselineBytes ? null : new UInt64Decimal((string) $baselineBytes),
+             null === $bytesThreshold ? null : new UInt64Decimal((string) $bytesThreshold), $cooldownSeconds,
+             $policyFailureNotificationConfigured && $policyRetentionCompatible && $includeResolvedPolicyJson ? $json : null,

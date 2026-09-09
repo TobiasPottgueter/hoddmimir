@@ -4,20 +4,44 @@ declare(strict_types=1);
 
 namespace App\Tests\Smoke;
 
+use App\Application\Collector\CollectorWorkerRunCode;
+use App\Application\Collector\CollectorWorkerRunResult;
+use App\Application\Collector\CollectorWorkerRunner;
+use App\Application\Backup\Worker\BackupWorkerRuntimeSafety;
+use App\Application\Backup\Worker\BackupWorkerRunner;
+use App\Application\Backup\Execution\BackupExecutionGate;
+use App\Application\Backup\Notification\BackupNotificationConfiguration;
+use App\Application\Backup\Notification\BackupNotificationDeliveryGate;
+use App\Application\Readiness\ReadinessAggregator;
+use App\Application\Readiness\ReadinessCheckResult;
 use App\Kernel;
+use App\Tests\Fakes\FixedReadinessCheck;
 use JsonException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
+use Symfony\Bundle\FrameworkBundle\Test\TestContainer;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class WorkerCommandsTest extends TestCase
 {
-    /** @return iterable<string, array{string, string}> */
-    public static function commands(): iterable
+    protected function setUp(): void
     {
-        yield 'collector' => ['hoddmimir:worker:data', 'collector'];
-        yield 'backup' => ['hoddmimir:worker:backup', 'backup'];
+        if (\function_exists('pcntl_alarm')) {
+            \pcntl_async_signals(true);
+            \pcntl_signal(\SIGALRM, static function (): never {
+                throw new \RuntimeException('The worker command did not terminate.');
+            });
+            \pcntl_alarm(5);
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        if (\function_exists('pcntl_alarm')) {
+            \pcntl_alarm(0);
+            \pcntl_signal(\SIGALRM, \SIG_DFL);
+        }
     }
 
     /** @return iterable<string, array{string}> */
@@ -28,43 +52,144 @@ final class WorkerCommandsTest extends TestCase
     }
 
     /** @throws JsonException */
-    #[DataProvider('commands')]
-    public function testWorkerCommandCanBoot(string $commandName, string $component): void
+    public function testBackupWorkerCommandCanBoot(): void
     {
-        $kernel = new Kernel('test', false);
+        $kernel = $this->readyKernel();
         $application = new Application($kernel);
-        $tester = new CommandTester($application->find($commandName));
+        $tester = new CommandTester($application->find('hoddmimir:worker:backup'));
 
         self::assertSame(0, $tester->execute(['--once' => true]));
 
         /** @var array{component?: mixed, status?: mixed} $payload */
         $payload = json_decode(trim($tester->getDisplay()), true, 512, JSON_THROW_ON_ERROR);
 
-        self::assertSame($component, $payload['component'] ?? null);
+        self::assertSame('backup', $payload['component'] ?? null);
         self::assertSame('ready', $payload['status'] ?? null);
 
         $kernel->shutdown();
     }
 
-    public function testWorkerCommandRejectsAnInvalidInterval(): void
+    public function testBackupWorkerRunnerDependencyGraphIsConstructible(): void
     {
-        $kernel = new Kernel('test', false);
+        $passwordFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-db-');
+        $secretFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-app-');
+        $keyringFile = tempnam(sys_get_temp_dir(), 'hoddmimir-worker-keyring-');
+        self::assertIsString($passwordFile);
+        self::assertIsString($secretFile);
+        self::assertIsString($keyringFile);
+        file_put_contents($passwordFile, 'unused-test-password');
+        file_put_contents($secretFile, str_repeat('application-secret-', 3));
+        file_put_contents($keyringFile, '{"format":1,"revision":1,"primaryKeyId":"worker_test","keys":[{"id":"worker_test","material":"'.str_repeat('a', 64).'"}]}');
+        $environment = [
+            'DATABASE_HOST' => '127.0.0.1',
+            'DATABASE_PORT' => '3306',
+            'DATABASE_NAME' => 'hoddmimir_worker_di_test',
+            'DATABASE_USER' => 'hoddmimir_worker_di_test',
+            'DATABASE_PASSWORD_FILE' => $passwordFile,
+            'APP_SECRET_FILE' => $secretFile,
+            'ENCRYPTION_KEY_FILE' => $keyringFile,
+            'ENCRYPTION_KEYRING_REVISION' => '1',
+        ];
+        $previous = [];
+        foreach ($environment as $name => $value) {
+            $previous[$name] = getenv($name);
+            putenv($name.'='.$value);
+            $_ENV[$name] = $value;
+            $_SERVER[$name] = $value;
+        }
+        $kernel = null;
+        try {
+            $kernel = $this->readyKernel();
+            $testContainer = $kernel->getContainer()->get('test.service_container');
+            self::assertInstanceOf(TestContainer::class, $testContainer);
+            self::assertInstanceOf(BackupWorkerRunner::class, $testContainer->get(BackupWorkerRunner::class));
+        } finally {
+            $kernel?->shutdown();
+            foreach ($previous as $name => $value) {
+                if (false === $value) {
+                    putenv($name);
+                    unset($_ENV[$name], $_SERVER[$name]);
+                } else {
+                    putenv($name.'='.$value);
+                    $_ENV[$name] = $value;
+                    $_SERVER[$name] = $value;
+                }
+            }
+            unlink($passwordFile);
+            unlink($secretFile);
+            unlink($keyringFile);
+        }
+    }
+
+    public function testBackupWorkerRefusesExecutionWithoutProblemDelivery(): void
+    {
+        $kernel = $this->readyKernel();
+        try {
+            $testContainer = $kernel->getContainer()->get('test.service_container');
+            self::assertInstanceOf(TestContainer::class, $testContainer);
+            $testContainer->set(BackupWorkerRuntimeSafety::class, new BackupWorkerRuntimeSafety(
+                new SmokeSafetyFlag(true),
+                new SmokeSafetyFlag(false),
+                new SmokeSafetyFlag(false),
+            ));
+            $application = new Application($kernel);
+            $tester = new CommandTester($application->find('hoddmimir:worker:backup'));
+            self::assertSame(1, $tester->execute(['--once' => true]));
+            self::assertStringContainsString('requires enabled and valid problem notification delivery', $tester->getDisplay());
+        } finally {
+            $kernel->shutdown();
+        }
+    }
+
+    public function testCollectorCommandUsesInjectedRuntimeAndHasNoIntervalOption(): void
+    {
+        $kernel = $this->readyKernel();
+        $testContainer = $kernel->getContainer()->get('test.service_container');
+        self::assertInstanceOf(TestContainer::class, $testContainer);
+        $runner = new SmokeCollectorRunner();
+        $testContainer->set(CollectorWorkerRunner::class, $runner);
         $application = new Application($kernel);
         $tester = new CommandTester($application->find('hoddmimir:worker:data'));
 
-        self::assertSame(2, $tester->execute(['--once' => true, '--interval' => '0']));
-        self::assertStringContainsString('positive integer', $tester->getDisplay());
+        self::assertFalse($application->find('hoddmimir:worker:data')->getDefinition()->hasOption('interval'));
+        self::assertSame(0, $tester->execute(['--once' => true]));
+        self::assertTrue($runner->once);
+        self::assertStringContainsString('cycle_succeeded', $tester->getDisplay());
 
         $kernel->shutdown();
     }
 
-    public function testCollectorDefaultsToTwoMinuteCadence(): void
+    /** @throws JsonException */
+    public function testBackupWorkerMainCommandFailsOnceWhenSchemaIsUnavailable(): void
     {
-        $kernel = new Kernel('test', false);
+        $kernel = $this->kernelWithReadiness(ReadinessCheckResult::unavailable(
+            'database_schema',
+            'database_unavailable',
+        ));
         $application = new Application($kernel);
-        $command = $application->find('hoddmimir:worker:data');
+        $tester = new CommandTester($application->find('hoddmimir:worker:backup'));
 
-        self::assertSame('120', $command->getDefinition()->getOption('interval')->getDefault());
+        self::assertSame(1, $tester->execute(['--once' => true]));
+        /** @var array{component?: mixed, status?: mixed, checks?: mixed} $payload */
+        $payload = json_decode(trim($tester->getDisplay()), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('backup', $payload['component'] ?? null);
+        self::assertSame('unavailable', $payload['status'] ?? null);
+        self::assertSame([
+            'database_schema' => [
+                'status' => 'unavailable',
+                'reason' => 'database_unavailable',
+            ],
+        ], $payload['checks'] ?? null);
+
+        $kernel->shutdown();
+    }
+
+    public function testCollectorAndExactHealthCommandsAreRegistered(): void
+    {
+        $kernel = $this->readyKernel();
+        $application = new Application($kernel);
+        self::assertSame('hoddmimir:worker:data', $application->find('hoddmimir:worker:data')->getName());
+        self::assertSame('hoddmimir:worker:health', $application->find('hoddmimir:worker:health')->getName());
 
         $kernel->shutdown();
     }
@@ -73,7 +198,7 @@ final class WorkerCommandsTest extends TestCase
     #[DataProvider('workerKinds')]
     public function testReadinessCommandIsRegisteredWithoutRunningAWorkerIteration(string $component): void
     {
-        $kernel = new Kernel('test', false);
+        $kernel = $this->readyKernel();
         $application = new Application($kernel);
         $tester = new CommandTester($application->find('hoddmimir:worker:readiness'));
 
@@ -86,5 +211,45 @@ final class WorkerCommandsTest extends TestCase
         self::assertSame('ready', $payload['status'] ?? null);
 
         $kernel->shutdown();
+    }
+
+    private function readyKernel(): Kernel
+    {
+        return $this->kernelWithReadiness(ReadinessCheckResult::ready('database_schema'));
+    }
+
+    private function kernelWithReadiness(ReadinessCheckResult $result): Kernel
+    {
+        $kernel = new Kernel('test', false);
+        $kernel->boot();
+        $testContainer = $kernel->getContainer()->get('test.service_container');
+        self::assertInstanceOf(TestContainer::class, $testContainer);
+        $testContainer->set(
+            ReadinessAggregator::class,
+            new ReadinessAggregator([
+                new FixedReadinessCheck($result),
+            ]),
+        );
+
+        return $kernel;
+    }
+}
+
+final readonly class SmokeSafetyFlag implements BackupExecutionGate, BackupNotificationDeliveryGate, BackupNotificationConfiguration
+{
+    public function __construct(private bool $value) {}
+    public function enabled(): bool { return $this->value; }
+    public function isValid(): bool { return $this->value; }
+}
+
+final class SmokeCollectorRunner implements CollectorWorkerRunner
+{
+    public bool $once = false;
+
+    public function run(bool $once): CollectorWorkerRunResult
+    {
+        $this->once = $once;
+
+        return new CollectorWorkerRunResult(CollectorWorkerRunCode::CycleSucceeded);
     }
 }

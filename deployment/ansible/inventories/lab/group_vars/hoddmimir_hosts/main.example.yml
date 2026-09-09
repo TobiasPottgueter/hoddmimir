@@ -1,0 +1,25 @@
+---
+# Real lab coordinates and release digests belong in the ignored main.yml.
+hoddmimir_deployment_profile: lab
+hoddmimir_manage_https: false
+hoddmimir_project_name: hoddmimir-lab
+hoddmimir_install_directory: /opt/hoddmimir-lab
+hoddmimir_secrets_directory: /etc/hoddmimir-lab/secrets
+hoddmimir_database_name: hoddmimir_lab
+
+hoddmimir_image_repository: registry.example.invalid/hoddmimir
+hoddmimir_registry_index_digests:
+  worker: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  web: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+  mariadb: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+hoddmimir_data_worker_image: registry.example.invalid/hoddmimir/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hoddmimir_backup_worker_image: registry.example.invalid/hoddmimir/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hoddmimir_webapp_image: registry.example.invalid/hoddmimir/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+hoddmimir_mariadb_image: registry.example.invalid/hoddmimir/mariadb@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+hoddmimir_docker_subnet: 172.31.252.0/24
+hoddmimir_docker_gateway: 172.31.252.1
+hoddmimir_web_port: 18080
+hoddmimir_backup_execution_enabled: false
+hoddmimir_backup_execution_required_ack: ENABLE_LAB_BACKUPS
+hoddmimir_matrix_notifications_enabled: false

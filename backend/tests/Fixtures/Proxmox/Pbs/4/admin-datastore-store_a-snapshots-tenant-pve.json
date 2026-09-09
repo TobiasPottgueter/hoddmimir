@@ -1,0 +1,1 @@
+{"data":[{"backup-type":"host","backup-id":"host-a","backup-time":1750000120,"files":[{"filename":"host.pxar.didx","size":8192,"crypt-mode":"sign-only"},{"filename":"index.json.blob"}],"protected":false,"verification":{"state":"failed","upid":"UPID:pbs-four:0000002E:000F4244:66800004:66800000:verify:store_a:backup@pbs!collector:"}}]}

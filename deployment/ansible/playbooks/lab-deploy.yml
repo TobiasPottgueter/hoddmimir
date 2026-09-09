@@ -1,0 +1,14 @@
+---
+- name: Deploy isolated Hoddmímir lab
+  hosts: hoddmimir_hosts
+  gather_facts: true
+  become: false
+  vars:
+    hoddmimir_backup_execution_activation_ack: "{{ lookup('ansible.builtin.env', 'ENABLE_LAB_BACKUPS') }}"
+  pre_tasks:
+    - name: Reject a non-lab inventory before deployment
+      ansible.builtin.import_role:
+        name: hoddmimir
+        tasks_from: lab-profile
+  roles:
+    - role: hoddmimir

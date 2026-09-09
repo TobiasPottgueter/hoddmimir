@@ -1,0 +1,54 @@
+---
+name: Official Proxmox API schema drift
+
+on:  # yamllint disable-line rule:truthy
+  workflow_dispatch:
+  schedule:
+    - cron: "41 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proxmox-api-schema-drift
+  cancel-in-progress: false
+
+jobs:
+  official-schema-drift:
+    name: PVE 7/8/9 and PBS 3/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        # actions/checkout v5.0.1
+        uses: >-
+          actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Set up Python
+        # actions/setup-python v6.3.0
+        uses: >-
+          actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+
+      - name: Run offline policy tests
+        run: >-
+          python -m unittest
+          scripts/tests/test_proxmox_api_schema_drift.py -v
+
+      - name: Compare official schemas with reviewed capabilities
+        shell: bash
+        run: |
+          set +e
+          python scripts/check-proxmox-api-schema-drift.py 2>&1 |
+            tee proxmox-api-schema-drift.log
+          checker_status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '## Official Proxmox API schema drift'
+            echo
+            echo '```text'
+            cat proxmox-api-schema-drift.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$checker_status"

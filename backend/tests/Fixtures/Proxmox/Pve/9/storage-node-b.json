@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "storage": "pbs-backup",
+      "type": "pbs",
+      "content": "backup",
+      "enabled": 1,
+      "active": 1,
+      "shared": 1,
+      "total": 10000000,
+      "used": 4000000,
+      "avail": 5500000,
+      "future-status-field": "ignored"
+    }
+  ]
+}

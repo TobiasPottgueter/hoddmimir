@@ -1,0 +1,1 @@
+{"data":[{"upid":"UPID:pbs-four:0000004D:0010C8E3:67800003:67800000:prune:store_a:root@pam:","node":"localhost","pid":77,"pstart":1100003,"starttime":1736441856,"worker_type":"prune","worker_id":"store_a","user":"root@pam","endtime":1736441940,"status":"WARNINGS: 2"}],"total":1}

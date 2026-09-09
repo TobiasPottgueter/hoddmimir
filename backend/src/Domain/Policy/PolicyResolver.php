@@ -1,0 +1,61 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Policy;
+
+use DomainException;
+use InvalidArgumentException;
+
+final readonly class PolicyResolver
+{
+    public function resolve(
+        BackupPolicy $policy,
+        int $pveMajor,
+        ?BackupMode $guestMode,
+        ?Compression $guestCompression,
+        ?RetentionPolicy $guestRetention,
+        bool $deletionEffectApproved,
+        bool $deletionEffectAllowedForTarget,
+    ): ResolvedBackupPolicy {
+        if (!$policy->status->executable()) {
+            throw new DomainException('Only enabled backup policies can be resolved.');
+        }
+        if ([] !== $policy->activationBlockers($pveMajor)) {
+            throw new DomainException('An enabled backup policy is not valid for the requested PVE major.');
+        }
+
+        $retention = $guestRetention ?? $policy->effectiveRetention();
+        /** @var \App\Domain\Target\BackupTargetId $targetId */
+        $targetId = $policy->targetId;
+        /** @var BackupMode $mode */
+        $mode = $policy->effectiveMode();
+        /** @var Compression $compression */
+        $compression = $policy->effectiveCompression();
+        /** @var RetentionPolicy $retention */
+        /** @var PolicyPriority $priority */
+        $priority = $policy->priority;
+        /** @var PolicyThresholds $thresholds */
+        $thresholds = $policy->thresholds;
+        /** @var Schedule $schedule */
+        $schedule = $policy->schedule;
+        if (!$retention->supportsPveMajor($pveMajor)) {
+            throw new InvalidArgumentException('The resolved retention is incompatible with the PVE major.');
+        }
+
+        return new ResolvedBackupPolicy(
+            $policy->id,
+            $policy->revision,
+            $targetId,
+            $pveMajor,
+            $guestMode ?? $mode,
+            $guestCompression ?? $compression,
+            $retention,
+            $deletionEffectApproved && $deletionEffectAllowedForTarget ? $retention : null,
+            $priority,
+            $thresholds,
+            $schedule,
+            $policy->failureNotificationRecipients,
+        );
+    }
+}

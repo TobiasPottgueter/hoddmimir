@@ -28,3 +28,9 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Keep the host clock synchronized for task reconciliation and leases
+  ansible.builtin.service:
+    name: ntpd
+    state: started
+    enabled: true

@@ -1,0 +1,1 @@
+{"data":[{"store":"local_fs","mount-status":"nonremovable","backend-type":"filesystem"},{"store":"object_s3","mount-status":"nonremovable","backend-type":"s3","future-admin":"ignored"}]}

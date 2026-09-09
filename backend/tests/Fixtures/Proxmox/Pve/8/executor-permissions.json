@@ -1,0 +1,22 @@
+{
+  "major": 8,
+  "backupTokenIdentity": "hoddmimir-fixture@pve!backup",
+  "backupOwnerIdentity": "hoddmimir-fixture@pve",
+  "backupPermissions": {
+    "data": {
+      "/vms": {"VM.Backup": 1},
+      "/storage": {"Datastore.AllocateSpace": 1},
+      "/vms/800001": {"VM.Backup": 0},
+      "/vms/800002": {"VM.Audit": 1},
+      "/storage/lab-backup": {"Datastore.AllocateSpace": 0}
+    }
+  },
+  "scanAcl": {
+    "data": [
+      {"path": "/vms", "type": "token", "ugid": "hoddmimir-fixture@pve!backup", "roleid": "HoddmimirBackup", "propagate": 1},
+      {"path": "/storage", "type": "user", "ugid": "hoddmimir-fixture@pve", "roleid": "HoddmimirBackup", "propagate": 1},
+      {"path": "/vms/800002", "type": "user", "ugid": "hoddmimir-fixture@pve", "roleid": "PVEAuditor", "propagate": 1},
+      {"path": "/vms/foreign", "type": "user", "ugid": "other-fixture@pve", "roleid": "NoAccess", "propagate": 1}
+    ]
+  }
+}

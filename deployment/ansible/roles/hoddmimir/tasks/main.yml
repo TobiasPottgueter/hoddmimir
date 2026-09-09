@@ -2,6 +2,12 @@
 - name: Run deployment preflight gates
   ansible.builtin.import_tasks: preflight.yml
 
+- name: Configure the optional host HTTPS boundary
+  ansible.builtin.import_tasks: https-setup.yml
+  when: hoddmimir_manage_https | bool
+  tags:
+    - hoddmimir_https
+
 - name: Create Hoddmímir installation directory
   ansible.builtin.file:
     path: "{{ hoddmimir_install_directory }}"
@@ -10,98 +16,145 @@
     group: root
     mode: "0750"
 
-- name: Install transactional deployment executor
-  ansible.builtin.copy:
-    src: deploy_transaction.py
-    dest: "{{ hoddmimir_transaction_script }}"
-    owner: root
-    group: root
-    mode: "0555"
-
-- name: Remove stale deployment staging directory
-  ansible.builtin.file:
-    path: "{{ hoddmimir_staging_directory }}"
-    state: absent
-  changed_when: false
-
-- name: Create deployment staging directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0700"
-  loop:
-    - "{{ hoddmimir_staging_directory }}"
-    - "{{ hoddmimir_staging_directory }}/secrets"
-  changed_when: false
-
-- name: Stage Docker secret files
-  ansible.builtin.copy:
-    content: "{{ item.value }}\n"
-    dest: "{{ hoddmimir_staging_directory }}/secrets/{{ item.name }}"
-    owner: root
-    group: root
-    mode: "0600"
-  loop:
-    - { name: app_secret, value: "{{ hoddmimir_app_secret }}" }
-    - { name: encryption_key, value: "{{ hoddmimir_encryption_key }}" }
-    - { name: mariadb_root_password, value: "{{ hoddmimir_mariadb_root_password }}" }
-    - { name: mariadb_migration_password, value: "{{ hoddmimir_mariadb_migration_password }}" }
-    - { name: mariadb_web_password, value: "{{ hoddmimir_mariadb_web_password }}" }
-    - { name: mariadb_collector_password, value: "{{ hoddmimir_mariadb_collector_password }}" }
-    - { name: mariadb_backup_worker_password, value: "{{ hoddmimir_mariadb_backup_worker_password }}" }
-  loop_control:
-    label: "{{ item.name }}"
-  changed_when: false
-  diff: false
-  no_log: true
-
-- name: Stage MariaDB initialization script
-  ansible.builtin.template:
-    src: 10-create-app-users.sh.j2
-    dest: "{{ hoddmimir_staging_directory }}/10-create-app-users.sh"
-    owner: root
-    group: root
-    mode: "0555"
-  changed_when: false
-
-- name: Stage runtime environment
-  ansible.builtin.template:
-    src: runtime.env.j2
-    dest: "{{ hoddmimir_staging_directory }}/runtime.env"
-    owner: root
-    group: root
-    mode: "0640"
-  changed_when: false
-
-- name: Stage production Compose model
-  ansible.builtin.template:
-    src: compose.yaml.j2
-    dest: "{{ hoddmimir_staging_directory }}/compose.yaml"
-    owner: root
-    group: root
-    mode: "0640"
-  changed_when: false
-
-- name: Apply and verify deployment transaction
+- name: Stage and apply isolated deployment transaction
   block:
+    - name: Create unique deployment staging directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ hoddmimir_install_directory }}"
+        prefix: "{{ hoddmimir_staging_prefix }}"
+      register: hoddmimir_deployment_staging
+      changed_when: false
+
+    - name: Enforce private staging directory permissions
+      ansible.builtin.file:
+        path: "{{ hoddmimir_deployment_staging.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      changed_when: false
+
+    - name: Create private staging secrets directory
+      ansible.builtin.file:
+        path: "{{ hoddmimir_deployment_staging.path }}/secrets"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      changed_when: false
+
+    - name: Stage transactional deployment executor
+      ansible.builtin.copy:
+        src: deploy_transaction.py
+        dest: "{{ hoddmimir_deployment_staging.path }}/deploy_transaction.py"
+        owner: root
+        group: root
+        mode: "0555"
+      changed_when: false
+
+    - name: Stage maintenance deployment executor
+      ansible.builtin.copy:
+        src: maintenance_upgrade.py
+        dest: "{{ hoddmimir_deployment_staging.path }}/maintenance_upgrade.py"
+        owner: root
+        group: root
+        mode: "0555"
+      changed_when: false
+
+    - name: Stage Docker secret files
+      ansible.builtin.copy:
+        content: "{{ item.value }}\n"
+        dest: "{{ hoddmimir_deployment_staging.path }}/secrets/{{ item.name }}"
+        owner: root
+        group: root
+        mode: "0600"
+      loop:
+        - { name: app_secret, value: "{{ hoddmimir_app_secret }}" }
+        - { name: mariadb_root_password, value: "{{ hoddmimir_mariadb_root_password }}" }
+        - { name: mariadb_migration_password, value: "{{ hoddmimir_mariadb_migration_password }}" }
+        - { name: mariadb_web_password, value: "{{ hoddmimir_mariadb_web_password }}" }
+        - { name: mariadb_collector_password, value: "{{ hoddmimir_mariadb_collector_password }}" }
+        - { name: mariadb_backup_worker_password, value: "{{ hoddmimir_mariadb_backup_worker_password }}" }
+        - { name: matrix_webhook_url, value: "{{ hoddmimir_matrix_webhook_url }}" }
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      diff: false
+      no_log: true
+
+    - name: Stage canonical encryption keyring
+      ansible.builtin.template:
+        src: encryption-keyring.json.j2
+        dest: "{{ hoddmimir_deployment_staging.path }}/secrets/encryption_key"
+        owner: root
+        group: root
+        mode: "0600"
+      changed_when: false
+      diff: false
+      no_log: true
+
+    - name: Stage MariaDB initialization script
+      ansible.builtin.template:
+        src: 10-create-app-users.sh.j2
+        dest: "{{ hoddmimir_deployment_staging.path }}/10-create-app-users.sh"
+        owner: root
+        group: root
+        mode: "0555"
+      changed_when: false
+
+    - name: Stage runtime environment
+      ansible.builtin.template:
+        src: runtime.env.j2
+        dest: "{{ hoddmimir_deployment_staging.path }}/runtime.env"
+        owner: root
+        group: root
+        mode: "0640"
+      changed_when: false
+
+    - name: Stage production Compose model
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ hoddmimir_deployment_staging.path }}/compose.yaml"
+        owner: root
+        group: root
+        mode: "0640"
+      changed_when: false
+
+    - name: Stage production migration Compose model
+      ansible.builtin.template:
+        src: compose.migration.yaml.j2
+        dest: "{{ hoddmimir_deployment_staging.path }}/compose.migration.yaml"
+        owner: root
+        group: root
+        mode: "0640"
+      changed_when: false
+
     - name: Execute deployment transaction
       ansible.builtin.command:
         argv: >-
           {{
             [
               hoddmimir_python_executable,
-              hoddmimir_transaction_script,
+              hoddmimir_deployment_staging.path ~ '/deploy_transaction.py',
               '--docker-executable=' ~ hoddmimir_docker_executable,
-              '--staging-directory=' ~ hoddmimir_staging_directory,
+              '--staging-directory=' ~ hoddmimir_deployment_staging.path,
               '--current-compose-file=' ~ hoddmimir_compose_file,
+              '--current-migration-compose-file=' ~ hoddmimir_migration_compose_file,
               '--current-environment-file=' ~ hoddmimir_environment_file,
               '--current-mariadb-init-script=' ~ hoddmimir_mariadb_init_script,
               '--current-secrets-directory=' ~ hoddmimir_secrets_directory,
               '--health-url=' ~ hoddmimir_healthcheck_url,
-              '--wait-timeout=' ~ (hoddmimir_compose_wait_timeout_seconds | string)
+              '--wait-timeout=' ~ (hoddmimir_compose_wait_timeout_seconds | string),
+              '--migration-service=' ~ hoddmimir_migration_service,
+              '--database-service=' ~ hoddmimir_database_service,
+              '--database-bootstrap-script=' ~ hoddmimir_database_bootstrap_script,
+              '--encryption-keyring-revision=' ~ (hoddmimir_encryption_keyring['revision'] | string),
+              '--transaction-lock-file=' ~ hoddmimir_transaction_lock_file,
+              '--maintenance-directory=' ~ hoddmimir_maintenance_directory,
+              '--maintenance-timeout=' ~ (hoddmimir_maintenance_timeout_seconds | string),
             ]
+            + (hoddmimir_maintenance_external_schedulers_paused | bool | ternary(['--maintenance-external-schedulers-paused'], []))
             + (
               hoddmimir_expected_services
               | map('regex_replace', '^(.*)$', '--expected-service=\1')
@@ -112,8 +165,17 @@
       changed_when: (hoddmimir_transaction.stdout | from_json).changed | bool
 
   always:
-    - name: Remove deployment staging directory
+    - name: Remove only this deployment staging directory
       ansible.builtin.file:
-        path: "{{ hoddmimir_staging_directory }}"
+        path: "{{ hoddmimir_deployment_staging.path }}"
         state: absent
       changed_when: false
+      when:
+        - hoddmimir_deployment_staging is defined
+        - hoddmimir_deployment_staging.path is defined
+
+- name: Activate the optional host HTTPS boundary
+  ansible.builtin.import_tasks: https-activate.yml
+  when: hoddmimir_manage_https | bool
+  tags:
+    - hoddmimir_https

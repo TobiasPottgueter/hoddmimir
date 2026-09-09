@@ -1,0 +1,32 @@
+{
+  "data": [
+    {
+      "id": "cluster",
+      "name": "forest-test",
+      "nodes": 2,
+      "quorate": true,
+      "type": "cluster",
+      "version": 8
+    },
+    {
+      "id": "node/pve8-a.test",
+      "ip": "198.51.100.81",
+      "level": "c",
+      "local": true,
+      "name": "pve8-a.test",
+      "nodeid": 1,
+      "online": true,
+      "type": "node"
+    },
+    {
+      "id": "node/pve8-b.test",
+      "ip": "198.51.100.82",
+      "level": "c",
+      "local": false,
+      "name": "pve8-b.test",
+      "nodeid": 2,
+      "online": true,
+      "type": "node"
+    }
+  ]
+}

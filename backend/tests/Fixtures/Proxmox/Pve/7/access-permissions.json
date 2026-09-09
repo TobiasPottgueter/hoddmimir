@@ -1,0 +1,16 @@
+{
+  "data": {
+    "/": {
+      "Sys.Audit": 1
+    },
+    "/nodes": {
+      "Sys.Audit": 1
+    },
+    "/storage": {
+      "Datastore.Audit": 1
+    },
+    "/vms": {
+      "VM.Audit": 1
+    }
+  }
+}

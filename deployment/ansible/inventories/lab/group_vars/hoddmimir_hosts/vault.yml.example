@@ -1,0 +1,16 @@
+---
+# Generate the real ignored and encrypted Vault through `make lab-secrets`.
+hoddmimir_app_secret: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_encryption_keyring:
+  format: 1
+  revision: 1
+  primaryKeyId: lab_1
+  keys:
+    - id: lab_1
+      material: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_mariadb_root_password: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_mariadb_migration_password: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_mariadb_web_password: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_mariadb_collector_password: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_mariadb_backup_worker_password: REPLACE_WITH_64_HEX_CHARACTERS
+hoddmimir_matrix_webhook_url: https://matrix.invalid/disabled

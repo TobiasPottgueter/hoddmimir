@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -eu
+
+exec {{ hoddmimir_python_executable | quote }} \
+    {{ hoddmimir_https_transaction_executable | quote }} \
+    --domain={{ hoddmimir_public_domain | quote }} \
+    --email={{ hoddmimir_acme_email | quote }} \
+    --health-url={{ hoddmimir_https_healthcheck_url | quote }} \
+    --token-file={{ hoddmimir_hetzner_dns_api_token_file | quote }} \
+    --candidate-caddyfile={{ hoddmimir_caddy_candidate_file | quote }} \
+    --caddyfile={{ hoddmimir_caddyfile | quote }} \
+    --certificate-file={{ hoddmimir_certificate_file | quote }} \
+    --certificate-key-file={{ hoddmimir_certificate_key_file | quote }} \
+    --lego-state-directory={{ hoddmimir_lego_state_directory | quote }} \
+    --renew-before-days={{ hoddmimir_acme_renew_before_days | string | quote }} \
+    --acme-user={{ hoddmimir_acme_user | quote }} \
+    --acme-group={{ hoddmimir_acme_group | quote }} \
+    --caddy-group={{ hoddmimir_caddy_group | quote }} \
+    --caddy-executable={{ hoddmimir_caddy_executable | quote }} \
+    --lego-executable={{ hoddmimir_lego_executable | quote }} \
+    --openssl-executable={{ hoddmimir_openssl_executable | quote }} \
+    --rc-service-executable={{ hoddmimir_rc_service_executable | quote }} \
+    --caddy-service={{ hoddmimir_caddy_service | quote }} \
+    --lock-file={{ hoddmimir_https_transaction_lock_file | quote }}

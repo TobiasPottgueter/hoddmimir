@@ -1,0 +1,1 @@
+{"data":[{"upid":"UPID:pbs-four:0000004D:0010C8E3:67800003:67800000:backup:store\\x2da\\x3avm-guest\\x2d101:backup@pbs!collector:","node":"localhost","pid":77,"pstart":1100003,"starttime":1736441856,"worker_type":"backup","worker_id":"store-a:vm/guest-101","user":"backup@pbs!collector","endtime":1736441940,"status":"OK"}],"total":1}

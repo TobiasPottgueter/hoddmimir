@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "storage": "local-backup",
+      "type": "dir",
+      "content": "backup,iso",
+      "nodes": "pve7-a.test",
+      "digest": "fixture-pve-7-storage-cfg",
+      "prune-backups": "keep-last=7",
+      "future-field": "ignored"
+    },
+    {
+      "storage": "pbs-backup",
+      "type": "pbs",
+      "content": "backup",
+      "shared": 1,
+      "server": "pbs7.test",
+      "datastore": "vault7",
+      "digest": "fixture-pve-7-storage-cfg"
+    },
+    {
+      "storage": "installation-media",
+      "type": "glusterfs",
+      "content": "iso",
+      "shared": 1,
+      "digest": "fixture-pve-7-storage-cfg"
+    },
+    {
+      "storage": "disabled-backup",
+      "type": "dir",
+      "content": "backup",
+      "disable": 1,
+      "digest": "fixture-pve-7-storage-cfg"
+    },
+    {
+      "storage": "restricted-backup",
+      "type": "nfs",
+      "content": "backup",
+      "nodes": "pve7-a.test",
+      "shared": 1,
+      "digest": "fixture-pve-7-storage-cfg"
+    }
+  ]
+}

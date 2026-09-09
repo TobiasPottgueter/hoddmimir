@@ -1,0 +1,12 @@
+{
+  "data": {
+    "vmid": 301,
+    "storage": "pbs-archive",
+    "mode": "suspend",
+    "compress": "zstd",
+    "prune-backups": "keep-last=3,keep-daily=7",
+    "notification-mode": "legacy-sendmail",
+    "mailto": "backup-alerts@example.invalid,platform@example.invalid",
+    "mailnotification": "failure"
+  }
+}

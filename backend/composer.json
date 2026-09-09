@@ -4,14 +4,24 @@
     "type": "project",
     "license": "proprietary",
     "require": {
+        "doctrine/dbal": "^4.4",
+        "doctrine/doctrine-bundle": "^3.2",
+        "doctrine/doctrine-migrations-bundle": "^4.0",
+        "doctrine/migrations": "^3.9",
         "php": "^8.5",
         "ext-ctype": "*",
+        "ext-curl": "*",
         "ext-iconv": "*",
+        "ext-openssl": "*",
+        "ext-sodium": "*",
         "symfony/console": "^7.4",
         "symfony/framework-bundle": "^7.4",
+        "symfony/http-client": "^7.4",
+        "symfony/monolog-bundle": "^4.0",
         "symfony/runtime": "^7.4"
     },
     "require-dev": {
+        "infection/infection": "0.34.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^12.5",
         "symfony/browser-kit": "^7.4",
@@ -21,6 +31,7 @@
         "symfony/cache": ">=8.0",
         "symfony/config": ">=8.0",
         "symfony/dependency-injection": ">=8.0",
+        "symfony/doctrine-bridge": ">=8.0",
         "symfony/dom-crawler": ">=8.0",
         "symfony/error-handler": ">=8.0",
         "symfony/event-dispatcher": ">=8.0",
@@ -28,8 +39,10 @@
         "symfony/finder": ">=8.0",
         "symfony/http-foundation": ">=8.0",
         "symfony/http-kernel": ">=8.0",
+        "symfony/monolog-bridge": ">=8.0",
         "symfony/routing": ">=8.0",
         "symfony/string": ">=8.0",
+        "symfony/stopwatch": ">=8.0",
         "symfony/var-dumper": ">=8.0",
         "symfony/var-exporter": ">=8.0"
     },
@@ -48,13 +61,16 @@
         "test": "phpunit",
         "verify": [
             "@validate-project",
+            "@openapi",
             "@analyse",
             "@test"
         ],
+        "openapi": "php tools/check-openapi.php ../docs/openapi-v1.json",
         "validate-project": "composer validate --strict"
     },
     "config": {
         "allow-plugins": {
+            "infection/extension-installer": true,
             "symfony/runtime": true
         },
         "optimize-autoloader": true,

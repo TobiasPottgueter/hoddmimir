@@ -23,19 +23,22 @@ final readonly class WorkerLoop
         int $intervalSeconds,
         bool $once,
         callable $onIteration,
-    ): void {
+    ): WorkerReadinessReport {
         if ($intervalSeconds < 1) {
             throw new InvalidArgumentException('The worker interval must be at least one second.');
         }
 
-        while (true) {
-            $onIteration($this->readinessProbe->probe($worker));
-
-            if ($once) {
-                return;
+        do {
+            $report = $this->readinessProbe->probe($worker);
+            if ($report->isReady()) {
+                $onIteration($report);
             }
 
-            $this->sleeper->sleep($intervalSeconds);
-        }
+            if (!$once) {
+                $this->sleeper->sleep($intervalSeconds);
+            }
+        } while (!$once);
+
+        return $report;
     }
 }

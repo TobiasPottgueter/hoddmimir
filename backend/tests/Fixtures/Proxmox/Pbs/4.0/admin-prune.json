@@ -1,0 +1,1 @@
+{"data":[{"id":"prune_daily","store":"store_a","ns":"","schedule":"daily","last-run-upid":"UPID:pbs-four:0000003A:0010C8E0:67800000:67800000:prunejob:prune_daily:root@pam:","last-run-state":"OK","last-run-endtime":1736441910,"next-run":1736528256}],"digest":"4444444444444444444444444444444444444444444444444444444444444444"}

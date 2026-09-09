@@ -7,6 +7,7 @@ alpine_base_hoddmimir_manage_runtime_hostname: true
 alpine_base_hoddmimir_retired_hostnames: []
 
 alpine_base_packages:
+  - busybox-openrc
   - ca-certificates
   - curl
   - tzdata

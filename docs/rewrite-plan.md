@@ -1,6 +1,6 @@
 # Rewrite-Plan: Hoddmímir 2.0
 
-Stand: 10. Juli 2026
+Stand: 7. September 2026 (Vertragsentscheidungen ADR 0005/0006; Implementierungsstatus unverändert)
 
 ## 1. Ziel und verbindlicher Scope
 
@@ -184,12 +184,36 @@ Verantwortung:
 
 Der Collector hat gegenüber PVE/PBS ausschließlich Leserechte. Er startet, stoppt und löscht nichts.
 
+Capability-Snapshots werden nach dem erfolgreichen Read des ausgewählten
+Endpunkts und vor dem Inventory-Apply kanonisch, idempotent und gefencet
+persistiert. Der vollständige Hash-, Transaktions- und Fehlervertrag steht in
+[`capability-snapshot-persistence.md`](capability-snapshot-persistence.md).
+
+Die externen Backupjobs und Tasklisten werden nach dem autoritativen
+Core-/Storage-Apply über zwei gefencete Childruns (`external_jobs` und
+`observed_tasks`) persistiert. Beide verwenden genau einen kombinierten Read
+des vom Parent ausgewählten Endpunkts ohne erneutes Failover. Projektionen sind
+positive-only; unvollständige oder ACL-unzureichende Reads treffen keine
+Abwesenheitsentscheidung. Der vollständige Persistenz-, Cursor- und
+Shutdown-Vertrag steht in
+[`proxmox-external-monitoring-persistence.md`](proxmox-external-monitoring-persistence.md).
+
+PBS namespaces and snapshots run as a third, independently fenced content
+child after the PBS datastore parent apply. The child reuses the parent's
+exact selected endpoint, reads no `/groups` endpoint, derives group projections
+from snapshot rows, and persists scoped positive observations. Namespace
+scopes are always positive-only; only complete ACL-backed exact snapshot
+scopes may archive unseen snapshots and derived groups in that namespace. The
+complete GET, limit, root-namespace, fixture, and persistence contract is in
+[`pbs-content-inventory-contract.md`](pbs-content-inventory-contract.md).
+
 ### 3.3 Backup Worker
 
 Verantwortung:
 
 - atomisches Claiming mit Lease und Heartbeat;
 - erneute Prüfung von Placement, Policy, Kapazität und Concurrency direkt vor dem Start;
+- direkte frische vollständige PVE-Taskprüfung vor jedem Start: Manuelle/externe Backups belegen ebenfalls den Node-Slot. Bei belegtem oder nicht zuverlässig prüfbarem Slot warten;
 - Status `starting` wird vor dem HTTP-Request persistiert;
 - Start exakt eines Gastes per `POST /nodes/{node}/vzdump`;
 - sofortige Persistierung des zurückgegebenen UPID;
@@ -198,7 +222,7 @@ Verantwortung:
 - Zustände `pending`, `leased`, `starting`, `running`, `retry_wait`, `succeeded`, `failed`, `cancelled`, `unknown`;
 - strukturierte Events, Fehlertypen und revisionssicherer Policy-Snapshot je Lauf.
 
-Ein `vzdump`-POST wird bei Timeout oder Transportabbruch niemals blind wiederholt. Zuerst wird über die Taskliste im engen Zeitfenster reconciliiert. Bleibt der Zustand unklar, endet der Lauf in `unknown` und erfordert eine kontrollierte Entscheidung.
+Ein `vzdump`-POST wird bei Timeout oder Transportabbruch niemals blind wiederholt. Zuerst wird über die Taskliste im engen Zeitfenster reconciliiert. Bleibt das Ergebnis unbekannt, bleibt der alte Lauf nachvollziehbar `unknown`. Ein neuer automatischer Versuch ist nach vollständiger frischer Taskklärung ohne eindeutige Zuordnung und Prüfung aller allgemeinen Startgates, ohne Sonderwartefrist zulässig. Der verbindliche, implementierte und noch live abzunehmende Vertrag steht in [ADR 0005](adr/0005-automatic-backup-recovery.md). Ein möglicherweise zusätzliches Backup wird akzeptiert; eine neue Request-ID allein ist keine Wiederfreigabe.
 
 ### 3.4 WebApp
 
@@ -240,9 +264,9 @@ Symfony ist eine schlanke Anwendungshülle, nicht der Ort für die Backup-Fachlo
 - Generischer HTTP-Transport: Symfony HttpClient unter den eigenen PVE-/PBS-Adaptern.
 - MariaDB-Anbindung: Integration von Doctrine DBAL und der internen V2-Schema-Versionierung.
 
-Nicht an Symfony gekoppelt werden Domain-Regeln, Zustandsautomaten, Priorisierung, Queue-Entscheidungen, Proxmox-DTOs oder API-Verträge. Diese bleiben Plain PHP und sind ohne Symfony-Kernel unit-testbar. Die Worker laden keinen Web-, Security- oder Template-Stack. Twig, Doctrine ORM und Symfony Messenger sind nicht Bestandteil der Kernarchitektur.
+Nicht an Symfony gekoppelt werden Domain-Regeln, Zustandsautomaten, Priorisierung, Queue-Entscheidungen, Proxmox-DTOs oder API-Verträge. Diese bleiben Plain PHP und sind ohne Symfony-Kernel unit-testbar. Die Worker verwenden den gemeinsamen Symfony-Kernel einschließlich Framework-/HttpKernel-Klassen und registrierter API-Service-Definitionen, starten aber keinen HTTP-Server. Diese bewusste Wiring-Entscheidung ist in [ADR 0007](adr/0007-worker-runtime-wiring.md) festgehalten. Twig, Doctrine ORM und Symfony Messenger sind nicht Bestandteil der Kernarchitektur.
 
-Full Symfony ist damit nur für das WebApp-Backend gerechtfertigt. Für die Worker werden lediglich die benötigten Console-, DI-, Config-, Logging- und HttpClient-Komponenten verwendet. Reines Plain PHP für alles würde insbesondere Authentifizierung, RBAC, Validierung und Service-Wiring unnötig neu implementieren.
+Der gemeinsame Kernel ist die äußere Runtime-Hülle für WebApp und Console-Worker. Ein separater Minimal-Bootstrap ist nach ADR 0007 keine V2-Voraussetzung. Reines Plain PHP für alles würde insbesondere Authentifizierung, RBAC, Validierung und Service-Wiring unnötig neu implementieren.
 
 ### 4.2 Laufzeit-Images
 
@@ -307,12 +331,31 @@ Bekannte Unterschiede, die explizit getestet werden:
 
 Separate technische Identitäten:
 
-1. PVE Collector Token: `Sys.Audit`, `VM.Audit`, `Datastore.Audit` auf den benötigten Pfaden.
-2. PVE Backup Token: `VM.Backup` auf den Zielgästen/-Pools und `Datastore.AllocateSpace` auf Zielstorages; optional `Datastore.Audit`.
-3. PBS Collector Token: System-Audit und `DatastoreAudit` auf den ausgewählten Datastores/Namespaces.
+1. PVE Collector Token: installationsweit propagiertes `Sys.Audit`, `VM.Audit`, `Pool.Audit` und `Datastore.Audit`, damit immer alle aktuellen und zukünftigen Nodes, VMs, CTs, Pools und Storages sichtbar sind.
+2. PVE Backup Token: effektives `Sys.Audit` auf allen Nodes für die Sicht auf manuelle/externe Tasks (bestehendes `HoddmimirScan` auf `/` mit Propagation genügt; andernfalls Ergänzung auf `/nodes`) sowie installationsweit propagiertes `VM.Backup` und `Datastore.AllocateSpace`, damit immer alle aktuellen und zukünftigen Gäste, Pools und Storages ausführbar sind. Proxmox-ACLs begrenzen den Executor bewusst nicht auf die aktuelle Hoddmímir-Auswahl; Auswahl, Enable-Gates, Zielzuordnung und Policy bleiben fachliche Hoddmímir-Regeln.
+3. PBS Collector Token: System-Audit und `DatastoreAudit` auf den ausgewählten Datastores/Namespaces reichen für positive Datastore-Sicht. Vollständige Prune-/Verify-/Sync-Job-Scope-Evidenz erfordert propagiertes `DatastoreAudit` am Root `/datastore`; vollständige Sync-Job-Evidenz zusätzlich propagiertes `RemoteAudit` am Root `/remote`. Fehlt diese breite Evidenz, werden sichtbare Beobachtungen weiterhin positive-only persistiert und nur die betroffenen Scopes bleiben `partial`.
 4. PVE-zu-PBS Storage Token: liegt ausschließlich in der PVE-Storage-Konfiguration und hat nur `DatastoreBackup` auf dem engsten PBS-Namespace.
 
-Produktionsverbindungen erlauben keine deaktivierte TLS-Prüfung. Unterstützt werden eine vertrauenswürdige CA oder explizites SHA-256-Fingerprint-Pinning. Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem Logeintrag redigiert.
+Das bootstrap-freie Anlegen und Prüfen dieser Identitäten über die WebApp ist
+im [`proxmox-connection-onboarding-plan.md`](proxmox-connection-onboarding-plan.md)
+festgelegt.
+
+Produktionsverbindungen erlauben keine generische oder globale Abschaltung der
+TLS-Vertrauensprüfung. Die drei exklusiven Modi sind System-CA, Custom-CA und
+ein endpointbezogener exakter SHA-256-Leaf-Fingerprint. System-CA und Custom-CA
+prüfen Zertifikatskette und Hostnamen. Nur im ausdrücklich gewählten
+Fingerprint-Modus ersetzt der exakte Leaf-Digest diese beiden Prüfungen; ein
+abweichendes Zertifikat bricht nach TLS und vor dem HTTP-Request ab, bevor Header übertragen
+werden. Die Transportverschlüsselung bleibt in allen Modi aktiv. Die
+Request-Transporte dürfen diese ausschließlich von der Client-Factory gesetzte
+Trust-Policy nicht überschreiben. Diese Semantik entspricht der offiziellen
+[PBS-4-Client-Dokumentation](https://pbs.proxmox.com/docs/backup-client.html),
+die `PBS_FINGERPRINT` zur Serverzertifikatsprüfung verwendet, wenn die
+System-CA nicht validieren kann, sowie der
+[PVE-7-`pvesm`-Dokumentation](https://pve.proxmox.com/pve-docs-7/pvesm.1.html),
+die für selbstsignierte PBS-Zertifikate einen SHA-256-Fingerprint verlangt.
+Authorization-Header, Token, Cookies, CSRF-Werte und Secrets werden vor jedem
+Logeintrag redigiert.
 
 ### 5.4 Retry- und Timeout-Regeln
 
@@ -336,11 +379,14 @@ Das folgende Modell ist ein Greenfield-Entwurf. Gegenüber dem Altschema werden 
 - `guests` mit Unique Key `(cluster_id, guest_type, vmid)`
 - `guest_placements` und optional `guest_placement_history`
 - `pve_storages`
-- `pbs_servers`
-- `pbs_datastores`
+- `pbs_servers` und der getrennte aktuelle Messzustand `pbs_server_status`
+- `pbs_datastores` und der getrennte aktuelle Messzustand
+  `pbs_datastore_capacity_state`; S3-Werte bedeuten ausschließlich lokalen
+  Cache
 - `pbs_namespaces`
 - `backup_targets`
 - `inventory_sync_runs`
+- `collector_cycles`
 - `worker_heartbeats`
 
 ### 6.2 Policies, Queue und Läufe
@@ -392,11 +438,39 @@ Eligibility und Priorisierung werden als reine Domain-Services implementiert:
 6. Node- und Storage-Concurrency sowie Mindestfreiplatz prüfen.
 7. Idempotent enqueuen; eine Unique-Constraint verhindert Dubletten pro Policy, Gast und Planzeitpunkt.
 
-Retention und Kompression werden im Policy-Snapshot vollständig modelliert. PBS-Pruning wird bevorzugt über PBS-Retention/Prune-Jobs administriert. Eine Löschwirkung durch Backup-Parameter wird erst nach separater Rechte-, Capability- und E2E-Prüfung aktiviert.
+Die Auflösung folgt Ziel → Policy → Gast: explizite Gastwerte überschreiben
+Policywerte; fehlende Policywerte werden aus den Backup-Vorgaben des Ziels
+übernommen. Retention wird als vollständiger Regelsatz vererbt, nicht aus
+mehreren Ebenen zusammengemischt. Ohne einen vollständigen wirksamen Satz
+bleibt die Policy gesperrt. Die WebApp zeigt eigene und wirksame Werte getrennt.
+Eine Änderung von Zielvorgaben setzt deaktivierte zugehörige Policies voraus;
+die Prüfung erfolgt unter Datenbanksperren. Jede Zieländerung erhöht die
+Zielrevision, sodass bereits gepinnte Queue-Evidenz erneut geprüft werden muss.
+
+Retention und Kompression werden im Policy-Snapshot vollständig modelliert.
+Bei einem PVE-Storage vom Typ `pbs` liegt die löschwirksame Aufbewahrung
+ausschließlich bei den PBS-Prune-Jobs; Hoddmímir sendet für solche Ziele weder
+`maxfiles` noch `prune-backups` an `vzdump`. Bei Nicht-PBS-Zielen wie lokalem,
+NFS- oder CIFS-Storage bleiben diese Parameter für die notwendige
+Aufbewahrungssteuerung verfügbar, werden aber nur nach einer separaten,
+ausdrücklichen Retention-Ausführungsgenehmigung erzeugt. Die Voreinstellung ist
+für jedes Ziel fail-closed. Legacy-`maxfiles` ist zusätzlich auf PVE 9 immer
+unzulässig.
 
 ## 8. Teststrategie und verpflichtende Quality Gates
 
 „Alles unittesten“ wird so umgesetzt, dass jede deterministische Entscheidung ohne externe Systeme als Unit-Test existiert. HTTP, MariaDB, Container und Browser werden zusätzlich auf ihrer realen Grenze getestet.
+
+Die Ausführung dieser Tests ist risikobasiert gestuft: Während der
+Implementierung laufen die kleinsten fokussierten Unit-, Contract-, Static-
+Analysis- oder Component-Tests, die die Änderung und ihre direkten Grenzen
+abdecken. Unerwartete Fehler oder querschnittliche Änderungen erweitern den
+Prüfumfang. Vollständige Suites, Coverage, MariaDB-, Mutation-, Container-,
+Browser- und Supply-Chain-Gates laufen an der jeweils relevanten Commit-/PR-
+Merge-, Release- oder Deployment-Grenze sowie bei Änderungen, die mehrere
+Architekturschichten berühren. Ein bereits grünes Vollgate wird nicht allein
+wegen einer davon unabhängigen Änderung wiederholt; entscheidend ist, ob sich
+seine Eingaben oder Annahmen geändert haben.
 
 ### 8.1 PHP Unit-Tests
 
@@ -488,7 +562,7 @@ Browser-End-to-End-Tests mit Playwright:
 - Composer- und npm-Sicherheitsaudits;
 - ESLint, TypeScript-Check und Format-Check;
 - OpenAPI-Kompatibilitätsprüfung;
-- Container-Build für amd64 und arm64;
+- verpflichtender Container-Build, Security-Scan und Release ausschließlich für `linux/amd64`; die Dockerfiles bleiben für optionale lokale Builds architekturneutral;
 - SBOM, Vulnerability Scan und Secret Scan;
 - Test der V2-Schema-Installation und internen Schema-Upgrades vor jedem Release.
 
@@ -522,15 +596,42 @@ Abnahme: Plan ist reviewt; es wurde noch kein produktiver Code ausgeführt.
 
 ### Phase 1 – Repository- und Laufzeitfundament
 
+Status: **im Repository implementiert und auf dem lokalen Phase-6-Kandidaten
+abgenommen.** Der Nachweis steht in
+[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md).
+
+Lokal nachvollziehbar sind Monorepo, Anwendungsgrundgerüste, Alpine-basierte
+Application-Images, MariaDB-Compose, Migrationen, Health-/Readiness-Pfade,
+Ansible-Automation und die zugehörigen CI-/Testdefinitionen. Dieser
+Repositoryzustand ist kein Ersatz für einen frischen Lauf aller Quality Gates
+auf exakt dem zu veröffentlichenden Commit.
+
 - Monorepo-Struktur für PHP, Frontend, Docker, Docs und Tests.
 - PHP-/Symfony- und Vue-/PrimeVue-Grundgerüst.
 - Alpine-Images, Compose, MariaDB 11.4, Healthchecks und non-root Runtime.
 - initiales V2-Schema, interne Schema-Versionierung, strukturierte Logs sowie Clock/ID/Encryption Interfaces.
 - CI mit Unit-, Coverage-, Static-Analysis-, Frontend- und Container-Gates.
 
-Abnahme: alle drei Applikationscontainer plus MariaDB starten, sind gesund und besitzen noch keine PVE-Schreibfunktion.
+Abnahme: alle drei Applikationscontainer plus MariaDB starten und sind gesund;
+die Backupausführung bleibt im abgenommenen Stack explizit deaktiviert.
 
 ### Phase 2 – Eigene PVE-/PBS-API-Schicht
+
+Status: **lokale Implementierung und bereinigte Contract-Fixtures vorhanden;
+Live-Abnahme in Phase 7 offen.**
+
+Im Repository liegen eigene typisierte Transport-, Auth-, TLS-, Envelope-,
+Fehler- und Capability-Verträge sowie lokale Unit-/Contract-Tests für die fünf
+unterstützten Major-Linien. Die Fixtures sind konstruiert und frei von
+Geheimnissen;
+sie sind ausdrücklich kein Live-Nachweis. Offen bleiben die Read-only-Live-
+Matrix gegen aktuelle PVE-7/8/9- und PBS-3/4-Patchstände, echte Handshakes für
+System-CA, Custom-CA und korrektes/falsches Fingerprint-Pinning. Die getrennte
+Connect-Frist und lokale TLS-Grenztests sind inzwischen implementiert; siehe
+[`pve-first-read-contract.md`](pve-first-read-contract.md). Der automatisierte offizielle
+API-Schema-Drift-Nachweis ist als nächtlicher/manueller Read-only-Workflow mit
+gepinnten Baselines und Offline-Regressionstests vorhanden; er ersetzt die
+ausstehende Live-Matrix nicht.
 
 - Transport, TLS, Auth, Redaction, Envelope und Fehlertypen.
 - Versionprobe und Capability-Matrix.
@@ -542,16 +643,46 @@ Abnahme: keine alte Proxmox-Bibliothek im Dependency Tree; alle fünf Versionsli
 
 ### Phase 3 – Collector und Inventarmodell
 
+Status: **Collector-, Persistenz- und Darstellungs-Slices im Repository
+implementiert; Betriebsabnahme in Phase 7 offen.**
+
+Lokal vorhanden sind das startzeitbasierte Collector-Raster, Lease/Fencing und
+Heartbeat, PVE-/PBS-Inventarpersistenz einschließlich QEMU/LXC, Storage,
+Datastore, Namespace/Snapshot, Monitoring und Capability-Snapshots sowie eine
+GET-only-Inventar-/Health-API mit Vue-Sichten. Der verbindliche Einrichtungs-
+und Prüfvertrag für neue V2-Verbindungen und Credentials ist in der Phase-6-
+WebApp als verified-only Onboarding umgesetzt. Für die externe Abnahme fehlen
+weiterhin die vollständige unterstützte Live-Matrix und die realen TLS-
+Nachweise. Sämtliche lokalen Quality Gates werden auf dem identischen,
+gefrorenen Kandidaten erneut ausgeführt.
+
 - Schema für Verbindungen, Cluster, Nodes, Gäste, Storages und PBS-Datastores.
 - read-only Sync, Placement-Reconciliation, Freshness und Heartbeats.
 - QEMU und LXC.
 - PBS-Kapazität, Snapshots und Tasks.
+- kanonische, gefencete Capability-Snapshots mit stabiler historischer Run-Referenz.
 - kontinuierlicher Collector mit startzeitbasiertem 120-Sekunden-Standardraster ohne Überlappung oder Catch-up-Läufe, Laufstatus und sicherer Teilfehlerbehandlung; kein manueller Scan über WebApp oder API.
 - read-only WebApp-Sichten für Inventar und Health.
 
-Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig scannen; wiederholter Sync ist idempotent und Placementwechsel, Teilfehler oder Node-Ausfall erzeugen keine stale Queue.
+Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig
+scannen; wiederholter Sync ist idempotent und Placementwechsel, Teilfehler oder
+Node-Ausfall erzeugen weder falsche Abwesenheits-/Archivierungsentscheidungen
+noch veraltete Placement-Zuordnungen. Die Wirkung auf Queue-Entscheidungen wird
+erst mit der in Phase 4 eingeführten Queue als eigenes Forward-Gate abgenommen.
 
 ### Phase 4 – Policies, Scheduler und Shadow Mode
+
+Status: **lokal implementiert und abgenommen; der erneute Release-/Live-Nachweis
+bleibt Phase 7.** Der im Audit gefundene fehlende Produktionspfad ist
+geschlossen: Die automatische Gewinnerauswahl und Promotion nach
+`backup_requests` erfolgt deterministisch, gefencet und gemeinsam mit
+Shadow-Run, Entscheidungen, Gates und erstem Queue-Event in einer
+MariaDB-Transaktion. Unit-, echte MariaDB-, Rollback-, Concurrency-, Fencing-,
+Replay- und `execution=false`-Tests belegen den lokalen Vertrag. Vollständige
+CI, finaler AMD64-Kandidat und Labnachweis bleiben Phase 7. Der detaillierte
+Vertrag einschließlich Sicherheitsgrenzen und festgelegter Fachentscheidungen
+steht in
+[`phase-4-policy-shadow-plan.md`](phase-4-policy-shadow-plan.md).
 
 - reine Domain-Services für Eligibility, Gründe, Priorität, Vererbung und Limits.
 - atomare Queue mit Unique Keys und Leases.
@@ -559,18 +690,31 @@ Abnahme: Neu konfigurierte PVE-/PBS-Installationen lassen sich vollständig scan
 - Shadow Mode berechnet Entscheidungen, startet aber keine Backups.
 - Vergleich der neuen Entscheidungen mit den fachlichen Regeln der bisherigen Funktionsweise und dokumentierte Verbesserungen.
 
-Abnahme: Die vier Funktionen aus Abschnitt 1.1 sind vollständig bedienbar; sämtliche Auswahl-, Prioritäts- und Grenzregeln sind unitgetestet und der Shadow Mode ist erklärbar und stabil.
+Abnahme: Administration, Auswahl-, Prioritäts- und Grenzregeln, erklärbare
+Shadow-Auswertung und automatische atomare Gewinnerpromotion sind lokal
+getestet. Der Release-/Betriebsnachweis erfolgt in Phase 7.
 
 ### Phase 5 – Backup Worker und UPID-Monitoring
+
+Status: **lokal implementiert und abgenommen; reale PVE-Labtests bleiben Phase 7.** Der lokale Abschluss und der At-most-once-Vertrag stehen in
+[`phase-5-backup-worker-plan.md`](phase-5-backup-worker-plan.md).
 
 - Claim, Start, UPID-Persistierung, Polling, Log, Cancel und Recovery.
 - Reconciliation nach Neustart und unklarem POST-Ergebnis.
 - Concurrency, Kapazitätsgate und kontrollierte Retries.
-- Lab-Backups für QEMU/LXC und jede unterstützte Version.
+- bereinigte QEMU-/LXC-Contracts für PVE 7/8/9 und Planung der realen
+  Lab-Abnahme in Phase 7.
 
 Abnahme: kein Doppelbackup in Race-/Timeout-Tests; jeder Start besitzt einen nachvollziehbaren Endzustand oder `unknown` mit Auditspur.
 
 ### Phase 6 – Vollständige WebApp
+
+Status: **lokal implementiert und am 13. Juli 2026 abgenommen.** Die
+Kernoberflächen und das verbindliche verified-only
+PVE-/PBS-Verbindungs-Onboarding sind umgesetzt. Der Abschlussnachweis steht in
+[`phase-6-local-acceptance.md`](phase-6-local-acceptance.md). Deployment und
+reale Systemabnahme bleiben Phase 7. Der detaillierte Vertrag steht in
+[`phase-6-webapp-plan.md`](phase-6-webapp-plan.md).
 
 - Dashboard, Administration, Queue, Historie, Logs, Health und Audit.
 - lokale RBAC-Basis; OIDC kann über denselben User-/Rollenvertrag ergänzt werden.
@@ -581,11 +725,31 @@ Abnahme: alle kritischen Bedienabläufe sind component- und end-to-end-getestet.
 
 ### Phase 7 – Neueinrichtung und produktionsnaher Parallelbetrieb
 
+Status: **begonnen, nicht abgeschlossen.** Der reale Host-Bootstrap, ein
+isolierter gesunder Vier-Service-Labstack und die read-only geprüfte
+Labgrundlage sind belegt. Diese umfasst drei PVE-Cluster der Major-Versionen
+7, 8 und 9 mit insgesamt neun Nodes und 18 Wegwerfgästen sowie PBS 3 und PBS 4. Der read-only Onboarding-Preflight bestätigt 5/5
+Identitäts-/Versions-/Revoke-Verträge und 11/11 lokal gepinnte
+Endpunktzertifikate. Der fortschreibbare Evidenzstand steht in
+[`phase-7-live-acceptance.md`](phase-7-live-acceptance.md).
+
+Noch offen sind der finale Kandidat, Laufzeit-Tokens, verified-only
+Hoddmímir-Onboarding, die API-Live-Matrix, automatischer Inventar-Sync, der
+finale CI-/Labnachweis der Automatic-Shadow-Promotion, Shadow-Zyklus,
+Matrix-Zustellung, alle realen
+Backup-/Fehler-Mutationen und Produktions-Onboarding. Die vorbereitete
+Labtopologie und ihre Freigabe ersetzen keinen dieser Ausführungsnachweise.
+
 - leere V2-Datenbank installieren.
+- produktionsnahes Deployment über die vorbereitete Ansible-Automation
+  durchführen und verifizieren.
 - Benutzer, PVE-/PBS-Verbindungen, Ziele und Policies vollständig neu konfigurieren.
+- Read-only-Live-Matrix gegen PVE 7/8/9 und PBS 3/4 einschließlich realer
+  TLS-/ACL-Nachweise ausführen.
 - vollständigen Inventar-Sync durchführen.
 - mindestens einen vollständigen Shadow-Zyklus ohne Backup-Starts betreiben.
-- Lab- und Abnahmebackups ausführen; V2-Historie beginnt ausschließlich mit diesen neuen Läufen.
+- QEMU-/LXC-Lab- und Abnahmebackups gegen die unterstützten PVE-Versionen
+  ausführen; V2-Historie beginnt ausschließlich mit diesen neuen Läufen.
 
 Abnahme: Die neue Konfiguration ist vollständig geprüft; die Queue wird allein aus dem neuen Inventar und den neuen Policies gebildet.
 
@@ -595,7 +759,7 @@ Abnahme: Die neue Konfiguration ist vollständig geprüft; die Queue wird allein
 - Backup-/Restore-Test der neuen MariaDB.
 - Runbooks für Deployment, Upgrade, Tokenwechsel, Incident und Rollback.
 - neuen Backup Worker erst nach expliziter Freigabe aktivieren.
-- Aktivierungs- und Rollback-Fenster definieren; Rollback bedeutet, den V2-Backup-Worker kontrolliert zu deaktivieren.
+- Aktivierungs- und Rollback-Fenster definieren. Schema-Upgrades erfolgen im Wartungsfenster mit Remote-Ruheprüfung, konsistenter DB-Sicherung und Funktionstests vor Freigabe; bei Fehlern davor werden DB und passende alte Anwendung wiederhergestellt. Verbindlich ist [ADR 0006](adr/0006-maintenance-upgrade-database-restore.md), als Wartungsprotokoll 1 implementiert und für die dokumentierten Wartungs-/Upgrade-/Restore-Fälle [gegen echte Dev-Systeme abgenommen](audits/2026-09-07/08-dev-maintenance-acceptance.md). Nach Betriebsfreigabe kein automatischer Restore auf den Vorupgradezustand.
 
 Abnahme: alle Release-Gates grün, ein realer Backup-/Restore-Nachweis liegt vor und die Deaktivierung von V2 wurde geprobt.
 
@@ -606,7 +770,7 @@ Abnahme: alle Release-Gates grün, ein realer Backup-/Restore-Nachweis liegt vor
 - Keine Saleh7-/NETZkultur-Proxmox-Bibliothek ist direkt oder transitiv enthalten.
 - Collector und Backup Worker verwenden getrennte Minimalrechte.
 - TLS-Verifikation und Secret-Redaction sind nicht abschaltbare Produktionsstandards.
-- VZDump-Starts sind gegen Doppelstarts, Worker-Crash und unklare HTTP-Ergebnisse abgesichert.
+- VZDump-Starts sind gegen blinde Wiederholungen, Worker-Crash und unkontrollierte überlappende Starts abgesichert; automatische Wiederfreigabe nach ADR 0005 ist abgenommen. Zusätzliche zeitlich nachfolgende Backups sind dabei ausdrücklich akzeptiert.
 - QEMU und LXC sind unterstützt.
 - PVE-/PBS-Scanning, Node-/Gast-Auswahl, Backuplocation-Auswahl und bestehende Priorisierung sind als Release-Blocker vollständig abgenommen.
 - WebApp deckt Inventar, Administration, Queue, Historie, Logs, Health, RBAC und Audit ab.

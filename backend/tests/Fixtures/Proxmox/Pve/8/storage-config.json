@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "storage": "local-backup",
+      "type": "dir",
+      "content": "iso,backup",
+      "nodes": "pve8-a.test",
+      "digest": "fixture-pve-8-storage-cfg",
+      "prune-backups": "keep-last=8"
+    },
+    {
+      "storage": "pbs-backup",
+      "type": "pbs",
+      "content": "backup",
+      "shared": true,
+      "server": "pbs8.test",
+      "datastore": "vault8",
+      "namespace": "tenant-8",
+      "digest": "fixture-pve-8-storage-cfg"
+    },
+    {
+      "storage": "installation-media",
+      "type": "esxi",
+      "content": "import",
+      "digest": "fixture-pve-8-storage-cfg"
+    },
+    {
+      "storage": "disabled-backup",
+      "type": "dir",
+      "content": "backup",
+      "disable": true,
+      "digest": "fixture-pve-8-storage-cfg"
+    },
+    {
+      "storage": "restricted-backup",
+      "type": "nfs",
+      "content": "backup",
+      "nodes": "pve8-a.test",
+      "shared": 1,
+      "digest": "fixture-pve-8-storage-cfg",
+      "future-field": 8
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# Synthetic redaction-test sentinels present in the initial repository history.
+a91589c3f2d350011cc1001e37332374fb2675f2:backend/tests/Unit/Infrastructure/Logging/SensitiveDataRedactorTest.php:generic-api-key:112
+a91589c3f2d350011cc1001e37332374fb2675f2:backend/tests/Unit/Infrastructure/Logging/SensitiveDataRedactorTest.php:generic-api-key:120
+
+# Literal REPLACE_WITH_64_HEX_CHARACTERS placeholders in the example Vault.
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:4
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:5
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:6
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:7
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:8
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:9
+da6bd632c90ef55c5cc66c290de989d6cf301251:deployment/ansible/inventories/production/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:10
+
+# Literal REPLACE_WITH_64_HEX_CHARACTERS placeholders in the Phase 7 lab example Vault.
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:3
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:11
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:12
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:13
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:14
+3602c69ae01f16d621b405f2bb57a37d854895a4:deployment/ansible/inventories/lab/group_vars/hoddmimir_hosts/vault.yml.example:generic-api-key:15

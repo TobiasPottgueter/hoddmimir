@@ -4,20 +4,27 @@ name: {{ hoddmimir_project_name | to_json }}
 x-app-environment: &app-environment
   APP_SECRET_FILE: /run/secrets/app_secret
   ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  ENCRYPTION_KEYRING_REVISION: {{ (hoddmimir_encryption_keyring['revision'] | string) | to_json }}
   DATABASE_HOST: mariadb
   DATABASE_PORT: "3306"
   DATABASE_NAME: {{ hoddmimir_database_name | to_json }}
+  HODDMIMIR_MAINTENANCE_DIRECTORY: /run/hoddmimir-maintenance
 
 x-app-security: &app-security
   read_only: true
   cap_drop: [ALL]
+  cap_add: [CHOWN, DAC_READ_SEARCH, SETGID, SETUID]
   security_opt: [no-new-privileges:true]
   tmpfs:
     - /tmp:mode=1777
     - /app/var:uid=10001,gid=10001,mode=0770
+    - /run/hoddmimir-secrets:mode=0700
   init: true
   restart: unless-stopped
   stop_grace_period: 30s
+  cpus: 1.0
+  mem_limit: 512m
+  pids_limit: 128
   logging:
     driver: json-file
     options: { max-size: 10m, max-file: "3" }
@@ -25,14 +32,26 @@ x-app-security: &app-security
 services:
   mariadb:
     image: {{ hoddmimir_mariadb_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     environment:
       MARIADB_DATABASE: {{ hoddmimir_database_name | to_json }}
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_ROOT_HOST: localhost
       TZ: UTC
     secrets: [mariadb_root_password, mariadb_migration_password, mariadb_web_password, mariadb_collector_password, mariadb_backup_worker_password]
     volumes:
       - mariadb_data:/var/lib/mysql
-      - {{ (hoddmimir_mariadb_init_script ~ ':/docker-entrypoint-initdb.d/10-create-app-users.sh:ro') | to_json }}
+      - {{ (hoddmimir_mariadb_init_script ~ ':/usr/local/bin/hoddmimir-database-user-bootstrap:ro') | to_json }}
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/mysqld:uid=999,gid=999,mode=1770
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 256
     healthcheck:
       test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
       interval: 10s
@@ -45,37 +64,45 @@ services:
 
   data-worker:
     image: {{ hoddmimir_data_worker_image | to_json }}
-    command: [hoddmimir:worker:data, "--interval={{ hoddmimir_collector_interval_seconds }}"]
+    platform: {{ hoddmimir_release_platform | to_json }}
+    command: [hoddmimir:worker:data]
     env_file: [./runtime.env]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_collector
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
+    volumes:
+      - {{ (hoddmimir_maintenance_directory ~ ':/run/hoddmimir-maintenance:ro') | to_json }}
     secrets: [app_secret, encryption_key, mariadb_collector_password]
     depends_on:
       mariadb: { condition: service_healthy }
     healthcheck:
-      test: [CMD, php, bin/console, hoddmimir:worker:readiness, collector]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, php, bin/console, hoddmimir:worker:health, collector]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
     networks: [internal]
+    stop_grace_period: 75s
     <<: *app-security
 
   backup-worker:
     image: {{ hoddmimir_backup_worker_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     command: [hoddmimir:worker:backup, "--interval={{ hoddmimir_backup_worker_poll_interval_seconds }}"]
     env_file: [./runtime.env]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_backup_worker
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_backup_worker_password
-    secrets: [app_secret, encryption_key, mariadb_backup_worker_password]
+      MATRIX_WEBHOOK_URL_FILE: /run/secrets/matrix_webhook_url
+    volumes:
+      - {{ (hoddmimir_maintenance_directory ~ ':/run/hoddmimir-maintenance:ro') | to_json }}
+    secrets: [app_secret, encryption_key, mariadb_backup_worker_password, matrix_webhook_url]
     depends_on:
       mariadb: { condition: service_healthy }
     healthcheck:
-      test: [CMD, php, bin/console, hoddmimir:worker:readiness, backup]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, php, bin/console, hoddmimir:worker:readiness, backup]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -85,18 +112,22 @@ services:
 
   webapp:
     image: {{ hoddmimir_webapp_image | to_json }}
+    platform: {{ hoddmimir_release_platform | to_json }}
     env_file: [./runtime.env]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_web
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_web_password
+      HODDMIMIR_TRUSTED_PROXY: {{ hoddmimir_docker_gateway | to_json }}
+    volumes:
+      - {{ (hoddmimir_maintenance_directory ~ ':/run/hoddmimir-maintenance:ro') | to_json }}
     secrets: [app_secret, encryption_key, mariadb_web_password]
     depends_on:
       mariadb: { condition: service_healthy }
     ports:
-      - {{ (hoddmimir_web_bind_address ~ ':' ~ hoddmimir_web_port ~ ':8080') | to_json }}
+      - {{ ('127.0.0.1:' ~ hoddmimir_web_port ~ ':8080') | to_json }}
     healthcheck:
-      test: [CMD, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
+      test: [CMD, /usr/local/bin/hoddmimir-app-healthcheck, wget, --quiet, --output-document=-, http://127.0.0.1:8080/api/health]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -104,15 +135,20 @@ services:
     networks: [internal]
     read_only: true
     cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     tmpfs:
       - /tmp:mode=1777
       - /app/var:uid=82,gid=82,mode=0770
       - /config:uid=82,gid=82,mode=0770
       - /data:uid=82,gid=82,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
     logging:
       driver: json-file
       options: { max-size: 10m, max-file: "3" }
@@ -120,6 +156,10 @@ services:
 networks:
   internal:
     driver: bridge
+    ipam:
+      config:
+        - subnet: {{ hoddmimir_docker_subnet | to_json }}
+          gateway: {{ hoddmimir_docker_gateway | to_json }}
 
 volumes:
   mariadb_data:
@@ -132,3 +172,4 @@ secrets:
   mariadb_web_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_web_password') | to_json }} }
   mariadb_collector_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_collector_password') | to_json }} }
   mariadb_backup_worker_password: { file: {{ (hoddmimir_secrets_directory ~ '/mariadb_backup_worker_password') | to_json }} }
+  matrix_webhook_url: { file: {{ (hoddmimir_secrets_directory ~ '/matrix_webhook_url') | to_json }} }

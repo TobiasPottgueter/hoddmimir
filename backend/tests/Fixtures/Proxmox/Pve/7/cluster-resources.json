@@ -1,0 +1,86 @@
+{
+  "data": [
+    {
+      "cgroup-mode": 2,
+      "cpu": 0.125,
+      "disk": 17179869184,
+      "id": "node/pve7-a.test",
+      "level": "c",
+      "maxcpu": 16,
+      "maxdisk": 137438953472,
+      "maxmem": 68719476736,
+      "mem": 17179869184,
+      "name": "pve7-a.test",
+      "node": "pve7-a.test",
+      "status": "online",
+      "type": "node",
+      "uptime": 700001
+    },
+    {
+      "cgroup-mode": 2,
+      "cpu": 0.0625,
+      "disk": 8589934592,
+      "id": "node/pve7-b.test",
+      "level": "c",
+      "maxcpu": 12,
+      "maxdisk": 1099511627776,
+      "maxmem": 34359738368,
+      "mem": 8589934592,
+      "name": "pve7-b.test",
+      "node": "pve7-b.test",
+      "status": "online",
+      "type": "node",
+      "uptime": 700002
+    },
+    {
+      "cpu": 0.25,
+      "disk": 8589934592,
+      "diskwrite": 17179869184,
+      "id": "qemu/701",
+      "maxcpu": 4,
+      "maxdisk": 34359738368,
+      "maxmem": 8589934592,
+      "mem": 2147483648,
+      "name": "app-701.test",
+      "node": "pve7-a.test",
+      "pool": "documentation",
+      "status": "running",
+      "type": "qemu",
+      "uptime": 7001,
+      "vmid": 701
+    },
+    {
+      "cpu": 0.05,
+      "disk": 2147483648,
+      "diskwrite": 2147483648,
+      "id": "lxc/702",
+      "maxcpu": 2,
+      "maxdisk": 17179869184,
+      "maxmem": 4294967296,
+      "mem": 1073741824,
+      "name": "ct-702.test",
+      "node": "pve7-a.test",
+      "status": "running",
+      "type": "lxc",
+      "uptime": 7020,
+      "vmid": 702
+    },
+    {
+      "content": "backup,iso,vztmpl",
+      "disk": 274877906944,
+      "id": "storage/pve7-a.test/backup-pve7-test",
+      "maxdisk": 1099511627776,
+      "node": "pve7-a.test",
+      "plugintype": "dir",
+      "status": "available",
+      "storage": "backup-pve7-test",
+      "type": "storage"
+    },
+    {
+      "id": "/pool/documentation",
+      "name": "Documentation pool",
+      "pool": "documentation",
+      "type": "pool"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "format": 1,
+  "sources": [
+    {
+      "id": "pve-7",
+      "product": "pve",
+      "major": 7,
+      "repository": "https://git.proxmox.com/?p=pve-access-control.git",
+      "ref": "f96a4de50d5120bbb42f57b972c886ce76a1643d",
+      "files": {"src/PVE/CLI/pveum.pm": "437f6544f59ab0eac9093934cadaa75bd3100857be29d0ba304d9c7220b92e07"},
+      "commands": {
+        "pveum user list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group list": {"positionals": 0, "options": ["output-format"]},
+        "pveum role list": {"positionals": 0, "options": ["output-format"]},
+        "pveum user token list": {"positionals": 1, "options": ["output-format"]},
+        "pveum acl list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group add": {"positionals": 1, "options": ["comment"]},
+        "pveum user add": {"positionals": 1, "options": ["groups", "comment"]},
+        "pveum role add": {"positionals": 1, "options": ["privs"]},
+        "pveum acl modify": {"positionals": 1, "options": ["groups", "tokens", "roles", "propagate"]},
+        "pveum user token add": {"positionals": 2, "options": ["privsep"]}
+      }
+    },
+    {
+      "id": "pve-8",
+      "product": "pve",
+      "major": 8,
+      "repository": "https://git.proxmox.com/?p=pve-access-control.git",
+      "ref": "0f258e710ec5a7dfd23d054a29cf0ba65fec2362",
+      "files": {"src/PVE/CLI/pveum.pm": "dc134c203363ed0b065ff4a1b5ee47fab279a4ac8f0882980f4332dac39d67d9"},
+      "commands": {
+        "pveum user list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group list": {"positionals": 0, "options": ["output-format"]},
+        "pveum role list": {"positionals": 0, "options": ["output-format"]},
+        "pveum user token list": {"positionals": 1, "options": ["output-format"]},
+        "pveum acl list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group add": {"positionals": 1, "options": ["comment"]},
+        "pveum user add": {"positionals": 1, "options": ["groups", "comment"]},
+        "pveum role add": {"positionals": 1, "options": ["privs"]},
+        "pveum acl modify": {"positionals": 1, "options": ["groups", "tokens", "roles", "propagate"]},
+        "pveum user token add": {"positionals": 2, "options": ["privsep"]}
+      }
+    },
+    {
+      "id": "pve-9",
+      "product": "pve",
+      "major": 9,
+      "repository": "https://git.proxmox.com/?p=pve-access-control.git",
+      "ref": "5ccd07d9302562b73374d331b63d25b04b86766c",
+      "files": {"src/PVE/CLI/pveum.pm": "77b1ba1c390fcefbda4a39680b0f1393567e4fdcfbc9ee042c8f709a22e8102d"},
+      "commands": {
+        "pveum user list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group list": {"positionals": 0, "options": ["output-format"]},
+        "pveum role list": {"positionals": 0, "options": ["output-format"]},
+        "pveum user token list": {"positionals": 1, "options": ["output-format"]},
+        "pveum acl list": {"positionals": 0, "options": ["output-format"]},
+        "pveum group add": {"positionals": 1, "options": ["comment"]},
+        "pveum user add": {"positionals": 1, "options": ["groups", "comment"]},
+        "pveum role add": {"positionals": 1, "options": ["privs"]},
+        "pveum acl modify": {"positionals": 1, "options": ["groups", "tokens", "roles", "propagate"]},
+        "pveum user token add": {"positionals": 2, "options": ["privsep"]}
+      }
+    },
+    {
+      "id": "pbs-3",
+      "product": "pbs",
+      "major": 3,
+      "repository": "https://git.proxmox.com/?p=proxmox-backup.git",
+      "ref": "4be9fd98f22a392a57baf3956efe54f4f07a1042",
+      "files": {
+        "src/bin/proxmox_backup_manager/acl.rs": "2c9757089f2e797abf7fcffc4802f4f525b2e16238515a47626d99ff75b4445c",
+        "src/bin/proxmox_backup_manager/user.rs": "4cb3bf6404f4fed21e3406e55d8635a091e37ac7cdc273d10a7a5760939e490a"
+      },
+      "commands": {
+        "proxmox-backup-manager user list": {"positionals": 0, "options": ["output-format"]},
+        "proxmox-backup-manager user list-tokens": {"positionals": 1, "options": ["output-format"]},
+        "proxmox-backup-manager acl list": {"positionals": 0, "options": ["output-format"]},
+        "proxmox-backup-manager user create": {"positionals": 1, "options": ["comment"]},
+        "proxmox-backup-manager user generate-token": {"positionals": 2, "options": ["comment"]},
+        "proxmox-backup-manager acl update": {"positionals": 2, "options": ["auth-id", "propagate"]}
+      }
+    },
+    {
+      "id": "pbs-4",
+      "product": "pbs",
+      "major": 4,
+      "repository": "https://git.proxmox.com/?p=proxmox-backup.git",
+      "ref": "f6b8e3b5d7c0ffa4c5cba4821873810b50b3c83e",
+      "files": {
+        "src/bin/proxmox_backup_manager/acl.rs": "56ce3cb0a00f0a104859fe454a836bbc7e1798d9ff80b16d848ae7baa40e28ec",
+        "src/bin/proxmox_backup_manager/user.rs": "bea4a949421dbfde243b05e557ed01754d2e78b86949d75f36674b8a8cc33907"
+      },
+      "commands": {
+        "proxmox-backup-manager user list": {"positionals": 0, "options": ["output-format"]},
+        "proxmox-backup-manager user list-tokens": {"positionals": 1, "options": ["output-format"]},
+        "proxmox-backup-manager acl list": {"positionals": 0, "options": ["output-format"]},
+        "proxmox-backup-manager user create": {"positionals": 1, "options": ["comment"]},
+        "proxmox-backup-manager user generate-token": {"positionals": 2, "options": ["comment"]},
+        "proxmox-backup-manager acl update": {"positionals": 2, "options": ["auth-id", "propagate"]}
+      }
+    }
+  ]
+}

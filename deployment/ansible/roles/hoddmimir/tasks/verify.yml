@@ -25,3 +25,28 @@
     method: GET
     status_code: 200
     return_content: false
+
+- name: Read the published WebApp binding
+  ansible.builtin.command:
+    argv:
+      - "{{ hoddmimir_docker_executable }}"
+      - compose
+      - --file
+      - "{{ hoddmimir_compose_file }}"
+      - port
+      - webapp
+      - "8080"
+  register: hoddmimir_webapp_binding
+  changed_when: false
+
+- name: Require the WebApp port to remain loopback-only
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_webapp_binding.stdout_lines == ['127.0.0.1:' ~ (hoddmimir_web_port | string)]
+    fail_msg: The WebApp container port is not bound exclusively to the host loopback address.
+
+- name: Verify the optional host HTTPS boundary
+  ansible.builtin.import_tasks: verify-https.yml
+  when: hoddmimir_manage_https | bool
+  tags:
+    - hoddmimir_https

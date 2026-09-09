@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "id": "node/pve9-standalone.test",
+      "ip": "203.0.113.99",
+      "level": "",
+      "local": true,
+      "name": "pve9-standalone.test",
+      "nodeid": 0,
+      "online": true,
+      "type": "node"
+    }
+  ]
+}

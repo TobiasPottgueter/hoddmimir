@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "id": "pve8-minimal"
+    },
+    {
+      "id": "pve8-nightly",
+      "schedule": "mon..fri 22:30",
+      "enabled": 1,
+      "storage": "pbs-backup",
+      "vmid": "301,302",
+      "mode": "snapshot",
+      "compress": "zstd",
+      "maxfiles": 7
+    },
+    {
+      "id": "pve8-weekly",
+      "schedule": "sun 03:30",
+      "enabled": 1,
+      "node": "pve8-a",
+      "storage": "pbs-backup",
+      "all": 1,
+      "prune-backups": {
+        "keep-daily": 7,
+        "keep-weekly": 4
+      },
+      "future-observation": {
+        "source": "constructed"
+      }
+    },
+    {
+      "id": "pve8-retention-legacy",
+      "prune-backups": "keep-last=7"
+    }
+  ]
+}

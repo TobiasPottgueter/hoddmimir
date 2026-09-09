@@ -1,0 +1,21 @@
+---
+# Copy this shape only through scripts/init-ansible-inventory.sh. The real
+# domain, email, host network and release digests belong in the ignored
+# mode-0600 main.yml, never in Git.
+hoddmimir_image_repository: registry.example.invalid/hoddmimir
+hoddmimir_registry_index_digests:
+  worker: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  web: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+  mariadb: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+hoddmimir_data_worker_image: registry.example.invalid/hoddmimir/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hoddmimir_backup_worker_image: registry.example.invalid/hoddmimir/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hoddmimir_webapp_image: registry.example.invalid/hoddmimir/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+hoddmimir_mariadb_image: registry.example.invalid/hoddmimir/mariadb@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+hoddmimir_public_domain: hoddmimir.example.invalid
+hoddmimir_acme_email: acme@example.invalid
+hoddmimir_manage_https: true
+hoddmimir_docker_subnet: 172.31.254.0/24
+hoddmimir_docker_gateway: 172.31.254.1
+hoddmimir_web_port: 8080
+hoddmimir_backup_execution_enabled: false

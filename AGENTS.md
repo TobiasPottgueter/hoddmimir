@@ -22,9 +22,11 @@ Use `Hoddmímir` (NFC) as the user-facing display name and `hoddmimir` as the te
 - The collector is read-only against PVE/PBS. Only the backup worker may start or stop backup tasks.
 - The collector is a continuously running worker. Its default production cadence is one automatic inventory cycle every 120 seconds; do not add a manual scan endpoint or a “Scan now” action to the WebApp.
 - Schedule inventory cycles on a start-time-based grid with a default width of 120 seconds; a deployment override changes only that grid width. Never overlap cycles. If a cycle overruns one or more ticks, skip every missed tick and schedule only the next future tick—never create a catch-up burst. Implement and test this behavior in collector application logic; the generic readiness `WorkerLoop` is not the final scan scheduler.
-- Never automatically retry a `vzdump` POST after an ambiguous response.
+- Never blindly retry a `vzdump` POST after an ambiguous response. Each submission attempt sends at most one POST. A new automatic attempt is allowed only after the complete Proxmox task reconciliation and universal pre-start checks defined in `docs/adr/0005-automatic-backup-recovery.md`; a new request ID must not bypass those gates.
+- Before every backup start, the backup worker must directly check fresh, complete Proxmox task evidence and wait while a blocking backup task occupies the node slot, including user-initiated and externally scheduled backups. Unknown occupancy blocks starts. This universal gate is not a special recovery delay.
 - Never disable TLS verification in production code.
 - Never log tokens, passwords, cookies, CSRF values, TOTP data, or decrypted secrets.
+- Mandatory container CI, release publication, and production validation target only `linux/amd64`. Keep Dockerfiles architecture-neutral so optional local builds remain possible, but never add another architecture to a release manifest or required gate without an explicit policy change.
 
 ## Repository layout
 
@@ -56,6 +58,14 @@ Do not read from or modify the old project unless a task explicitly requests rea
 - Add Playwright tests for critical administration flows when those flows are implemented.
 - A behavior change is incomplete until its tests pass.
 
+### Proportional verification
+
+- During implementation, run the smallest focused unit, contract, static-analysis, or component test set that covers the changed behavior and its immediate boundaries.
+- Expand the test scope when a focused check fails unexpectedly, when shared interfaces or cross-cutting contracts change, or when risk analysis shows wider impact.
+- Run the complete backend/frontend suites, full coverage, MariaDB integration, mutation, container, browser, and supply-chain gates at their relevant commit/PR merge, release-publication, or deployment boundary. Full gates are also required for cross-cutting core changes that affect several architectural layers.
+- Do not rerun an unchanged full gate merely because an unrelated file changed after it passed. Record the exact tested source state and rerun only gates whose inputs or relevant assumptions changed.
+- A small isolated change does not by itself justify executing every repository test. Verification must remain proportionate while still satisfying the mandatory gate for the next publication or deployment boundary.
+
 ## Development rules
 
 - Use strict types in every PHP file.
@@ -69,6 +79,7 @@ Do not read from or modify the old project unless a task explicitly requests rea
 - Never commit a real Ansible inventory, Vault file, vault password, SSH material, registry credential, or generated deployment secret.
 - CI may parse the example inventory and run lint/syntax checks, but it must not connect to deployment hosts.
 - Production deployment uses registry images pinned by digest and keeps backup execution disabled unless its explicit acknowledgement is supplied.
+- Schema upgrades must follow the maintenance, remote-quiescence, database-backup, functional-validation, and pre-release restore contract in `docs/adr/0006-maintenance-upgrade-database-restore.md`. The protocol-1 implementation requires a maintenance-capable installed baseline and live acceptance; incompatible migrations must not use the image-only recovery path.
 - Deployment changes must pass the isolated inventory, Compose-contract, preflight, secret-permission, and transaction-rollback tests.
 
 ## Initial verification commands
@@ -79,15 +90,22 @@ These commands may evolve with the scaffold. Keep this section current when tool
 ./scripts/init-dev-secrets.sh
 docker compose config
 docker compose build
-docker compose up --detach --wait
+make up
 curl --fail http://localhost:8080/api/health
 docker compose down --volumes
 
 docker build --target backend-test --file docker/php/Dockerfile .
+make backend-integration
+make backend-coverage
+make mutation
 docker build --target frontend-test --file docker/web/Dockerfile .
 docker build --target frontend-build --file docker/web/Dockerfile .
+make e2e
+make api-schema-drift-test
+make supply-chain
 
 make inventory
+make lab-secrets-test
 make lint
 make syntax
 make deployment-test

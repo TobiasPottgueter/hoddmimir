@@ -1,0 +1,6034 @@
+{
+  "format": 1,
+  "policy": {
+    "compatibility": "reviewed-semantic-subset",
+    "additiveChanges": "allowed-and-reported",
+    "newCapabilities": "ignored-until-explicit-review"
+  },
+  "sources": [
+    {
+      "id": "pve-7",
+      "product": "pve",
+      "major": 7,
+      "url": "https://pve.proxmox.com/pve-docs-7/api-viewer/apidoc.js",
+      "documentationUrl": "https://pve.proxmox.com/pve-docs-7/",
+      "retrievedAt": "2026-07-12",
+      "lastModified": "Wed, 22 Mar 2023 13:52:09 GMT",
+      "etag": "2e894f-5f77d775b5440",
+      "sha256": "125f0af24951e901800e49559593678edd95af66da27c88311faecda708ebaf1",
+      "capabilities": [
+        "GET /version",
+        "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
+        "GET /cluster/status",
+        "GET /cluster/resources",
+        "GET /storage",
+        "GET /nodes/{node}/storage",
+        "GET /cluster/backup",
+        "GET /nodes/{node}/tasks",
+        "GET /nodes/{node}/tasks/{upid}/status",
+        "POST /nodes/{node}/vzdump",
+        "GET /nodes/{node}/tasks/{upid}/log",
+        "DELETE /nodes/{node}/tasks/{upid}"
+      ],
+      "openResponseEnums": [],
+      "contracts": {
+        "GET /version": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "properties": {
+              "console": {
+                "enum": [
+                  "applet",
+                  "vv",
+                  "html5",
+                  "xtermjs"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "release": {
+                "type": "string"
+              },
+              "repoid": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /access/permissions": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "path": {
+                "optional": 1,
+                "type": "string"
+              },
+              "userid": {
+                "optional": 1,
+                "pattern": "(?^:^(?^:[^\\s:/]+)\\@(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+)(?:!(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+))?$)",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "type": "object"
+          }
+        },
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "protected": 1,
+          "returns": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ip": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "local": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "nodeid": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "nodes": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "online": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "quorate": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "cluster",
+                    "node"
+                  ],
+                  "type": "string"
+                },
+                "version": {
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/resources": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "vm",
+                  "storage",
+                  "node",
+                  "sdn"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "cgroup-mode": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "cpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "disk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "hastate": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "maxcpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "maxdisk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "maxmem": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "mem": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "name": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "node": {
+                  "format": "pve-node",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "plugintype": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "pool": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "node",
+                    "storage",
+                    "pool",
+                    "qemu",
+                    "lxc",
+                    "openvz",
+                    "sdn"
+                  ],
+                  "type": "string"
+                },
+                "uptime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "vmid": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "btrfs",
+                  "cephfs",
+                  "cifs",
+                  "dir",
+                  "glusterfs",
+                  "iscsi",
+                  "iscsidirect",
+                  "lvm",
+                  "lvmthin",
+                  "nfs",
+                  "pbs",
+                  "rbd",
+                  "zfs",
+                  "zfspool"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "storage": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "content": {
+                "format": "pve-storage-content-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "enabled": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "format": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "target": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "active": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "avail": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "type": "string"
+                },
+                "enabled": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "shared": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "type": "string"
+                },
+                "total": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "used": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "used_fraction": {
+                  "optional": 1,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/backup": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "id": {
+                  "maxLength": 50,
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "errors": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "since": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "source": {
+                "default": "archive",
+                "enum": [
+                  "archive",
+                  "active",
+                  "all"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "statusfilter": {
+                "format": "pve-task-status-type-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "typefilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "until": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "userfilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid",
+                "minimum": 1,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "pstart": {
+                  "type": "integer"
+                },
+                "starttime": {
+                  "type": "integer"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "upid": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "properties": {
+              "exitstatus": {
+                "optional": 1,
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "starttime": {
+                "type": "number"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "stopped"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "POST /nodes/{node}/vzdump": {
+          "allowtoken": 1,
+          "method": "POST",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "all": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "bwlimit": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "compress": {
+                "default": "0",
+                "enum": [
+                  "0",
+                  "1",
+                  "gzip",
+                  "lzo",
+                  "zstd"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "dumpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude-path": {
+                "format": "string-alist",
+                "optional": 1,
+                "type": "string"
+              },
+              "ionice": {
+                "default": 7,
+                "maximum": 8,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "lockwait": {
+                "default": 180,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "mailnotification": {
+                "default": "always",
+                "enum": [
+                  "always",
+                  "failure"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "mailto": {
+                "format": "email-or-username-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "maxfiles": {
+                "minimum": 1,
+                "optional": 1,
+                "type": "integer"
+              },
+              "mode": {
+                "default": "snapshot",
+                "enum": [
+                  "snapshot",
+                  "suspend",
+                  "stop"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "node": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              },
+              "notes-template": {
+                "maxLength": 1024,
+                "optional": 1,
+                "requires": "storage",
+                "type": "string"
+              },
+              "performance": {
+                "format": "backup-performance",
+                "optional": 1,
+                "type": "string"
+              },
+              "pigz": {
+                "default": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "pool": {
+                "optional": 1,
+                "type": "string"
+              },
+              "protected": {
+                "optional": 1,
+                "requires": "storage",
+                "type": "boolean"
+              },
+              "prune-backups": {
+                "default": "keep-all=1",
+                "format": "prune-backups",
+                "optional": 1,
+                "type": "string"
+              },
+              "quiet": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "remove": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "script": {
+                "optional": 1,
+                "type": "string"
+              },
+              "stdexcludes": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stdout": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stop": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stopwait": {
+                "default": 10,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "tmpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "zstd": {
+                "default": 1,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "string"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/log": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "download": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "t": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "DELETE /nodes/{node}/tasks/{upid}": {
+          "allowtoken": 1,
+          "method": "DELETE",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "id": "pve-8",
+      "product": "pve",
+      "major": 8,
+      "url": "https://pve.proxmox.com/pve-docs-8/api-viewer/apidoc.js",
+      "documentationUrl": "https://pve.proxmox.com/pve-docs-8/",
+      "retrievedAt": "2026-07-12",
+      "lastModified": "Wed, 09 Apr 2025 06:00:00 GMT",
+      "etag": "351bb2-632522df4f800",
+      "sha256": "bbe03a42c55b3f9ae77a5b5216c1a8554f4fffd0f4b266848f4af26be295946e",
+      "capabilities": [
+        "GET /version",
+        "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
+        "GET /cluster/status",
+        "GET /cluster/resources",
+        "GET /storage",
+        "GET /nodes/{node}/storage",
+        "GET /cluster/backup",
+        "GET /nodes/{node}/tasks",
+        "GET /nodes/{node}/tasks/{upid}/status",
+        "POST /nodes/{node}/vzdump",
+        "GET /nodes/{node}/tasks/{upid}/log",
+        "DELETE /nodes/{node}/tasks/{upid}"
+      ],
+      "openResponseEnums": [],
+      "contracts": {
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+
+        "GET /version": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "properties": {
+              "console": {
+                "enum": [
+                  "applet",
+                  "vv",
+                  "html5",
+                  "xtermjs"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "release": {
+                "type": "string"
+              },
+              "repoid": {
+                "pattern": "[0-9a-fA-F]{8,64}",
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /access/permissions": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "path": {
+                "optional": 1,
+                "type": "string"
+              },
+              "userid": {
+                "optional": 1,
+                "pattern": "(?^:^(?^:[^\\s:/]+)\\@(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+)(?:!(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+))?$)",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "type": "object"
+          }
+        },
+        "GET /cluster/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "protected": 1,
+          "returns": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ip": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "local": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "nodeid": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "nodes": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "online": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "quorate": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "cluster",
+                    "node"
+                  ],
+                  "type": "string"
+                },
+                "version": {
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/resources": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "vm",
+                  "storage",
+                  "node",
+                  "sdn"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "cgroup-mode": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "cpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "disk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "diskread": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "diskwrite": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "hastate": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "lock": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "maxcpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "maxdisk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "maxmem": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "mem": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "name": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "netin": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "netout": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "format": "pve-node",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "plugintype": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "pool": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "tags": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "template": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "node",
+                    "storage",
+                    "pool",
+                    "qemu",
+                    "lxc",
+                    "openvz",
+                    "sdn"
+                  ],
+                  "type": "string"
+                },
+                "uptime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "vmid": {
+                  "format": "pve-vmid",
+                  "maximum": 999999999,
+                  "minimum": 100,
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "btrfs",
+                  "cephfs",
+                  "cifs",
+                  "dir",
+                  "esxi",
+                  "glusterfs",
+                  "iscsi",
+                  "iscsidirect",
+                  "lvm",
+                  "lvmthin",
+                  "nfs",
+                  "pbs",
+                  "rbd",
+                  "zfs",
+                  "zfspool"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "storage": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "content": {
+                "format": "pve-storage-content-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "enabled": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "format": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "target": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "active": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "avail": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "type": "string"
+                },
+                "enabled": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "shared": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "type": "string"
+                },
+                "total": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "used": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "used_fraction": {
+                  "optional": 1,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/backup": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "id": {
+                  "maxLength": 50,
+                  "pattern": "\\S+",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "errors": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "since": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "source": {
+                "default": "archive",
+                "enum": [
+                  "archive",
+                  "active",
+                  "all"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "statusfilter": {
+                "format": "pve-task-status-type-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "typefilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "until": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "userfilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid",
+                "maximum": 999999999,
+                "minimum": 100,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "pstart": {
+                  "type": "integer"
+                },
+                "starttime": {
+                  "type": "integer"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "upid": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "properties": {
+              "exitstatus": {
+                "optional": 1,
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "pstart": {
+                "type": "integer"
+              },
+              "starttime": {
+                "type": "integer"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "stopped"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "POST /nodes/{node}/vzdump": {
+          "allowtoken": 1,
+          "method": "POST",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "all": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "bwlimit": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "compress": {
+                "default": "0",
+                "enum": [
+                  "0",
+                  "1",
+                  "gzip",
+                  "lzo",
+                  "zstd"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "dumpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude-path": {
+                "items": {
+                  "type": "string"
+                },
+                "optional": 1,
+                "type": "array"
+              },
+              "fleecing": {
+                "format": "backup-fleecing",
+                "optional": 1,
+                "type": "string"
+              },
+              "ionice": {
+                "default": 7,
+                "maximum": 8,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "job-id": {
+                "maxLength": 50,
+                "optional": 1,
+                "pattern": "\\S+",
+                "type": "string"
+              },
+              "lockwait": {
+                "default": 180,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "mailnotification": {
+                "default": "always",
+                "enum": [
+                  "always",
+                  "failure"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "mailto": {
+                "format": "email-or-username-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "maxfiles": {
+                "minimum": 1,
+                "optional": 1,
+                "type": "integer"
+              },
+              "mode": {
+                "default": "snapshot",
+                "enum": [
+                  "snapshot",
+                  "suspend",
+                  "stop"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "node": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              },
+              "notes-template": {
+                "maxLength": 1024,
+                "optional": 1,
+                "requires": "storage",
+                "type": "string"
+              },
+              "notification-mode": {
+                "default": "auto",
+                "enum": [
+                  "auto",
+                  "legacy-sendmail",
+                  "notification-system"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "notification-policy": {
+                "default": "always",
+                "enum": [
+                  "always",
+                  "failure",
+                  "never"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "notification-target": {
+                "format": "pve-configid",
+                "optional": 1,
+                "type": "string"
+              },
+              "pbs-change-detection-mode": {
+                "enum": [
+                  "legacy",
+                  "data",
+                  "metadata"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "performance": {
+                "format": "backup-performance",
+                "optional": 1,
+                "type": "string"
+              },
+              "pigz": {
+                "default": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "pool": {
+                "optional": 1,
+                "type": "string"
+              },
+              "protected": {
+                "optional": 1,
+                "requires": "storage",
+                "type": "boolean"
+              },
+              "prune-backups": {
+                "default": "keep-all=1",
+                "format": "prune-backups",
+                "optional": 1,
+                "type": "string"
+              },
+              "quiet": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "remove": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "script": {
+                "optional": 1,
+                "type": "string"
+              },
+              "stdexcludes": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stdout": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stop": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stopwait": {
+                "default": 10,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "tmpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "zstd": {
+                "default": 1,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "string"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/log": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "download": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "t": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "DELETE /nodes/{node}/tasks/{upid}": {
+          "allowtoken": 1,
+          "method": "DELETE",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "id": "pve-9",
+      "product": "pve",
+      "major": 9,
+      "url": "https://pve.proxmox.com/pve-docs/api-viewer/apidoc.js",
+      "documentationUrl": "https://pve.proxmox.com/pve-docs/",
+      "retrievedAt": "2026-07-12",
+      "lastModified": "Fri, 03 Jul 2026 09:08:20 GMT",
+      "etag": "4144c0-655b144140900",
+      "sha256": "f2b77b57c71f3781a0993cc5062940ef31e0843fd9a6bcfdb4de4dd2001d6d9e",
+      "capabilities": [
+        "GET /version",
+        "GET /access/permissions",
+        "GET /access/roles",
+        "GET /access/acl",
+        "GET /cluster/status",
+        "GET /cluster/resources",
+        "GET /storage",
+        "GET /nodes/{node}/storage",
+        "GET /cluster/backup",
+        "GET /nodes/{node}/tasks",
+        "GET /nodes/{node}/tasks/{upid}/status",
+        "POST /nodes/{node}/vzdump",
+        "GET /nodes/{node}/tasks/{upid}/log",
+        "DELETE /nodes/{node}/tasks/{upid}"
+      ],
+      "openResponseEnums": [],
+      "contracts": {
+        "GET /access/roles": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "privs": {
+                  "format": "pve-priv-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "roleid": {
+                  "format": "pve-roleid",
+                  "type": "string"
+                },
+                "special": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /access/acl": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": 0,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "propagate": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "roleid": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "user",
+                    "group",
+                    "token"
+                  ],
+                  "type": "string"
+                },
+                "ugid": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+
+        "GET /version": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "properties": {
+              "console": {
+                "enum": [
+                  "applet",
+                  "vv",
+                  "html5",
+                  "xtermjs"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "release": {
+                "type": "string"
+              },
+              "repoid": {
+                "pattern": "[0-9a-fA-F]{8,64}",
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /access/permissions": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "path": {
+                "optional": 1,
+                "type": "string"
+              },
+              "userid": {
+                "optional": 1,
+                "pattern": "(?^:^(?^:[^\\s:/]+)\\@(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+)(?:!(?^:[A-Za-z][A-Za-z0-9\\.\\-_]+))?$)",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "type": "object"
+          }
+        },
+        "GET /cluster/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "protected": 1,
+          "returns": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ip": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "local": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "nodeid": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "nodes": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "online": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "quorate": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "cluster",
+                    "node"
+                  ],
+                  "type": "string"
+                },
+                "version": {
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/resources": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "vm",
+                  "storage",
+                  "node",
+                  "sdn"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "cgroup-mode": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "cpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "disk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "diskread": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "diskwrite": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "hastate": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "host-arch": {
+                  "default": "x86_64",
+                  "enum": [
+                    "x86_64",
+                    "aarch64"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "level": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "lock": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "maxcpu": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "number"
+                },
+                "maxdisk": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "maxmem": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "mem": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "memhost": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "name": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "netin": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "netout": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "network": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "network-type": {
+                  "enum": [
+                    "fabric",
+                    "zone"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "node": {
+                  "format": "pve-node",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "plugintype": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "pool": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "protocol": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "sdn": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "shared": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "tags": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "template": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "node",
+                    "storage",
+                    "pool",
+                    "qemu",
+                    "lxc",
+                    "openvz",
+                    "sdn",
+                    "network"
+                  ],
+                  "type": "string"
+                },
+                "uptime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "vmid": {
+                  "format": "pve-vmid",
+                  "maximum": 999999999,
+                  "minimum": 100,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "zone-type": {
+                  "optional": 1,
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "type": {
+                "enum": [
+                  "btrfs",
+                  "cephfs",
+                  "cifs",
+                  "dir",
+                  "esxi",
+                  "iscsi",
+                  "iscsidirect",
+                  "lvm",
+                  "lvmthin",
+                  "nfs",
+                  "pbs",
+                  "rbd",
+                  "zfs",
+                  "zfspool"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "storage": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/storage": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "content": {
+                "format": "pve-storage-content-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "enabled": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "format": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "target": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "active": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "avail": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "content": {
+                  "format": "pve-storage-content-list",
+                  "type": "string"
+                },
+                "enabled": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "formats": {
+                  "optional": 1,
+                  "properties": {
+                    "default": {
+                      "enum": [
+                        "qcow2",
+                        "raw",
+                        "subvol",
+                        "vmdk"
+                      ],
+                      "type": "string"
+                    },
+                    "supported": {
+                      "items": {
+                        "enum": [
+                          "qcow2",
+                          "raw",
+                          "subvol",
+                          "vmdk"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "select_existing": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "shared": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "type": "string"
+                },
+                "total": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "used": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "used_fraction": {
+                  "optional": 1,
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /cluster/backup": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0
+          },
+          "returns": {
+            "items": {
+              "properties": {
+                "all": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "bwlimit": {
+                  "default": 0,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "comment": {
+                  "maxLength": 512,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "compress": {
+                  "default": "0",
+                  "enum": [
+                    "0",
+                    "1",
+                    "gzip",
+                    "lzo",
+                    "zstd"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "dumpdir": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "enabled": {
+                  "default": "1",
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "exclude": {
+                  "format": "pve-vmid-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "exclude-path": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "optional": 1,
+                  "type": "array"
+                },
+                "fleecing": {
+                  "optional": 1,
+                  "properties": {
+                    "enabled": {
+                      "default": 0,
+                      "optional": 1,
+                      "type": "boolean"
+                    },
+                    "storage": {
+                      "format": "pve-storage-id",
+                      "optional": 1,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "maxLength": 50,
+                  "pattern": "\\S+",
+                  "type": "string"
+                },
+                "ionice": {
+                  "default": 7,
+                  "maximum": 8,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "lockwait": {
+                  "default": 180,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "mailnotification": {
+                  "default": "always",
+                  "enum": [
+                    "always",
+                    "failure"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "mailto": {
+                  "format": "email-or-username-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "mode": {
+                  "default": "snapshot",
+                  "enum": [
+                    "snapshot",
+                    "suspend",
+                    "stop"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "format": "pve-node",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notes-template": {
+                  "maxLength": 1024,
+                  "optional": 1,
+                  "requires": "storage",
+                  "type": "string"
+                },
+                "notification-mode": {
+                  "default": "auto",
+                  "enum": [
+                    "auto",
+                    "legacy-sendmail",
+                    "notification-system"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "pbs-change-detection-mode": {
+                  "enum": [
+                    "legacy",
+                    "data",
+                    "metadata"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "performance": {
+                  "optional": 1,
+                  "properties": {
+                    "max-workers": {
+                      "default": 16,
+                      "maximum": 256,
+                      "minimum": 1,
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "pbs-entries-max": {
+                      "default": 1048576,
+                      "minimum": 1,
+                      "optional": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "pigz": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "pool": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "protected": {
+                  "optional": 1,
+                  "requires": "storage",
+                  "type": "boolean"
+                },
+                "prune-backups": {
+                  "optional": 1,
+                  "properties": {
+                    "keep-all": {
+                      "optional": 1,
+                      "type": "boolean"
+                    },
+                    "keep-daily": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "keep-hourly": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "keep-last": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "keep-monthly": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "keep-weekly": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    },
+                    "keep-yearly": {
+                      "minimum": "0",
+                      "optional": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "quiet": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "remove": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "repeat-missed": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "schedule": {
+                  "format": "pve-calendar-event",
+                  "maxLength": 128,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "script": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "stdexcludes": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "stop": {
+                  "default": 0,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "stopwait": {
+                  "default": 10,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "storage": {
+                  "format": "pve-storage-id",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "tmpdir": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "vmid": {
+                  "format": "pve-vmid-list",
+                  "optional": 1,
+                  "type": "string"
+                },
+                "zstd": {
+                  "default": 1,
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "errors": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "since": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "source": {
+                "default": "archive",
+                "enum": [
+                  "archive",
+                  "active",
+                  "all"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "statusfilter": {
+                "format": "pve-task-status-type-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "typefilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "until": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "userfilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid",
+                "maximum": 999999999,
+                "minimum": 100,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "pstart": {
+                  "type": "integer"
+                },
+                "starttime": {
+                  "type": "integer"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "upid": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/status": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "properties": {
+              "exitstatus": {
+                "optional": 1,
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "pstart": {
+                "type": "integer"
+              },
+              "starttime": {
+                "type": "integer"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "stopped"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "POST /nodes/{node}/vzdump": {
+          "allowtoken": 1,
+          "method": "POST",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "all": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "bwlimit": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "compress": {
+                "default": "0",
+                "enum": [
+                  "0",
+                  "1",
+                  "gzip",
+                  "lzo",
+                  "zstd"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "dumpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "exclude-path": {
+                "items": {
+                  "type": "string"
+                },
+                "optional": 1,
+                "type": "array"
+              },
+              "fleecing": {
+                "format": "backup-fleecing",
+                "optional": 1,
+                "type": "string"
+              },
+              "ionice": {
+                "default": 7,
+                "maximum": 8,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "job-id": {
+                "maxLength": 50,
+                "optional": 1,
+                "pattern": "\\S+",
+                "type": "string"
+              },
+              "lockwait": {
+                "default": 180,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "mailnotification": {
+                "default": "always",
+                "enum": [
+                  "always",
+                  "failure"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "mailto": {
+                "format": "email-or-username-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "mode": {
+                "default": "snapshot",
+                "enum": [
+                  "snapshot",
+                  "suspend",
+                  "stop"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "node": {
+                "format": "pve-node",
+                "optional": 1,
+                "type": "string"
+              },
+              "notes-template": {
+                "maxLength": 1024,
+                "optional": 1,
+                "requires": "storage",
+                "type": "string"
+              },
+              "notification-mode": {
+                "default": "auto",
+                "enum": [
+                  "auto",
+                  "legacy-sendmail",
+                  "notification-system"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "pbs-change-detection-mode": {
+                "enum": [
+                  "legacy",
+                  "data",
+                  "metadata"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "performance": {
+                "format": "backup-performance",
+                "optional": 1,
+                "type": "string"
+              },
+              "pigz": {
+                "default": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "pool": {
+                "optional": 1,
+                "type": "string"
+              },
+              "protected": {
+                "optional": 1,
+                "requires": "storage",
+                "type": "boolean"
+              },
+              "prune-backups": {
+                "default": "keep-all=1",
+                "format": "prune-backups",
+                "optional": 1,
+                "type": "string"
+              },
+              "quiet": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "remove": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "script": {
+                "optional": 1,
+                "type": "string"
+              },
+              "stdexcludes": {
+                "default": 1,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stdout": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stop": {
+                "default": 0,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "stopwait": {
+                "default": 10,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "storage": {
+                "format": "pve-storage-id",
+                "optional": 1,
+                "type": "string"
+              },
+              "tmpdir": {
+                "optional": 1,
+                "type": "string"
+              },
+              "vmid": {
+                "format": "pve-vmid-list",
+                "optional": 1,
+                "type": "string"
+              },
+              "zstd": {
+                "default": 1,
+                "optional": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "string"
+          }
+        },
+        "GET /nodes/{node}/tasks/{upid}/log": {
+          "allowtoken": 1,
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "download": {
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "start": {
+                "default": 0,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "items": {
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "t": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "DELETE /nodes/{node}/tasks/{upid}": {
+          "allowtoken": 1,
+          "method": "DELETE",
+          "parameters": {
+            "additionalProperties": 0,
+            "properties": {
+              "node": {
+                "format": "pve-node",
+                "type": "string"
+              },
+              "upid": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": 1,
+          "proxyto": "node",
+          "returns": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "id": "pbs-3",
+      "product": "pbs",
+      "major": 3,
+      "url": "https://pbs.proxmox.com/docs-3/api-viewer/apidoc.js",
+      "documentationUrl": "https://pbs.proxmox.com/docs-3/",
+      "retrievedAt": "2026-07-12",
+      "lastModified": "Mon, 15 Dec 2025 18:35:18 GMT",
+      "etag": "14eee3-64601df79e820",
+      "sha256": "2ba388ace5bb8580da297a2e78d1ef636fe20cec80ed5e577b5e1efe9905f267",
+      "capabilities": [
+        "GET /version",
+        "GET /ping",
+        "GET /nodes",
+        "GET /nodes/{node}/status",
+        "GET /config/datastore",
+        "GET /admin/datastore",
+        "GET /admin/datastore/{store}/status",
+        "GET /access/permissions",
+        "GET /admin/prune",
+        "GET /admin/sync",
+        "GET /admin/verify",
+        "GET /nodes/{node}/tasks",
+        "GET /admin/datastore/{store}/namespace",
+        "GET /admin/datastore/{store}/snapshots"
+      ],
+      "openResponseEnums": [],
+      "contracts": {
+        "GET /version": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "release": {
+                "type": "string"
+              },
+              "repoid": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /ping": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "pong": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /nodes": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "type": "null"
+          }
+        },
+        "GET /nodes/{node}/status": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "pattern": "/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]*[a-zA-Z0-9])?)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "boot-info": {
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "efi",
+                      "legacy-bios"
+                    ],
+                    "type": "string"
+                  },
+                  "secureboot": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "cpu": {
+                "type": "number"
+              },
+              "cpuinfo": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "sockets": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "current-kernel": {
+                "additionalProperties": false,
+                "properties": {
+                  "machine": {
+                    "type": "string"
+                  },
+                  "release": {
+                    "type": "string"
+                  },
+                  "sysname": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "info": {
+                "additionalProperties": false,
+                "properties": {
+                  "fingerprint": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "kversion": {
+                "type": "string"
+              },
+              "loadavg": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "memory": {
+                "additionalProperties": false,
+                "properties": {
+                  "free": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "root": {
+                "additionalProperties": false,
+                "properties": {
+                  "avail": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "swap": {
+                "additionalProperties": false,
+                "properties": {
+                  "free": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "uptime": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "wait": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /config/datastore": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backing-device": {
+                  "optional": 1,
+                  "pattern": "/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/",
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "gc-schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "keep-daily": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-hourly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-monthly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-weekly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-yearly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "maintenance-mode": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "message": {
+                        "maxLength": 64,
+                        "optional": 1,
+                        "pattern": "/^[[:^cntrl:]]*$/",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "read-only",
+                          "offline",
+                          "delete",
+                          "unmount"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "notification-mode": {
+                  "default": "legacy-sendmail",
+                  "enum": [
+                    "legacy-sendmail",
+                    "notification-system"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notify": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "gc": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "prune": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "sync": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "verify": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notify-user": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "prune-schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "tuning": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "chunk-order": {
+                        "default": "inode",
+                        "enum": [
+                          "none",
+                          "inode"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "gc-atime-cutoff": {
+                        "default": 1445,
+                        "maximum": 2880,
+                        "minimum": 1,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "gc-atime-safety-check": {
+                        "default": true,
+                        "optional": 1,
+                        "type": "boolean"
+                      },
+                      "gc-cache-capacity": {
+                        "default": 1048576,
+                        "maximum": 8388608,
+                        "minimum": 0,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "sync-level": {
+                        "default": "filesystem",
+                        "enum": [
+                          "none",
+                          "file",
+                          "filesystem"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "verify-new": {
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "maintenance": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "message": {
+                        "maxLength": 64,
+                        "optional": 1,
+                        "pattern": "/^[[:^cntrl:]]*$/",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "read-only",
+                          "offline",
+                          "delete",
+                          "unmount"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "mount-status": {
+                  "default": "nonremovable",
+                  "enum": [
+                    "mounted",
+                    "notmounted",
+                    "nonremovable"
+                  ],
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/status": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "verbose": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "avail": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "counts": {
+                "additionalProperties": false,
+                "optional": 1,
+                "properties": {
+                  "ct": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "host": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "other": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "vm": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "gc-status": {
+                "additionalProperties": false,
+                "optional": 1,
+                "properties": {
+                  "disk-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "disk-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "index-data-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "index-file-count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "pending-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "pending-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-bad": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "still-bad": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "upid": {
+                    "minLength": 36,
+                    "optional": 1,
+                    "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "total": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /access/permissions": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "auth-id": {
+                "maxLength": 64,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                "type": "string"
+              },
+              "path": {
+                "maxLength": 128,
+                "minLength": 1,
+                "optional": 1,
+                "pattern": "/^(?:/|(?:/(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))+)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": true,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "GET /admin/prune": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "disable": {
+                  "default": false,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "keep-daily": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-hourly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-monthly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-weekly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-yearly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "schedule": {
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/sync": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "sync-direction": {
+                "default": "pull",
+                "enum": [
+                  "all",
+                  "push",
+                  "pull"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "burst-in": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "burst-out": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "encrypted-only": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "group-filter": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "optional": 1,
+                  "type": "array"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "owner": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                  "type": "string"
+                },
+                "rate-in": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "rate-out": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "remote": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "remote-ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "remote-store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "remove-vanished": {
+                  "default": false,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "resync-corrupt": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "sync-direction": {
+                  "default": "pull",
+                  "enum": [
+                    "pull",
+                    "push"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "transfer-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "verified-only": {
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/verify": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "ignore-verified": {
+                  "default": true,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "default": 7,
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "outdated-after": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "errors": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "pattern": "/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]*[a-zA-Z0-9])?)$/",
+                "type": "string"
+              },
+              "running": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "since": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "start": {
+                "default": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "statusfilter": {
+                "items": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "error",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "optional": 1,
+                "type": "array"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "typefilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "until": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "userfilter": {
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "pstart": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "starttime": {
+                  "type": "integer"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "upid": {
+                  "minLength": 36,
+                  "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "worker_id": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "worker_type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/namespace": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "max-depth": {
+                "default": 7,
+                "maximum": 7,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "parent": {
+                "maxLength": 256,
+                "optional": 1,
+                "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                "type": "string"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/snapshots": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "backup-id": {
+                "optional": 1,
+                "pattern": "/^[A-Za-z0-9_][A-Za-z0-9._\\-]*$/",
+                "type": "string"
+              },
+              "backup-type": {
+                "enum": [
+                  "vm",
+                  "ct",
+                  "host"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "ns": {
+                "maxLength": 256,
+                "optional": 1,
+                "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                "type": "string"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backup-id": {
+                  "pattern": "/^[A-Za-z0-9_][A-Za-z0-9._\\-]*$/",
+                  "type": "string"
+                },
+                "backup-time": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "backup-type": {
+                  "enum": [
+                    "vm",
+                    "ct",
+                    "host"
+                  ],
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "files": {
+                  "items": {
+                    "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "fingerprint": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "owner": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                  "type": "string"
+                },
+                "protected": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "verification": {
+                  "additionalProperties": false,
+                  "optional": 1,
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "ok",
+                        "failed"
+                      ],
+                      "type": "string"
+                    },
+                    "upid": {
+                      "minLength": 36,
+                      "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "id": "pbs-4",
+      "product": "pbs",
+      "major": 4,
+      "url": "https://pbs.proxmox.com/docs/api-viewer/apidoc.js",
+      "documentationUrl": "https://pbs.proxmox.com/docs/",
+      "retrievedAt": "2026-07-12",
+      "lastModified": "Thu, 18 Jun 2026 09:28:25 GMT",
+      "etag": "16feb0-65483cc484040",
+      "sha256": "c62063edd60fbc288c376ec1a71efd1b16239cdf9ff88cb8f873ae1a7410f64a",
+      "capabilities": [
+        "GET /version",
+        "GET /ping",
+        "GET /nodes",
+        "GET /nodes/{node}/status",
+        "GET /nodes/{node}/identity",
+        "GET /config/datastore",
+        "GET /admin/datastore",
+        "GET /admin/datastore/{store}/status",
+        "GET /access/permissions",
+        "GET /admin/prune",
+        "GET /admin/sync",
+        "GET /admin/verify",
+        "GET /nodes/{node}/tasks",
+        "GET /admin/datastore/{store}/namespace",
+        "GET /admin/datastore/{store}/snapshots"
+      ],
+      "openResponseEnums": [],
+      "contracts": {
+        "GET /version": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "release": {
+                "type": "string"
+              },
+              "repoid": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /ping": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "pong": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /nodes": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "type": "null"
+          }
+        },
+        "GET /nodes/{node}/status": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "pattern": "/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]*[a-zA-Z0-9])?)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "boot-info": {
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "efi",
+                      "legacy-bios"
+                    ],
+                    "type": "string"
+                  },
+                  "secureboot": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "cpu": {
+                "type": "number"
+              },
+              "cpuinfo": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "sockets": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "current-kernel": {
+                "additionalProperties": false,
+                "properties": {
+                  "machine": {
+                    "type": "string"
+                  },
+                  "release": {
+                    "type": "string"
+                  },
+                  "sysname": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "info": {
+                "additionalProperties": false,
+                "properties": {
+                  "fingerprint": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "kversion": {
+                "type": "string"
+              },
+              "loadavg": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "memory": {
+                "additionalProperties": false,
+                "properties": {
+                  "free": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "root": {
+                "additionalProperties": false,
+                "properties": {
+                  "avail": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "swap": {
+                "additionalProperties": false,
+                "properties": {
+                  "free": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "total": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "used": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "uptime": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "wait": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /nodes/{node}/identity": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "optional": 1,
+                "pattern": "/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]*[a-zA-Z0-9])?)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "pbs-instance-id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /config/datastore": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "backing-device": {
+                  "optional": 1,
+                  "pattern": "/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/",
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "counter-reset-schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "gc-on-unmount": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "gc-schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "keep-daily": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-hourly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-monthly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-weekly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-yearly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "maintenance-mode": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "message": {
+                        "maxLength": 64,
+                        "optional": 1,
+                        "pattern": "/^[[:^cntrl:]]*$/",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "read-only",
+                          "offline",
+                          "delete",
+                          "unmount",
+                          "s3-refresh"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "notification-mode": {
+                  "default": "notification-system",
+                  "enum": [
+                    "legacy-sendmail",
+                    "notification-system"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notification-thresholds": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "s3-delete": {
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "s3-download": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "s3-get": {
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "s3-head": {
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "s3-post": {
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "s3-put": {
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "s3-upload": {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "optional": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notify": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "gc": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "prune": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "sync": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "verify": {
+                        "enum": [
+                          "never",
+                          "always",
+                          "error"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "notify-user": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "prune-schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "tuning": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "chunk-order": {
+                        "default": "inode",
+                        "enum": [
+                          "none",
+                          "inode"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      },
+                      "default-verification-readers": {
+                        "default": 1,
+                        "maximum": 32,
+                        "minimum": 1,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "default-verification-workers": {
+                        "default": 4,
+                        "maximum": 32,
+                        "minimum": 1,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "gc-atime-cutoff": {
+                        "default": 1445,
+                        "maximum": 2880,
+                        "minimum": 1,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "gc-atime-safety-check": {
+                        "default": true,
+                        "optional": 1,
+                        "type": "boolean"
+                      },
+                      "gc-cache-capacity": {
+                        "default": 1048576,
+                        "maximum": 8388608,
+                        "minimum": 0,
+                        "optional": 1,
+                        "type": "integer"
+                      },
+                      "sync-level": {
+                        "default": "filesystem",
+                        "enum": [
+                          "none",
+                          "file",
+                          "filesystem"
+                        ],
+                        "optional": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "verify-new": {
+                  "optional": 1,
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend-type": {
+                  "default": "filesystem",
+                  "enum": [
+                    "filesystem",
+                    "s3"
+                  ],
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "maintenance": {
+                  "format": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "message": {
+                        "maxLength": 64,
+                        "optional": 1,
+                        "pattern": "/^[[:^cntrl:]]*$/",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "read-only",
+                          "offline",
+                          "delete",
+                          "unmount",
+                          "s3-refresh"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "optional": 1,
+                  "type": "string"
+                },
+                "mount-status": {
+                  "default": "nonremovable",
+                  "enum": [
+                    "mounted",
+                    "notmounted",
+                    "nonremovable"
+                  ],
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/status": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "verbose": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": false,
+            "properties": {
+              "avail": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "backend-type": {
+                "default": "filesystem",
+                "enum": [
+                  "filesystem",
+                  "s3"
+                ],
+                "type": "string"
+              },
+              "counts": {
+                "additionalProperties": false,
+                "optional": 1,
+                "properties": {
+                  "ct": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "host": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "other": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "vm": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "groups": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "snapshots": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "gc-status": {
+                "additionalProperties": false,
+                "optional": 1,
+                "properties": {
+                  "cache-stats": {
+                    "additionalProperties": false,
+                    "optional": 1,
+                    "properties": {
+                      "hits": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "misses": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "disk-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "disk-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "index-data-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "index-file-count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "pending-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "pending-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-bad": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "removed-chunks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "still-bad": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "upid": {
+                    "minLength": 36,
+                    "optional": 1,
+                    "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "s3-statistics": {
+                "additionalProperties": false,
+                "optional": 1,
+                "properties": {
+                  "delete": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "downloaded": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "get": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "head": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "post": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "put": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "uploaded": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "total": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "GET /access/permissions": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "auth-id": {
+                "maxLength": 64,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                "type": "string"
+              },
+              "path": {
+                "maxLength": 128,
+                "minLength": 1,
+                "optional": 1,
+                "pattern": "/^(?:/|(?:/(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))+)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "additionalProperties": true,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "GET /admin/prune": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "disable": {
+                  "default": false,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "keep-daily": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-hourly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-monthly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-weekly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "keep-yearly": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "schedule": {
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/sync": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "sync-direction": {
+                "default": "pull",
+                "enum": [
+                  "all",
+                  "push",
+                  "pull"
+                ],
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "active-encryption-key": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "associated-key": {
+                  "items": {
+                    "maxLength": 32,
+                    "minLength": 3,
+                    "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                    "type": "string"
+                  },
+                  "optional": 1,
+                  "type": "array"
+                },
+                "burst-in": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "burst-out": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "encrypted-only": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "group-filter": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "optional": 1,
+                  "type": "array"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "owner": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                  "type": "string"
+                },
+                "rate-in": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "rate-out": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "optional": 1,
+                  "type": "string"
+                },
+                "remote": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "remote-ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "remote-store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "remove-vanished": {
+                  "default": false,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "resync-corrupt": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "run-on-mount": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "sync-direction": {
+                  "default": "pull",
+                  "enum": [
+                    "pull",
+                    "push"
+                  ],
+                  "optional": 1,
+                  "type": "string"
+                },
+                "transfer-last": {
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "unmount-on-done": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "verified-only": {
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "worker-threads": {
+                  "default": 1,
+                  "maximum": 32,
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/verify": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "id": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "ignore-verified": {
+                  "default": true,
+                  "optional": 1,
+                  "type": "boolean"
+                },
+                "last-run-endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "last-run-state": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "last-run-upid": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "max-depth": {
+                  "default": 7,
+                  "maximum": 7,
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "next-run": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                },
+                "outdated-after": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "read-threads": {
+                  "default": 1,
+                  "maximum": 32,
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "schedule": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "store": {
+                  "maxLength": 32,
+                  "minLength": 3,
+                  "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                  "type": "string"
+                },
+                "verify-threads": {
+                  "default": 4,
+                  "maximum": 32,
+                  "minimum": 1,
+                  "optional": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /nodes/{node}/tasks": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "errors": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "limit": {
+                "default": 50,
+                "optional": 1,
+                "type": "integer"
+              },
+              "node": {
+                "pattern": "/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]*[a-zA-Z0-9])?)$/",
+                "type": "string"
+              },
+              "running": {
+                "default": false,
+                "optional": 1,
+                "type": "boolean"
+              },
+              "since": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "start": {
+                "default": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "statusfilter": {
+                "items": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "error",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "optional": 1,
+                "type": "array"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "optional": 1,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              },
+              "typefilter": {
+                "optional": 1,
+                "type": "string"
+              },
+              "until": {
+                "optional": 1,
+                "type": "integer"
+              },
+              "userfilter": {
+                "optional": 1,
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "endtime": {
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "pstart": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "starttime": {
+                  "type": "integer"
+                },
+                "status": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "upid": {
+                  "minLength": 36,
+                  "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "worker_id": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "worker_type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/namespace": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "max-depth": {
+                "default": 7,
+                "maximum": 7,
+                "minimum": 0,
+                "optional": 1,
+                "type": "integer"
+              },
+              "parent": {
+                "maxLength": 256,
+                "optional": 1,
+                "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                "type": "string"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comment": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "ns": {
+                  "maxLength": 256,
+                  "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "GET /admin/datastore/{store}/snapshots": {
+          "method": "GET",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "backup-id": {
+                "optional": 1,
+                "pattern": "/^[A-Za-z0-9_][A-Za-z0-9._\\-]*$/",
+                "type": "string"
+              },
+              "backup-type": {
+                "enum": [
+                  "vm",
+                  "ct",
+                  "host"
+                ],
+                "optional": 1,
+                "type": "string"
+              },
+              "ns": {
+                "maxLength": 256,
+                "optional": 1,
+                "pattern": "/^(?:(?:(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)/){0,7}(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))?$/",
+                "type": "string"
+              },
+              "store": {
+                "maxLength": 32,
+                "minLength": 3,
+                "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                "type": "string"
+              }
+            }
+          },
+          "returns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backup-id": {
+                  "pattern": "/^[A-Za-z0-9_][A-Za-z0-9._\\-]*$/",
+                  "type": "string"
+                },
+                "backup-time": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "backup-type": {
+                  "enum": [
+                    "vm",
+                    "ct",
+                    "host"
+                  ],
+                  "type": "string"
+                },
+                "comment": {
+                  "maxLength": 128,
+                  "optional": 1,
+                  "pattern": "/^[[:^cntrl:]]*$/",
+                  "type": "string"
+                },
+                "files": {
+                  "items": {
+                    "pattern": "/^(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)$/",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "fingerprint": {
+                  "optional": 1,
+                  "type": "string"
+                },
+                "owner": {
+                  "maxLength": 64,
+                  "minLength": 3,
+                  "optional": 1,
+                  "pattern": "/^(?:(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)|(?:[^\\s:/[:cntrl:]]+)@(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*)!(?:[A-Za-z0-9_][A-Za-z0-9._\\-]*))$/",
+                  "type": "string"
+                },
+                "protected": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "minimum": 0,
+                  "optional": 1,
+                  "type": "integer"
+                },
+                "verification": {
+                  "additionalProperties": false,
+                  "optional": 1,
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "ok",
+                        "failed"
+                      ],
+                      "type": "string"
+                    },
+                    "upid": {
+                      "minLength": 36,
+                      "pattern": "/^UPID:(?P<node>[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?):(?P<pid>[0-9A-Fa-f]{8}):(?P<pstart>[0-9A-Fa-f]{8,9}):(?P<task_id>[0-9A-Fa-f]{8,16}):(?P<starttime>[0-9A-Fa-f]{8}):(?P<wtype>[^:\\s]+):(?P<wid>[^:\\s]*):(?P<authid>[^:\\s]+):$/",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      }
+    }
+  ]
+}

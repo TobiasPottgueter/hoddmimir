@@ -1,7 +1,60 @@
 ---
+- name: Parse the dedicated Docker bridge network
+  ansible.builtin.set_fact:
+    hoddmimir_docker_network_prefix: >-
+      {{ hoddmimir_docker_subnet.split('/')[1]
+         if hoddmimir_docker_subnet is string and '/' in hoddmimir_docker_subnet else '' }}
+    hoddmimir_docker_network_octets: >-
+      {{ (hoddmimir_docker_subnet.split('/')[0]).split('.')
+         if hoddmimir_docker_subnet is string and '/' in hoddmimir_docker_subnet else [] }}
+    hoddmimir_docker_gateway_octets: >-
+      {{ hoddmimir_docker_gateway.split('.')
+         if hoddmimir_docker_gateway is string else [] }}
+
+- name: Validate the dedicated private Docker bridge network
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_docker_network_prefix == '24'
+      - hoddmimir_docker_network_octets | length == 4
+      - hoddmimir_docker_gateway_octets | length == 4
+      - hoddmimir_docker_network_octets | select('match', '^(0|[1-9][0-9]{0,2})$') | list | length == 4
+      - hoddmimir_docker_gateway_octets | select('match', '^(0|[1-9][0-9]{0,2})$') | list | length == 4
+      - hoddmimir_docker_network_octets | map('int') | select('ge', 0) | select('le', 255) | list | length == 4
+      - hoddmimir_docker_gateway_octets | map('int') | select('ge', 0) | select('le', 255) | list | length == 4
+      - hoddmimir_docker_network_octets[3] | int == 0
+      - hoddmimir_docker_gateway_octets[0:3] == hoddmimir_docker_network_octets[0:3]
+      - hoddmimir_docker_gateway_octets[3] | int >= 1
+      - hoddmimir_docker_gateway_octets[3] | int <= 254
+      - >-
+        hoddmimir_docker_network_octets[0] | int == 10
+        or (
+          hoddmimir_docker_network_octets[0] | int == 172
+          and hoddmimir_docker_network_octets[1] | int >= 16
+          and hoddmimir_docker_network_octets[1] | int <= 31
+        )
+        or (
+          hoddmimir_docker_network_octets[0] | int == 192
+          and hoddmimir_docker_network_octets[1] | int == 168
+        )
+    fail_msg: Configure one canonical RFC1918 /24 Docker bridge and a non-network/non-broadcast gateway inside it.
+
 - name: Validate non-secret deployment settings
   ansible.builtin.assert:
     that:
+      - hoddmimir_deployment_profile is string
+      - hoddmimir_deployment_profile in ['production', 'lab']
+      - hoddmimir_manage_https is boolean
+      - hoddmimir_maintenance_external_schedulers_paused is boolean
+      - hoddmimir_maintenance_timeout_seconds is integer
+      - hoddmimir_maintenance_timeout_seconds >= 1
+      - hoddmimir_maintenance_timeout_seconds <= 86400
+      - hoddmimir_maintenance_directory == hoddmimir_install_directory ~ '/maintenance'
+      - hoddmimir_project_name is match('^[a-z0-9][a-z0-9_-]{0,62}$')
+      - hoddmimir_image_repository is string
+      - hoddmimir_image_repository is match('^[a-z0-9.-]+/[a-z0-9._-]+(?:/[a-z0-9._-]+)*$')
+      - hoddmimir_release_platform == 'linux/amd64'
+      - hoddmimir_registry_index_digests is mapping
+      - (hoddmimir_registry_index_digests.keys() | list | sort) == ['mariadb', 'web', 'worker']
       - hoddmimir_data_worker_image | length > 0
       - hoddmimir_backup_worker_image | length > 0
       - hoddmimir_webapp_image | length > 0
@@ -9,11 +62,109 @@
       - hoddmimir_database_name is match('^[A-Za-z0-9_]+$')
       - hoddmimir_web_port | int > 0
       - hoddmimir_web_port | int <= 65535
-      - hoddmimir_collector_interval_seconds | int > 0
+      - hoddmimir_collector_grid_width_seconds | int > 0
+      - hoddmimir_collector_grid_width_seconds | int <= 31536000
+      - hoddmimir_evidence_freshness_seconds | int >= 1
+      - hoddmimir_evidence_freshness_seconds | int <= 86400
+      - hoddmimir_pve_storage_max_node_fanout | int >= 1
+      - hoddmimir_pve_storage_max_node_fanout | int <= 1024
+      - hoddmimir_pbs_max_datastore_fanout | int >= 1
+      - hoddmimir_pbs_max_datastore_fanout | int <= 1024
+      - hoddmimir_pbs_content_max_datastores | int >= 1
+      - hoddmimir_pbs_content_max_datastores | int <= 1024
+      - hoddmimir_pbs_content_max_namespaces_per_datastore | int >= 1
+      - hoddmimir_pbs_content_max_namespaces_per_datastore | int <= 65536
+      - hoddmimir_pbs_content_max_snapshots_per_namespace | int >= 1
+      - hoddmimir_pbs_content_max_snapshots_per_namespace | int <= 1048576
+      - hoddmimir_pbs_content_max_total_snapshots | int >= hoddmimir_pbs_content_max_snapshots_per_namespace | int
+      - hoddmimir_pbs_content_max_total_snapshots | int <= 4194304
+      - hoddmimir_pbs_content_namespace_body_bytes | int >= 65536
+      - hoddmimir_pbs_content_namespace_body_bytes | int <= 67108864
+      - hoddmimir_pbs_content_snapshot_body_bytes | int >= 1048576
+      - hoddmimir_pbs_content_snapshot_body_bytes | int <= 268435456
+      - hoddmimir_monitor_history_overlap_seconds | int >= 0
+      - hoddmimir_monitor_history_overlap_seconds | int <= 3600
+      - hoddmimir_pve_monitor_page_size | int >= 1
+      - hoddmimir_pve_monitor_page_size | int <= 100
+      - hoddmimir_pve_monitor_max_nodes | int >= 1
+      - hoddmimir_pve_monitor_max_nodes | int <= 128
+      - hoddmimir_pve_monitor_active_page_cap | int >= 1
+      - hoddmimir_pve_monitor_active_page_cap | int <= 2
+      - hoddmimir_pve_monitor_archive_page_cap | int >= 1
+      - hoddmimir_pve_monitor_archive_page_cap | int <= 10
+      - hoddmimir_pve_monitor_request_limit | int >= 1
+      - hoddmimir_pve_monitor_request_limit | int <= 512
+      - hoddmimir_pve_monitor_raw_row_limit | int >= hoddmimir_pve_monitor_page_size | int
+      - hoddmimir_pve_monitor_raw_row_limit | int <= 25000
+      - hoddmimir_pve_monitor_distinct_task_limit | int >= 1
+      - hoddmimir_pve_monitor_distinct_task_limit | int <= hoddmimir_pve_monitor_raw_row_limit | int
+      - hoddmimir_pve_monitor_history_window_seconds | int >= 1
+      - hoddmimir_pve_monitor_history_window_seconds | int <= 86400
+      - hoddmimir_pbs_monitor_page_size | int >= 1
+      - hoddmimir_pbs_monitor_page_size | int <= 1000
+      - hoddmimir_pbs_monitor_max_pages_per_stream | int >= 1
+      - hoddmimir_pbs_monitor_max_pages_per_stream | int <= 64
+      - hoddmimir_pbs_monitor_max_rows_per_stream | int >= hoddmimir_pbs_monitor_page_size | int
+      - hoddmimir_pbs_monitor_max_rows_per_stream | int <= 65536
+      - hoddmimir_pbs_monitor_max_jobs_per_kind | int >= 1
+      - hoddmimir_pbs_monitor_max_jobs_per_kind | int <= 65536
+      - hoddmimir_pbs_monitor_history_window_seconds | int >= 1
+      - hoddmimir_pbs_monitor_history_window_seconds | int <= 86400
       - hoddmimir_backup_worker_poll_interval_seconds | int > 0
+      - hoddmimir_matrix_webhook_channel is match('^[a-z0-9][a-z0-9._-]{0,63}$')
+      - hoddmimir_matrix_webhook_timeout_seconds | int >= 1
+      - hoddmimir_matrix_webhook_timeout_seconds | int <= 30
       - hoddmimir_compose_wait_timeout_seconds | int > 0
       - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_backup_execution_activation_ack == hoddmimir_backup_execution_required_ack
+      - not (hoddmimir_backup_execution_enabled | bool) or (hoddmimir_matrix_notifications_enabled | bool)
     fail_msg: Image references, runtime values, database name, or backup activation acknowledgement are invalid.
+
+- name: Enforce the production activation profile
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_backup_execution_required_ack == 'ENABLE_PRODUCTION_BACKUPS'
+    fail_msg: The production profile requires the production-only backup acknowledgement.
+  when: hoddmimir_deployment_profile == 'production'
+
+- name: Enforce the isolated lab deployment profile
+  ansible.builtin.import_tasks: lab-profile.yml
+  when: hoddmimir_deployment_profile == 'lab'
+
+- name: Validate host HTTPS deployment settings
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_public_domain is match('^(?=.{1,253}$)(?!.*\.\.)(?!-)[a-z0-9-]+(?:\.[a-z0-9-]+)+$')
+      - not hoddmimir_public_domain.endswith('.invalid')
+      - hoddmimir_acme_email is match('^[A-Za-z0-9.!#$%&''*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$')
+      - not hoddmimir_acme_email.endswith('@example.invalid')
+      - hoddmimir_acme_dns_provider == 'hetzner'
+      - hoddmimir_acme_renew_before_days | int >= 1
+      - hoddmimir_acme_renew_before_days | int <= 60
+    fail_msg: Configure a non-placeholder public domain, ACME identity, provider, and renewal window when host HTTPS is managed.
+  when: hoddmimir_manage_https | bool
+
+- name: Validate secret Hetzner DNS API token
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_hetzner_dns_api_token is defined
+      - hoddmimir_hetzner_dns_api_token is string
+      - hoddmimir_hetzner_dns_api_token is match('^[A-Za-z0-9_-]{32,256}$')
+      - hoddmimir_hetzner_dns_api_token != 'REPLACE_WITH_HETZNER_DNS_API_TOKEN'
+    fail_msg: Supply the Hetzner DNS API token through the ignored encrypted production Vault.
+  no_log: true
+  when: hoddmimir_manage_https | bool
+
+- name: Validate secret Matrix webhook configuration
+  ansible.builtin.assert:
+    that:
+      - hoddmimir_matrix_webhook_url is defined
+      - hoddmimir_matrix_webhook_url | length >= 12
+      - hoddmimir_matrix_webhook_url | length <= 2048
+      - hoddmimir_matrix_webhook_url is match('^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s#]*)?$')
+      - not (hoddmimir_matrix_notifications_enabled | bool) or hoddmimir_matrix_webhook_url != 'https://matrix.invalid/disabled'
+      - not (hoddmimir_backup_execution_enabled | bool) or hoddmimir_matrix_webhook_url != 'https://matrix.invalid/disabled'
+    fail_msg: Supply a strict HTTPS Matrix webhook URL; production delivery may not use the disabled placeholder.
+  no_log: true
 
 - name: Require immutable image references
   ansible.builtin.assert:
@@ -22,13 +173,51 @@
       - hoddmimir_backup_worker_image is match('^.+@sha256:[0-9a-f]{64}$')
       - hoddmimir_webapp_image is match('^.+@sha256:[0-9a-f]{64}$')
       - hoddmimir_mariadb_image is match('^.+@sha256:[0-9a-f]{64}$')
-    fail_msg: Pin every production image with an @sha256 digest before deployment.
+      - hoddmimir_data_worker_image == hoddmimir_backup_worker_image
+      - >-
+        hoddmimir_data_worker_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - >-
+        hoddmimir_webapp_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - >-
+        hoddmimir_mariadb_image
+        | regex_replace('^.*@', '')
+        not in (hoddmimir_registry_index_digests.values() | list)
+      - hoddmimir_registry_index_digests.values() | list | unique | length == 3
+      - >-
+        [
+          hoddmimir_data_worker_image | regex_replace('^.*@', ''),
+          hoddmimir_webapp_image | regex_replace('^.*@', ''),
+          hoddmimir_mariadb_image | regex_replace('^.*@', '')
+        ] | unique | length == 3
+      - >-
+        hoddmimir_data_worker_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/worker'
+      - >-
+        hoddmimir_webapp_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/web'
+      - >-
+        hoddmimir_mariadb_image
+        | regex_replace('@sha256:[0-9a-f]{64}$', '')
+        == hoddmimir_image_repository ~ '/mariadb'
+    fail_msg: Pin the exact published Hoddmímir worker, web, and MariaDB linux/amd64 platform manifests; both workers must use the same worker digest.
 
-- name: Require strong unique generated secrets
+- name: Validate the three corresponding OCI registry index digests
+  ansible.builtin.assert:
+    that:
+      - item.value is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: Supply one valid OCI registry index digest for each published Hoddmímir image.
+  loop: "{{ hoddmimir_registry_index_digests | dict2items }}"
+
+- name: Require strong generated application and database secrets
   ansible.builtin.assert:
     that:
       - hoddmimir_app_secret is defined and hoddmimir_app_secret is match('^[0-9a-f]{64}$')
-      - hoddmimir_encryption_key is defined and hoddmimir_encryption_key is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_root_password is defined and hoddmimir_mariadb_root_password is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_migration_password is defined and hoddmimir_mariadb_migration_password is match('^[0-9a-f]{64}$')
       - hoddmimir_mariadb_web_password is defined and hoddmimir_mariadb_web_password is match('^[0-9a-f]{64}$')
@@ -37,12 +226,79 @@
       - >-
         [
           hoddmimir_app_secret,
-          hoddmimir_encryption_key,
           hoddmimir_mariadb_root_password,
           hoddmimir_mariadb_migration_password,
           hoddmimir_mariadb_web_password,
           hoddmimir_mariadb_collector_password,
           hoddmimir_mariadb_backup_worker_password
-        ] | unique | length == 7
-    fail_msg: Create the ignored encrypted vault.yml with seven distinct 64-character hexadecimal secrets.
+        ] | unique | length == 6
+    fail_msg: Create the ignored encrypted vault.yml with distinct 64-character hexadecimal application and database secrets.
+  no_log: true
+
+- name: Validate encryption keyring envelope
+  ansible.builtin.assert:
+    that:
+      - >-
+        hoddmimir_encryption_keyring is defined
+        and hoddmimir_encryption_keyring is mapping
+        and (hoddmimir_encryption_keyring.keys() | list | sort) == ['format', 'keys', 'primaryKeyId', 'revision']
+        and hoddmimir_encryption_keyring['format'] is integer
+        and hoddmimir_encryption_keyring['format'] == 1
+        and hoddmimir_encryption_keyring['revision'] is integer
+        and hoddmimir_encryption_keyring['revision'] >= 1
+        and hoddmimir_encryption_keyring['primaryKeyId'] is string
+        and hoddmimir_encryption_keyring['primaryKeyId'] is match('^[a-z0-9][a-z0-9_-]{0,31}$')
+        and hoddmimir_encryption_keyring['keys'] is sequence
+        and hoddmimir_encryption_keyring['keys'] is not string
+        and hoddmimir_encryption_keyring['keys'] is not mapping
+        and hoddmimir_encryption_keyring['keys'] | length >= 1
+        and hoddmimir_encryption_keyring['keys'] | length <= 16
+    fail_msg: The encryption keyring structure, format, revision, primary key ID, or key count is invalid.
+  no_log: true
+
+- name: Validate encryption keyring entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - (item.keys() | list | sort) == ['id', 'material']
+      - item['id'] is string
+      - item['id'] is match('^[a-z0-9][a-z0-9_-]{0,31}$')
+      - item['material'] is string
+      - item['material'] is match('^[0-9a-f]{64}$')
+    fail_msg: Every encryption keyring entry must contain one valid ID and one 64-character lowercase hexadecimal material value.
+  loop: "{{ hoddmimir_encryption_keyring['keys'] }}"
+  no_log: true
+
+- name: Require unique encryption IDs and materials with an existing primary key
+  ansible.builtin.assert:
+    that:
+      - >-
+        hoddmimir_encryption_keyring['keys']
+        | map(attribute='id')
+        | unique
+        | length
+        == hoddmimir_encryption_keyring['keys'] | length
+      - >-
+        hoddmimir_encryption_keyring['keys']
+        | map(attribute='material')
+        | unique
+        | length
+        == hoddmimir_encryption_keyring['keys'] | length
+      - >-
+        hoddmimir_encryption_keyring['primaryKeyId']
+        in (hoddmimir_encryption_keyring['keys'] | map(attribute='id') | list)
+      - >-
+        (
+          [
+            hoddmimir_app_secret,
+            hoddmimir_mariadb_root_password,
+            hoddmimir_mariadb_migration_password,
+            hoddmimir_mariadb_web_password,
+            hoddmimir_mariadb_collector_password,
+            hoddmimir_mariadb_backup_worker_password
+          ]
+          + (hoddmimir_encryption_keyring['keys'] | map(attribute='material') | list)
+        ) | unique | length
+        == 6 + (hoddmimir_encryption_keyring['keys'] | length)
+    fail_msg: Encryption key IDs and materials must be unique, distinct from other secrets, and include the primary key ID.
   no_log: true

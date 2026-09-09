@@ -10,7 +10,15 @@ export default defineConfigWithVueTs(
     name: "app/files-to-lint",
     files: ["**/*.{ts,mts,tsx,vue}"],
   },
-  globalIgnores(["dist/**", "coverage/**", "node_modules/**"]),
+  globalIgnores([
+    "dist/**",
+    "coverage/**",
+    "node_modules/**",
+    "playwright-report/**",
+    "test-results/**",
+    "blob-report/**",
+    "src/api/generated/**",
+  ]),
   pluginVue.configs["flat/essential"],
   vueTsConfigs.recommended,
   {

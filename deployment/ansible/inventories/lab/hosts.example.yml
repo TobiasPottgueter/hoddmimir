@@ -1,0 +1,8 @@
+---
+all:
+  children:
+    hoddmimir_hosts:
+      hosts:
+        hoddmimir-lab:
+          ansible_host: REPLACE_WITH_LAB_DEPLOYMENT_HOST
+          ansible_user: REPLACE_WITH_LAB_DEPLOYMENT_USER

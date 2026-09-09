@@ -1,0 +1,16 @@
+---
+- name: Prove disabled HTTPS deployment and verification are inert
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hoddmimir_manage_https: false
+  tasks:
+    - name: Load deployment tasks under the HTTPS-only test tag
+      ansible.builtin.import_role:
+        name: hoddmimir
+
+    - name: Load verification tasks under the HTTPS-only test tag
+      ansible.builtin.import_role:
+        name: hoddmimir
+        tasks_from: verify

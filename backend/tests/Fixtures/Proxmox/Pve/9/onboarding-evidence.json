@@ -1,0 +1,38 @@
+{
+  "version": {"data": {"release": "9.2", "repoid": "9000000c", "version": "9.2.3"}},
+  "roles": {"data": [
+    {"roleid": "HoddmimirScan", "privs": "Datastore.Audit,Pool.Audit,Sys.Audit,VM.Audit"},
+    {"roleid": "HoddmimirBackup", "privs": "Datastore.AllocateSpace,VM.Backup"}
+  ]},
+  "acl": {"data": [
+    {"path": "/", "type": "group", "ugid": "Bots", "roleid": "HoddmimirScan", "propagate": 1},
+    {"path": "/", "type": "group", "ugid": "Bots", "roleid": "HoddmimirBackup", "propagate": 1},
+    {"path": "/", "type": "token", "ugid": "hoddmimir@pve!scan", "roleid": "HoddmimirScan", "propagate": 1},
+    {"path": "/", "type": "token", "ugid": "hoddmimir@pve!backup", "roleid": "HoddmimirBackup", "propagate": 1},
+    {"path": "/nodes", "type": "token", "ugid": "hoddmimir@pve!backup", "roleid": "HoddmimirScan", "propagate": 1}
+  ]},
+  "scanPermissions": {"data": {
+    "/": {"Sys.Audit": 1},
+    "/nodes": {"Sys.Audit": 1},
+    "/vms": {"VM.Audit": 1},
+    "/pool": {"Pool.Audit": 1},
+    "/storage": {"Datastore.Audit": 1}
+  }},
+  "backupPermissions": {"data": {
+    "/nodes": {"Sys.Audit": 1, "VM.Audit": 1, "Pool.Audit": 1, "Datastore.Audit": 1},
+    "/vms": {"VM.Backup": 1, "Datastore.AllocateSpace": 1},
+    "/storage": {"VM.Backup": 1, "Datastore.AllocateSpace": 1}
+  }},
+  "scanPropagationProbes": {
+    "/access": {"data": {"/access": {"Sys.Audit": 1}}},
+    "/nodes/hoddmimir-propagation-probe": {"data": {"/nodes/hoddmimir-propagation-probe": {"Sys.Audit": 1}}},
+    "/vms/999999999": {"data": {"/vms/999999999": {"VM.Audit": 1}}},
+    "/pool/hoddmimir-propagation-probe": {"data": {"/pool/hoddmimir-propagation-probe": {"Pool.Audit": 1}}},
+    "/storage/hoddmimir-propagation-probe": {"data": {"/storage/hoddmimir-propagation-probe": {"Datastore.Audit": 1}}}
+  },
+  "backupPropagationProbes": {
+    "/vms/999999999": {"data": {"/vms/999999999": {"VM.Backup": 1}}},
+    "/storage/hoddmimir-propagation-probe": {"data": {"/storage/hoddmimir-propagation-probe": {"Datastore.AllocateSpace": 1}}},
+    "/nodes/hoddmimir-propagation-probe": {"data": {"/nodes/hoddmimir-propagation-probe": {"Sys.Audit": 1}}}
+  }
+}

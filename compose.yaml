@@ -7,6 +7,9 @@ x-app-environment: &app-environment
   APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
   APP_SECRET_FILE: /run/secrets/app_secret
   ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  ENCRYPTION_KEYRING_REVISION: ${ENCRYPTION_KEYRING_REVISION:-1}
+  APP_BUILD_VERSION: ${APP_BUILD_VERSION:-development}
+  EVIDENCE_FRESHNESS_SECONDS: ${EVIDENCE_FRESHNESS_SECONDS:-300}
   DATABASE_HOST: mariadb
   DATABASE_PORT: 3306
   DATABASE_NAME: ${MARIADB_DATABASE:-hoddmimir}
@@ -15,14 +18,23 @@ x-app-security: &app-security
   read_only: true
   cap_drop:
     - ALL
+  cap_add:
+    - CHOWN
+    - DAC_READ_SEARCH
+    - SETGID
+    - SETUID
   security_opt:
     - no-new-privileges:true
   tmpfs:
     - /tmp:mode=1777
     - /app/var:uid=10001,gid=10001,mode=0770
+    - /run/hoddmimir-secrets:mode=0700
   init: true
   restart: unless-stopped
   stop_grace_period: 30s
+  cpus: ${APP_CPU_LIMIT:-1.0}
+  mem_limit: ${APP_MEMORY_LIMIT:-512m}
+  pids_limit: ${APP_PIDS_LIMIT:-128}
   logging:
     driver: json-file
     options:
@@ -37,6 +49,7 @@ services:
     environment:
       MARIADB_DATABASE: ${MARIADB_DATABASE:-hoddmimir}
       MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_ROOT_HOST: localhost
       TZ: UTC
     secrets:
       - mariadb_root_password
@@ -46,6 +59,22 @@ services:
       - mariadb_backup_worker_password
     volumes:
       - mariadb_data:/var/lib/mysql
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/mysqld:uid=999,gid=999,mode=1770
+    cpus: ${MARIADB_CPU_LIMIT:-2.0}
+    mem_limit: ${MARIADB_MEMORY_LIMIT:-2g}
+    pids_limit: ${MARIADB_PIDS_LIMIT:-256}
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -62,12 +91,34 @@ services:
       context: .
       dockerfile: docker/php/Dockerfile
       target: worker
-    command: ["hoddmimir:worker:data", "--interval=${COLLECTOR_INTERVAL_SECONDS:-120}"]
+    command: ["hoddmimir:worker:data"]
     environment:
       <<: *app-environment
       DATABASE_USER: hoddmimir_collector
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_collector_password
-      COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-120}
+      COLLECTOR_GRID_WIDTH_SECONDS: ${COLLECTOR_GRID_WIDTH_SECONDS:-120}
+      PVE_STORAGE_MAX_NODE_FANOUT: ${PVE_STORAGE_MAX_NODE_FANOUT:-128}
+      PBS_MAX_DATASTORE_FANOUT: ${PBS_MAX_DATASTORE_FANOUT:-128}
+      PBS_CONTENT_MAX_DATASTORES: ${PBS_CONTENT_MAX_DATASTORES:-128}
+      PBS_CONTENT_MAX_NAMESPACES_PER_DATASTORE: ${PBS_CONTENT_MAX_NAMESPACES_PER_DATASTORE:-1024}
+      PBS_CONTENT_MAX_SNAPSHOTS_PER_NAMESPACE: ${PBS_CONTENT_MAX_SNAPSHOTS_PER_NAMESPACE:-65536}
+      PBS_CONTENT_MAX_TOTAL_SNAPSHOTS: ${PBS_CONTENT_MAX_TOTAL_SNAPSHOTS:-262144}
+      PBS_CONTENT_NAMESPACE_BODY_BYTES: ${PBS_CONTENT_NAMESPACE_BODY_BYTES:-8388608}
+      PBS_CONTENT_SNAPSHOT_BODY_BYTES: ${PBS_CONTENT_SNAPSHOT_BODY_BYTES:-67108864}
+      MONITOR_HISTORY_OVERLAP_SECONDS: ${MONITOR_HISTORY_OVERLAP_SECONDS:-300}
+      PVE_MONITOR_PAGE_SIZE: ${PVE_MONITOR_PAGE_SIZE:-100}
+      PVE_MONITOR_MAX_NODES: ${PVE_MONITOR_MAX_NODES:-128}
+      PVE_MONITOR_ACTIVE_PAGE_CAP: ${PVE_MONITOR_ACTIVE_PAGE_CAP:-2}
+      PVE_MONITOR_ARCHIVE_PAGE_CAP: ${PVE_MONITOR_ARCHIVE_PAGE_CAP:-10}
+      PVE_MONITOR_REQUEST_LIMIT: ${PVE_MONITOR_REQUEST_LIMIT:-512}
+      PVE_MONITOR_RAW_ROW_LIMIT: ${PVE_MONITOR_RAW_ROW_LIMIT:-25000}
+      PVE_MONITOR_DISTINCT_TASK_LIMIT: ${PVE_MONITOR_DISTINCT_TASK_LIMIT:-25000}
+      PVE_MONITOR_HISTORY_WINDOW_SECONDS: ${PVE_MONITOR_HISTORY_WINDOW_SECONDS:-86400}
+      PBS_MONITOR_PAGE_SIZE: ${PBS_MONITOR_PAGE_SIZE:-256}
+      PBS_MONITOR_MAX_PAGES_PER_STREAM: ${PBS_MONITOR_MAX_PAGES_PER_STREAM:-16}
+      PBS_MONITOR_MAX_ROWS_PER_STREAM: ${PBS_MONITOR_MAX_ROWS_PER_STREAM:-4096}
+      PBS_MONITOR_MAX_JOBS_PER_KIND: ${PBS_MONITOR_MAX_JOBS_PER_KIND:-4096}
+      PBS_MONITOR_HISTORY_WINDOW_SECONDS: ${PBS_MONITOR_HISTORY_WINDOW_SECONDS:-86400}
     secrets:
       - app_secret
       - encryption_key
@@ -76,13 +127,14 @@ services:
       mariadb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "collector"]
+      test: ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "php", "bin/console", "hoddmimir:worker:health", "collector"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
     networks:
       - internal
+    stop_grace_period: 75s
     <<: *app-security
 
   backup-worker:
@@ -96,16 +148,22 @@ services:
       DATABASE_USER: hoddmimir_backup_worker
       DATABASE_PASSWORD_FILE: /run/secrets/mariadb_backup_worker_password
       BACKUP_WORKER_POLL_INTERVAL_SECONDS: ${BACKUP_WORKER_POLL_INTERVAL_SECONDS:-5}
+      BACKUP_WORKER_HEARTBEAT_TTL_SECONDS: ${BACKUP_WORKER_HEARTBEAT_TTL_SECONDS:-150}
       BACKUP_EXECUTION_ENABLED: ${BACKUP_EXECUTION_ENABLED:-false}
+      MATRIX_NOTIFICATION_ENABLED: ${MATRIX_NOTIFICATION_ENABLED:-false}
+      MATRIX_WEBHOOK_CHANNEL: ${MATRIX_WEBHOOK_CHANNEL:-proxmox-backup}
+      MATRIX_WEBHOOK_TIMEOUT_SECONDS: ${MATRIX_WEBHOOK_TIMEOUT_SECONDS:-10}
+      MATRIX_WEBHOOK_URL_FILE: ${MATRIX_WEBHOOK_URL_FILE:-/run/secrets/matrix_webhook_url}
     secrets:
       - app_secret
       - encryption_key
       - mariadb_backup_worker_password
+      - matrix_webhook_url
     depends_on:
       mariadb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "php", "bin/console", "hoddmimir:worker:readiness", "backup"]
+      test: ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "php", "bin/console", "hoddmimir:worker:readiness", "backup"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -133,7 +191,7 @@ services:
     ports:
       - "127.0.0.1:${WEB_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "/usr/local/bin/hoddmimir-app-healthcheck", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -143,6 +201,11 @@ services:
     read_only: true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     tmpfs:
@@ -150,9 +213,13 @@ services:
       - /app/var:uid=82,gid=82,mode=0770
       - /config:uid=82,gid=82,mode=0770
       - /data:uid=82,gid=82,mode=0770
+      - /run/hoddmimir-secrets:mode=0700
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
+    cpus: ${APP_CPU_LIMIT:-1.0}
+    mem_limit: ${APP_MEMORY_LIMIT:-512m}
+    pids_limit: ${APP_PIDS_LIMIT:-128}
     logging:
       driver: json-file
       options:
@@ -181,3 +248,5 @@ secrets:
     file: ./.secrets/mariadb_collector_password
   mariadb_backup_worker_password:
     file: ./.secrets/mariadb_backup_worker_password
+  matrix_webhook_url:
+    file: ./.secrets/matrix_webhook_url

@@ -1,0 +1,41 @@
+#!/bin/sh
+
+set -eu
+
+printf '%s\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"
+
+case " $* " in
+    *' build mariadb-e2e qa-seed webapp-e2e playwright '*)
+        exit "${FAKE_DOCKER_BUILD_STATUS:-0}"
+        ;;
+    *' up --detach --wait mariadb-e2e '*)
+        exit "${FAKE_DOCKER_MARIADB_UP_STATUS:-0}"
+        ;;
+    *' exec -T --user 0 mariadb-e2e /usr/local/bin/hoddmimir-database-user-bootstrap '*)
+        exit "${FAKE_DOCKER_BOOTSTRAP_STATUS:-0}"
+        ;;
+    *' run --rm qa-seed '*)
+        exit "${FAKE_DOCKER_SEED_STATUS:-0}"
+        ;;
+    *' up --detach --wait webapp-e2e '*)
+        exit "${FAKE_DOCKER_WEBAPP_UP_STATUS:-0}"
+        ;;
+    *' run --rm playwright '*)
+        exit "${FAKE_DOCKER_PLAYWRIGHT_STATUS:-0}"
+        ;;
+    *' ps --all '*)
+        printf 'simulated E2E Compose status\n'
+        exit "${FAKE_DOCKER_PS_STATUS:-0}"
+        ;;
+    *' logs --no-color --timestamps mariadb-e2e webapp-e2e '*)
+        printf 'hoddmimir secret staging failed: APP_SECRET_FILE cannot be measured\n'
+        exit "${FAKE_DOCKER_LOGS_STATUS:-0}"
+        ;;
+    *' down --volumes --remove-orphans '*)
+        exit "${FAKE_DOCKER_DOWN_STATUS:-0}"
+        ;;
+    *)
+        printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+        exit 64
+        ;;
+esac

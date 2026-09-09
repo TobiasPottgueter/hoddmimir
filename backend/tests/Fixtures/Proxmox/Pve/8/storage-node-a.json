@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "storage": "local-backup",
+      "type": "dir",
+      "content": "backup,iso",
+      "enabled": true,
+      "active": true,
+      "shared": false,
+      "total": 2000000,
+      "used": 500000,
+      "avail": 1400000
+    },
+    {
+      "storage": "pbs-backup",
+      "type": "pbs",
+      "content": "backup",
+      "enabled": true,
+      "active": true,
+      "shared": true,
+      "total": 9000000,
+      "used": 3500000,
+      "avail": 5000000
+    },
+    {
+      "storage": "restricted-backup",
+      "type": "nfs",
+      "content": "backup",
+      "enabled": true,
+      "active": false,
+      "shared": true,
+      "total": 0,
+      "used": 0,
+      "avail": 0
+    }
+  ]
+}

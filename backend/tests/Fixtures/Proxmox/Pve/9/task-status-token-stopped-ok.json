@@ -1,0 +1,15 @@
+{
+  "data": {
+    "pid": 91,
+    "status": "stopped",
+    "type": "vzdump",
+    "id": "901",
+    "user": "backup-worker@pve",
+    "tokenid": "hoddmimir",
+    "exitstatus": "OK",
+    "upid": "UPID:pve9-a:0000005B:100000010:68800010:vzdump:901:backup-worker@pve!hoddmimir:",
+    "starttime": 1753219088,
+    "pstart": 4294967312,
+    "node": "pve9-a"
+  }
+}

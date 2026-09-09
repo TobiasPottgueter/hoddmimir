@@ -1,0 +1,25 @@
+---
+- name: Exercise failed HTTPS command change reporting
+  hosts: all
+  gather_facts: false
+  connection: local
+
+  tasks:
+    - name: Return a failed HTTPS transaction with empty standard output
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - exit 7
+      register: hoddmimir_https_transaction
+      changed_when: >-
+        hoddmimir_https_transaction.rc == 0 and
+        ((hoddmimir_https_transaction.stdout | default('{}') | from_json).changed | default(false) | bool)
+      failed_when: false
+
+    - name: Require the original failure to remain available without a template error
+      ansible.builtin.assert:
+        that:
+          - hoddmimir_https_transaction.rc == 7
+          - hoddmimir_https_transaction.stdout == ''
+          - not hoddmimir_https_transaction.changed

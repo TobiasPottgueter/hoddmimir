@@ -1,11 +1,35 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import DashboardView from "@/views/DashboardView.vue";
-import SectionPlaceholderView from "@/views/SectionPlaceholderView.vue";
+import { useAuthStore } from "@/stores/auth";
+import { pinia } from "@/app/pinia";
+
+const InventoryView = () => import("@/views/InventoryView.vue");
+const BackupTargetsView = () => import("@/views/BackupTargetsView.vue");
+const OperationsView = () => import("@/views/OperationsView.vue");
+const PoliciesView = () => import("@/views/PoliciesView.vue");
+const SystemsView = () => import("@/views/SystemsView.vue");
+const LoginView = () => import("@/views/LoginView.vue");
+const ShadowView = () => import("@/views/ShadowView.vue");
+const AdministrationView = () => import("@/views/AdministrationView.vue");
+const ConnectionsView = () => import("@/views/ConnectionsView.vue");
+const QueueView = () => import("@/views/QueueView.vue");
+const RunsView = () => import("@/views/RunsView.vue");
+const RunDetailView = () => import("@/views/RunDetailView.vue");
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    return to.path !== from.path ? { top: 0 } : false;
+  },
   routes: [
+    {
+      path: "/login",
+      name: "login",
+      component: LoginView,
+      meta: { title: "Anmelden", public: true },
+    },
     {
       path: "/",
       name: "dashboard",
@@ -15,73 +39,83 @@ const router = createRouter({
     {
       path: "/systems",
       name: "systems",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Systeme",
-        description: "PVE- und PBS-Verbindungen werden hier verwaltet.",
-      },
+      component: SystemsView,
+      meta: { title: "Systeme" },
     },
     {
       path: "/inventory",
       name: "inventory",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Inventar",
-        description:
-          "Cluster, Nodes, VMs und Container erscheinen automatisch nach dem ersten Collector-Zyklus.",
-      },
+      component: InventoryView,
+      meta: { title: "Inventar" },
+    },
+    {
+      path: "/operations",
+      name: "operations",
+      component: OperationsView,
+      meta: { title: "Collector-Betrieb" },
     },
     {
       path: "/backup-targets",
       name: "backup-targets",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Backup-Ziele",
-        description:
-          "Storages, Datastores und Namespaces werden hier zugeordnet.",
-      },
+      component: BackupTargetsView,
+      meta: { title: "Backup-Ziele" },
     },
     {
       path: "/policies",
       name: "policies",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Policies",
-        description:
-          "Auswahl, Zeitpläne und Priorisierungsregeln werden hier konfiguriert.",
-      },
+      component: PoliciesView,
+      meta: { title: "Policies" },
+    },
+    {
+      path: "/shadow",
+      name: "shadow",
+      component: ShadowView,
+      meta: { title: "Shadow-Auswertungen" },
     },
     {
       path: "/queue",
       name: "queue",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Queue",
-        description:
-          "Geplante und laufende Backup-Anforderungen werden hier sichtbar.",
-      },
+      component: QueueView,
+      meta: { title: "Queue" },
     },
     {
       path: "/runs",
       name: "runs",
-      component: SectionPlaceholderView,
-      meta: {
-        title: "Läufe",
-        description:
-          "Backup-Historie, Status und Tasklogs werden hier angezeigt.",
-      },
+      component: RunsView,
+      meta: { title: "Läufe" },
+    },
+    {
+      path: "/runs/:id",
+      name: "run-detail",
+      component: RunDetailView,
+      meta: { title: "Laufdetails" },
+    },
+    {
+      path: "/connections",
+      name: "connections",
+      component: ConnectionsView,
+      meta: { title: "Verbindungen" },
     },
     {
       path: "/administration",
       name: "administration",
-      component: SectionPlaceholderView,
+      component: AdministrationView,
       meta: {
         title: "Administration",
-        description:
-          "Benutzer, Rollen, Worker-Status und Audit-Log werden hier verwaltet.",
       },
     },
   ],
+});
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore(pinia);
+  await auth.restore();
+  if (to.meta.public === true) {
+    return auth.authenticated ? { name: "dashboard" } : true;
+  }
+  return auth.authenticated
+    ? true
+    : { name: "login", query: { redirect: to.fullPath } };
 });
 
 router.afterEach((route) => {

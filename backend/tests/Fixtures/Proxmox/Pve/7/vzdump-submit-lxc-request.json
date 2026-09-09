@@ -1,0 +1,1 @@
+{"data":{"vmid":102,"storage":"backup-vault","mode":"snapshot","compress":"zstd","maxfiles":3,"mailto":"backup-alerts@example.invalid,platform@example.invalid","mailnotification":"failure"}}
