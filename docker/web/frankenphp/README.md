@@ -9,7 +9,7 @@ compilation on musl; the small Alpine default fails on a cold HTTP start.
 
 These files are the builder's `caddy/go.mod` and `caddy/go.sum`, updated for
 kin-openapi 0.144.0, x/crypto 0.55.0 or newer selected by the module graph, and
-gRPC 1.83.1. Both direct and transitive versions are checked in. The parent
+gRPC 1.83.2 (CVE-2026-84445), including its required x/net 0.58.0. Both direct and transitive versions are checked in. The parent
 FrankenPHP source remains the immutable builder's `../` replacement. Builds use
 `go mod verify` and `-mod=readonly`, rather than resolving updated dependencies
 during image creation.
